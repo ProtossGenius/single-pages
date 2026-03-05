@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AirCopy - WebRTC 文件传输</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div id="app">
+        <!-- 连接前界面 -->
+        <div id="connection-setup" class="screen">
+            <div class="header">
+                <h1>AirCopy</h1>
+                <p>第一阶段：点对点建链（连接后显示 hello world）</p>
+            </div>
+            
+            <div class="content">
+                <div id="qr-container" class="toggle-content">
+                    <div id="qrcode"></div>
+                    <p class="hint">扫描二维码进行连接（支持双击放大）</p>
+                </div>
+                
+                <div id="scanner-container" class="toggle-content hidden">
+                    <div id="scanner-shell" class="scanner-shell">
+                        <div id="reader"></div>
+                        <div class="scanner-overlay">
+                            <span class="corner tl"></span>
+                            <span class="corner tr"></span>
+                            <span class="corner bl"></span>
+                            <span class="corner br"></span>
+                            <div class="scan-line"></div>
+                        </div>
+                    </div>
+                    <p class="hint">点击下方按钮后，扫描对方二维码</p>
+                </div>
+
+                <div class="controls">
+                    <button id="toggle-method">切换到扫描框</button>
+                    <button id="scan-trigger" class="hidden">开始扫码</button>
+                    <button id="regen-offer">刷新二维码</button>
+                    <button id="enlarge-qr">放大二维码</button>
+                </div>
+
+                <div class="user-info">
+                    <label for="display-name">展示名：</label>
+                    <input type="text" id="display-name" placeholder="请输入您的名字" value="用户_">
+                </div>
+
+                <p id="status-text" class="status-text">正在初始化…</p>
+            </div>
+        </div>
+
+        <!-- 连接后界面 -->
+        <div id="chat-interface" class="screen hidden">
+            <div class="sidebar">
+                <div class="sidebar-header">
+                    <h3>会话</h3>
+                </div>
+                <ul id="session-list">
+                    <li class="session-item active" data-id="group-chat">
+                        <span class="avatar">G</span>
+                        <span class="name">群聊</span>
+                    </li>
+                </ul>
+            </div>
+            
+            <div class="main-chat">
+                <div class="chat-header">
+                    <h3 id="chat-title">群聊</h3>
+                    <div class="header-actions">
+                        <button id="join-group" class="hidden">加入对方群聊</button>
+                        <button id="exit-chat">退出</button>
+                    </div>
+                </div>
+                
+                <div id="chat-messages" class="messages-container">
+                    <!-- 消息将在这里动态生成 -->
+                </div>
+                
+                <div class="chat-input-area">
+                    <div class="input-actions">
+                        <button id="send-file" disabled>文件</button>
+                        <button id="send-emoji" disabled>😊</button>
+                        <button id="video-call" disabled>视频</button>
+                    </div>
+                    <div class="input-wrapper">
+                        <textarea id="message-input" placeholder="输入消息..."></textarea>
+                        <button id="send-btn">发送</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="qr-modal" class="qr-modal hidden">
+        <button id="qr-modal-close" class="qr-modal-close">关闭</button>
+        <div id="qrcode-large" class="qrcode-large"></div>
+    </div>
+
+    <!-- 引入必要的库 -->
+    <!-- 二维码生成库 -->
+    <script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
+    <!-- 二维码扫描库 -->
+    <script src="https://cdn.jsdelivr.net/npm/@zxing/browser@latest/umd/zxing-browser.min.js"></script>
+    <!-- PeerJS（通过信令服务器协商，二维码只需传 peerId） -->
+    <script src="https://cdn.jsdelivr.net/npm/peerjs@1.5.4/dist/peerjs.min.js"></script>
+    
+    <!-- 应用逻辑 -->
+    <script src="peer-manager.js"></script>
+    <script src="main.js"></script>
+</body>
+</html>

@@ -1,0 +1,413 @@
+* {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+}
+
+body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    background-color: #f0f2f5;
+    color: #333;
+    height: 100vh;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+}
+
+#app {
+    width: 100%;
+    max-width: 1000px;
+    height: 90vh;
+    background: white;
+    box-shadow: 0 10px 30px rgba(0,0,0,0.1);
+    border-radius: 12px;
+    overflow: hidden;
+    display: flex;
+}
+
+.screen {
+    width: 100%;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+}
+
+.hidden {
+    display: none !important;
+}
+
+/* 连接前界面样式 */
+#connection-setup {
+    padding: 40px;
+    align-items: center;
+    justify-content: center;
+}
+
+.header {
+    text-align: center;
+    margin-bottom: 30px;
+}
+
+.header h1 {
+    font-size: 2.5rem;
+    color: #007bff;
+    margin-bottom: 10px;
+}
+
+.content {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    width: 100%;
+    max-width: 400px;
+}
+
+#qrcode {
+    padding: 20px;
+    background: white;
+    border: 1px solid #ddd;
+    border-radius: 8px;
+    cursor: zoom-in;
+}
+
+#reader {
+    width: 100%;
+    max-width: 300px;
+    border: 1px solid #ddd;
+    min-height: 300px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: #111;
+    overflow: hidden;
+}
+
+#reader video {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+.scanner-shell {
+    position: relative;
+    width: 300px;
+    height: 300px;
+    border-radius: 10px;
+    overflow: hidden;
+    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.2);
+}
+
+.scanner-overlay {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    z-index: 2;
+}
+
+.scanner-overlay .corner {
+    position: absolute;
+    width: 30px;
+    height: 30px;
+    border-color: #22c55e;
+    border-style: solid;
+    border-width: 0;
+}
+
+.scanner-overlay .corner.tl {
+    top: 8px;
+    left: 8px;
+    border-top-width: 4px;
+    border-left-width: 4px;
+}
+
+.scanner-overlay .corner.tr {
+    top: 8px;
+    right: 8px;
+    border-top-width: 4px;
+    border-right-width: 4px;
+}
+
+.scanner-overlay .corner.bl {
+    bottom: 8px;
+    left: 8px;
+    border-bottom-width: 4px;
+    border-left-width: 4px;
+}
+
+.scanner-overlay .corner.br {
+    bottom: 8px;
+    right: 8px;
+    border-bottom-width: 4px;
+    border-right-width: 4px;
+}
+
+.scan-line {
+    position: absolute;
+    left: 10px;
+    right: 10px;
+    top: 10px;
+    height: 2px;
+    border-radius: 2px;
+    background: linear-gradient(90deg, transparent, #22c55e, transparent);
+    box-shadow: 0 0 10px #22c55e;
+    opacity: 0;
+}
+
+.scanner-shell.scanning .scan-line {
+    opacity: 1;
+    animation: scan-move 1.9s linear infinite;
+}
+
+@keyframes scan-move {
+    0% { top: 12px; }
+    50% { top: calc(100% - 14px); }
+    100% { top: 12px; }
+}
+
+.hint {
+    margin-top: 15px;
+    color: #666;
+    font-size: 0.9rem;
+}
+
+.controls {
+    margin: 20px 0;
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
+.user-info {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.user-info input {
+    flex: 1;
+    padding: 8px 12px;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+}
+
+.status-text {
+    margin-top: 14px;
+    font-size: 0.92rem;
+    color: #495057;
+    min-height: 1.3em;
+    text-align: center;
+}
+
+/* 聊天界面样式 */
+#chat-interface {
+    flex-direction: row;
+}
+
+.sidebar {
+    width: 260px;
+    border-right: 1px solid #eee;
+    background: #f8f9fa;
+    display: flex;
+    flex-direction: column;
+}
+
+.sidebar-header {
+    padding: 20px;
+    border-bottom: 1px solid #eee;
+}
+
+#session-list {
+    list-style: none;
+    overflow-y: auto;
+}
+
+.session-item {
+    padding: 15px 20px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    cursor: pointer;
+    transition: background 0.2s;
+}
+
+.session-item:hover {
+    background: #e9ecef;
+}
+
+.session-item.active {
+    background: #e7f1ff;
+    border-left: 4px solid #007bff;
+}
+
+.avatar {
+    width: 40px;
+    height: 40px;
+    background: #007bff;
+    color: white;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: bold;
+}
+
+.main-chat {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+}
+
+.chat-header {
+    padding: 15px 20px;
+    border-bottom: 1px solid #eee;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.messages-container {
+    flex: 1;
+    padding: 20px;
+    overflow-y: auto;
+    background: #fff;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.chat-input-area {
+    padding: 15px;
+    border-top: 1px solid #eee;
+}
+
+.input-actions {
+    margin-bottom: 10px;
+    display: flex;
+    gap: 10px;
+}
+
+.input-wrapper {
+    display: flex;
+    gap: 10px;
+}
+
+#message-input {
+    flex: 1;
+    height: 60px;
+    padding: 10px;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    resize: none;
+}
+
+button {
+    padding: 8px 16px;
+    border: none;
+    border-radius: 4px;
+    background: #007bff;
+    color: white;
+    cursor: pointer;
+}
+
+button:hover {
+    background: #0056b3;
+}
+
+button.secondary {
+    background: #6c757d;
+}
+
+#exit-chat {
+    background: #dc3545;
+}
+
+#exit-chat:hover {
+    background: #bd2130;
+}
+
+.qr-modal {
+    position: fixed;
+    inset: 0;
+    z-index: 10000;
+    background: rgba(0, 0, 0, 0.84);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+}
+
+.qrcode-large {
+    background: #fff;
+    border-radius: 12px;
+    padding: 16px;
+    max-width: min(90vw, 90vh);
+    max-height: min(90vw, 90vh);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.qrcode-large canvas,
+.qrcode-large img {
+    width: min(82vw, 82vh) !important;
+    height: min(82vw, 82vh) !important;
+    display: block;
+}
+
+.qr-modal-close {
+    position: fixed;
+    top: 16px;
+    right: 16px;
+    background: #111827;
+}
+
+.message {
+    max-width: 70%;
+    padding: 10px 12px;
+    border-radius: 10px;
+    line-height: 1.35;
+    word-break: break-word;
+}
+
+.message.me {
+    align-self: flex-end;
+    background: #007bff;
+    color: #fff;
+}
+
+.message.peer {
+    align-self: flex-start;
+    background: #f1f3f5;
+    color: #212529;
+}
+
+.message.system {
+    align-self: center;
+    background: #fff3cd;
+    color: #664d03;
+}
+
+@media (max-width: 760px) {
+    #app {
+        height: 100vh;
+        border-radius: 0;
+    }
+
+    #connection-setup {
+        padding: 22px;
+    }
+
+    #reader {
+        min-height: 260px;
+    }
+
+    .scanner-shell {
+        width: 260px;
+        height: 260px;
+    }
+
+    .sidebar {
+        display: none;
+    }
+}
