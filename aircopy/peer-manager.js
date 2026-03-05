@@ -1,6 +1,7 @@
 const AIRCOPY_PEER_PREFIX = "AIRCOPYP1:";
 const FILE_CHUNK_SIZE = 60 * 1024;
 const FILE_ACK_TIMEOUT_MS = 120000;
+const HEARTBEAT_INTERVAL_MS = 15000;
 
 class PeerManager {
     constructor(handlers = {}) {
@@ -12,6 +13,8 @@ class PeerManager {
         this.persistentId = "";
         this.helloSent = false;
         this.remoteDisplayName = "";
+        this.heartbeatTimer = null;
+        this.heartbeatSequence = 0;
 
         this.incomingTransfers = new Map();
         this.outgoingTransferAcks = new Map();
@@ -299,6 +302,7 @@ class PeerManager {
     }
 
     closeConnection() {
+        this._stopHeartbeatLoop();
         if (this.connection) {
             this.connection.close();
             this.connection = null;
@@ -355,6 +359,7 @@ class PeerManager {
                 });
             }
             this._sendHello();
+            this._startHeartbeatLoop();
         });
 
         conn.on("data", (payload) => {
@@ -365,6 +370,7 @@ class PeerManager {
             if (this.connection === conn) {
                 this.connection = null;
                 this.helloSent = false;
+                this._stopHeartbeatLoop();
             }
             this.hangupVideoCall();
             this._resetIncomingTransfers();
@@ -409,6 +415,13 @@ class PeerManager {
         }
 
         const type = payload.t ? String(payload.t) : "text";
+        if (type === "heartbeat") {
+            this._handleIncomingHeartbeat(payload);
+            return;
+        }
+        if (type === "heartbeat-ack") {
+            return;
+        }
         if (type === "file-start" || type === "file-chunk" || type === "file-end" || type === "file-ack") {
             this._onTransferPayload(payload);
             return;
@@ -714,6 +727,51 @@ class PeerManager {
             return;
         }
         this.connection.send(payload);
+    }
+
+    _startHeartbeatLoop() {
+        this._stopHeartbeatLoop();
+        this._sendHeartbeat();
+        this.heartbeatTimer = window.setInterval(() => {
+            this._sendHeartbeat();
+        }, HEARTBEAT_INTERVAL_MS);
+    }
+
+    _stopHeartbeatLoop() {
+        if (this.heartbeatTimer !== null) {
+            window.clearInterval(this.heartbeatTimer);
+            this.heartbeatTimer = null;
+        }
+    }
+
+    _sendHeartbeat() {
+        if (!this.connection || !this.connection.open) {
+            return;
+        }
+        this.heartbeatSequence += 1;
+        this.connection.send({
+            t: "heartbeat",
+            id: `hb${Date.now().toString(36)}${this.heartbeatSequence.toString(36)}`,
+            ts: Date.now(),
+            name: this.displayName,
+            pid: this.persistentId
+        });
+    }
+
+    _handleIncomingHeartbeat(payload) {
+        const heartbeatId = payload && payload.id ? String(payload.id) : "";
+        this._sendIfConnected({
+            t: "heartbeat-ack",
+            id: heartbeatId,
+            ts: Date.now()
+        });
+        if (this.handlers.onHeartbeat) {
+            this.handlers.onHeartbeat({
+                id: heartbeatId,
+                peerId: this.connection ? this.connection.peer : "",
+                timestamp: payload && payload.ts ? Number(payload.ts) : Date.now()
+            });
+        }
     }
 
     _toArrayBuffer(value) {

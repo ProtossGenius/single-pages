@@ -343,6 +343,8 @@ body {
     border-radius: 999px;
     color: #fff;
     background: #6b7280;
+    position: relative;
+    overflow: visible;
 }
 
 .chat-status.online,
@@ -353,6 +355,38 @@ body {
 .chat-status.offline,
 .session-status.offline {
     background: #6b7280;
+}
+
+.status-heart-float {
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    transform: translate(-50%, -35%) scale(var(--heart-scale, 1));
+    color: #fb7185;
+    font-size: 0.85rem;
+    line-height: 1;
+    opacity: 0;
+    pointer-events: none;
+    z-index: 3;
+    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.22);
+    animation: status-heart-rise var(--heart-duration, 1200ms) ease-out forwards;
+}
+
+@keyframes status-heart-rise {
+    0% {
+        opacity: 0;
+        transform: translate(-50%, -35%) scale(calc(var(--heart-scale, 1) * 0.8));
+    }
+    16% {
+        opacity: 0.95;
+    }
+    100% {
+        opacity: 0;
+        transform: translate(
+            calc(-50% + var(--heart-drift, 0px)),
+            calc(-50% - var(--heart-rise, 56px))
+        ) scale(calc(var(--heart-scale, 1) * 1.12));
+    }
 }
 
 .unread-badge,

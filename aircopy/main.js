@@ -6,6 +6,7 @@
     const HANG_MODE_STORAGE_KEY = "aircopy.hang.mode.v1";
     const CHAT_HISTORY_MAX = 300;
     const EMOJI_SET = ["😀", "😁", "😂", "🤣", "😊", "😍", "😘", "😎", "🤔", "😭", "😡", "👍", "👎", "🙏", "👏", "🎉"];
+    const HEART_FLOAT_CHARS = ["❤", "♥", "❥"];
 
     const appState = {
         mode: "qr",
@@ -153,6 +154,9 @@
             }
             appendMessage(message.from, message.body, message.type === "hello");
             markUnreadIfNeeded(message.from === "peer");
+        },
+        onHeartbeat: () => {
+            playHeartbeatFloatBurst();
         },
         onIncomingFileOffer: (offer) => {
             appState.incomingFileOffer = offer || null;
@@ -2162,6 +2166,50 @@
             elements.peerSessionStatus.classList.toggle("offline", !appState.connected);
         }
         void syncBackgroundKeepAlive();
+    }
+
+    function playHeartbeatFloatBurst() {
+        if (!appState.connected) {
+            return;
+        }
+        spawnStatusHeartBurst(elements.chatStatus, 8);
+        spawnStatusHeartBurst(elements.peerSessionStatus, 8);
+    }
+
+    function spawnStatusHeartBurst(anchor, count = 8) {
+        if (!anchor || !anchor.classList.contains("online")) {
+            return;
+        }
+        const total = Math.max(4, Number(count) || 0);
+        for (let i = 0; i < total; i += 1) {
+            const delay = i * 95 + Math.random() * 90;
+            window.setTimeout(() => {
+                spawnStatusHeart(anchor);
+            }, delay);
+        }
+    }
+
+    function spawnStatusHeart(anchor) {
+        if (!anchor || !anchor.isConnected || !anchor.classList.contains("online")) {
+            return;
+        }
+        const heart = document.createElement("span");
+        heart.className = "status-heart-float";
+        heart.textContent = HEART_FLOAT_CHARS[Math.floor(Math.random() * HEART_FLOAT_CHARS.length)] || "❤";
+        const drift = (Math.random() * 26 - 13).toFixed(1);
+        const rise = (48 + Math.random() * 26).toFixed(1);
+        const duration = Math.round(900 + Math.random() * 700);
+        const scale = (0.82 + Math.random() * 0.48).toFixed(2);
+        heart.style.setProperty("--heart-drift", `${drift}px`);
+        heart.style.setProperty("--heart-rise", `${rise}px`);
+        heart.style.setProperty("--heart-duration", `${duration}ms`);
+        heart.style.setProperty("--heart-scale", scale);
+        anchor.appendChild(heart);
+        window.setTimeout(() => {
+            if (heart.parentNode) {
+                heart.parentNode.removeChild(heart);
+            }
+        }, duration + 200);
     }
 
     function shouldEnableBackgroundKeepAlive() {
