@@ -1,5 +1,6 @@
 const AIRCOPY_PEER_PREFIX = "AIRCOPYP1:";
 const FILE_CHUNK_SIZE = 60 * 1024;
+const FILE_ACK_TIMEOUT_MS = 120000;
 
 class PeerManager {
     constructor(handlers = {}) {
@@ -13,6 +14,7 @@ class PeerManager {
         this.remoteDisplayName = "";
 
         this.incomingTransfers = new Map();
+        this.outgoingTransferAcks = new Map();
 
         this.pendingIncomingCall = null;
         this.mediaCall = null;
@@ -107,6 +109,7 @@ class PeerManager {
         if (!blob) {
             throw new Error("文件对象无效。");
         }
+
         const kind = options.kind === "voice" ? "voice" : "file";
         const transferId = this._createTransferId();
         const fileName = options.fileName || (file && file.name) || `${kind}-${Date.now()}`;
@@ -127,6 +130,12 @@ class PeerManager {
             pid: this.persistentId
         });
 
+        const ack = await this._waitTransferAck(transferId);
+        if (!ack.accepted) {
+            const reason = ack.reason ? `（${ack.reason}）` : "";
+            throw new Error(`对方拒绝接收${reason}`);
+        }
+
         for (let index = 0; index < totalChunks; index += 1) {
             const start = index * chunkSize;
             const end = Math.min(blob.size, start + chunkSize);
@@ -144,9 +153,12 @@ class PeerManager {
                     direction: "send",
                     sentChunks: index + 1,
                     totalChunks,
-                    kind
+                    kind,
+                    fileName,
+                    size: blob.size
                 });
             }
+
             if (index % 8 === 7) {
                 await this._pause(0);
             }
@@ -167,7 +179,53 @@ class PeerManager {
         };
     }
 
-    async startVideoCall(constraints = { video: true, audio: true }) {
+    acceptIncomingFile(transferId, options = {}) {
+        const id = String(transferId || "").trim();
+        if (!id) {
+            throw new Error("transferId 为空。");
+        }
+        const transfer = this.incomingTransfers.get(id);
+        if (!transfer) {
+            throw new Error("未找到待确认文件。");
+        }
+
+        transfer.state = "accepted";
+        if (options.writable) {
+            transfer.writable = options.writable;
+            this._flushCachedChunksToWritable(transfer);
+        }
+
+        this._sendIfConnected({ t: "file-ack", id, accepted: true });
+    }
+
+    rejectIncomingFile(transferId, reason = "rejected") {
+        const id = String(transferId || "").trim();
+        if (!id) {
+            return;
+        }
+        const transfer = this.incomingTransfers.get(id);
+        if (!transfer) {
+            return;
+        }
+        transfer.state = "rejected";
+        this._sendIfConnected({ t: "file-ack", id, accepted: false, reason: String(reason || "rejected") });
+        this._cleanupIncomingTransfer(transfer, { closeWritable: true });
+    }
+
+    setIncomingFileWritable(transferId, writable) {
+        const id = String(transferId || "").trim();
+        if (!id || !writable) {
+            return;
+        }
+        const transfer = this.incomingTransfers.get(id);
+        if (!transfer || transfer.state !== "accepted") {
+            return;
+        }
+        transfer.writable = writable;
+        this._flushCachedChunksToWritable(transfer);
+    }
+
+    async startVideoCall(options = {}) {
         if (!this.peer || !this.connection || !this.connection.open) {
             throw new Error("连接未建立，无法发起视频通话。");
         }
@@ -176,33 +234,43 @@ class PeerManager {
             throw new Error("未找到对端 peerId。");
         }
 
-        const stream = await navigator.mediaDevices.getUserMedia(constraints);
-        this._setLocalMediaStream(stream);
+        const media = await this._createLocalMediaStream({
+            showVideo: options.showVideo !== false,
+            requireAudio: options.requireAudio !== false
+        });
+        this._setLocalMediaStream(media.stream, { hasVideoTrack: media.hasVideoTrack, requestedVideo: media.requestedVideo });
 
-        const call = this.peer.call(targetPeerId, stream, {
+        const call = this.peer.call(targetPeerId, media.stream, {
             metadata: {
                 name: this.displayName,
-                pid: this.persistentId
+                pid: this.persistentId,
+                videoEnabled: media.hasVideoTrack
             }
         });
+
         this._attachMediaCall(call, { incoming: false });
         if (this.handlers.onCallState) {
-            this.handlers.onCallState({ state: "calling", incoming: false });
+            this.handlers.onCallState({ state: "calling", incoming: false, hasVideoTrack: media.hasVideoTrack });
         }
     }
 
-    async acceptIncomingCall(constraints = { video: true, audio: true }) {
+    async acceptIncomingCall(options = {}) {
         if (!this.pendingIncomingCall) {
             throw new Error("当前没有可接听的视频通话。");
         }
         const call = this.pendingIncomingCall;
         this.pendingIncomingCall = null;
-        const stream = await navigator.mediaDevices.getUserMedia(constraints);
-        this._setLocalMediaStream(stream);
-        call.answer(stream);
+
+        const media = await this._createLocalMediaStream({
+            showVideo: options.showVideo !== false,
+            requireAudio: options.requireAudio !== false
+        });
+        this._setLocalMediaStream(media.stream, { hasVideoTrack: media.hasVideoTrack, requestedVideo: media.requestedVideo });
+
+        call.answer(media.stream);
         this._attachMediaCall(call, { incoming: true });
         if (this.handlers.onCallState) {
-            this.handlers.onCallState({ state: "connecting", incoming: true });
+            this.handlers.onCallState({ state: "connecting", incoming: true, hasVideoTrack: media.hasVideoTrack });
         }
     }
 
@@ -223,7 +291,7 @@ class PeerManager {
             this.mediaCall = null;
         }
         this.pendingIncomingCall = null;
-        this._setRemoteMediaStream(null);
+        this._setRemoteMediaStream(null, { hasVideoTrack: false });
         this._stopLocalMedia();
         if (this.handlers.onCallState) {
             this.handlers.onCallState({ state: "idle", incoming: false });
@@ -236,7 +304,8 @@ class PeerManager {
             this.connection = null;
         }
         this.hangupVideoCall();
-        this.incomingTransfers.clear();
+        this._resetIncomingTransfers();
+        this._resetOutgoingTransferAcks("连接已断开");
         this.helloSent = false;
         this.remoteDisplayName = "";
     }
@@ -298,7 +367,8 @@ class PeerManager {
                 this.helloSent = false;
             }
             this.hangupVideoCall();
-            this.incomingTransfers.clear();
+            this._resetIncomingTransfers();
+            this._resetOutgoingTransferAcks("连接已断开");
             if (this.handlers.onConnectionClosed) {
                 this.handlers.onConnectionClosed();
             }
@@ -339,7 +409,7 @@ class PeerManager {
         }
 
         const type = payload.t ? String(payload.t) : "text";
-        if (type === "file-start" || type === "file-chunk" || type === "file-end") {
+        if (type === "file-start" || type === "file-chunk" || type === "file-end" || type === "file-ack") {
             this._onTransferPayload(payload);
             return;
         }
@@ -370,20 +440,53 @@ class PeerManager {
         }
 
         if (payload.t === "file-start") {
-            this.incomingTransfers.set(transferId, {
+            const transfer = {
                 id: transferId,
                 kind: payload.kind === "voice" ? "voice" : "file",
                 name: payload.name ? String(payload.name) : "文件",
                 mime: payload.mime ? String(payload.mime) : "application/octet-stream",
                 size: Math.max(0, Number(payload.size) || 0),
                 totalChunks: Math.max(1, Number(payload.totalChunks) || 1),
-                chunks: []
+                chunks: [],
+                receivedSeq: new Set(),
+                receivedChunks: 0,
+                writable: null,
+                writeQueue: Promise.resolve(),
+                state: "pending"
+            };
+            this.incomingTransfers.set(transferId, transfer);
+
+            if (this.handlers.onIncomingFileOffer) {
+                this.handlers.onIncomingFileOffer({
+                    transferId,
+                    kind: transfer.kind,
+                    fileName: transfer.name,
+                    mimeType: transfer.mime,
+                    size: transfer.size,
+                    totalChunks: transfer.totalChunks
+                });
+            } else {
+                this.acceptIncomingFile(transferId);
+            }
+            return;
+        }
+
+        if (payload.t === "file-ack") {
+            const pending = this.outgoingTransferAcks.get(transferId);
+            if (!pending) {
+                return;
+            }
+            clearTimeout(pending.timer);
+            this.outgoingTransferAcks.delete(transferId);
+            pending.resolve({
+                accepted: Boolean(payload.accepted),
+                reason: payload.reason ? String(payload.reason) : ""
             });
             return;
         }
 
         const transfer = this.incomingTransfers.get(transferId);
-        if (!transfer) {
+        if (!transfer || transfer.state === "rejected") {
             return;
         }
 
@@ -393,43 +496,224 @@ class PeerManager {
                 return;
             }
             const seq = Math.max(0, Number(payload.seq) || 0);
-            transfer.chunks[seq] = chunkData;
+            if (transfer.receivedSeq.has(seq)) {
+                return;
+            }
+            transfer.receivedSeq.add(seq);
+            transfer.receivedChunks = transfer.receivedSeq.size;
+
+            if (transfer.writable) {
+                transfer.writeQueue = transfer.writeQueue.then(() => transfer.writable.write(new Uint8Array(chunkData)));
+            } else {
+                transfer.chunks[seq] = chunkData;
+            }
 
             if (this.handlers.onTransferProgress) {
-                const receivedChunks = transfer.chunks.filter(Boolean).length;
                 this.handlers.onTransferProgress({
                     transferId,
                     direction: "receive",
-                    receivedChunks,
+                    receivedChunks: transfer.receivedChunks,
                     totalChunks: transfer.totalChunks,
-                    kind: transfer.kind
+                    kind: transfer.kind,
+                    fileName: transfer.name,
+                    size: transfer.size
                 });
             }
             return;
         }
 
         if (payload.t === "file-end") {
-            const ordered = [];
-            for (let i = 0; i < transfer.totalChunks; i += 1) {
-                const chunk = transfer.chunks[i];
-                if (chunk) {
-                    ordered.push(chunk);
-                }
-            }
-            const blob = new Blob(ordered, { type: transfer.mime });
-            this.incomingTransfers.delete(transferId);
+            transfer.writeQueue
+                .then(async () => {
+                    if (transfer.writable && typeof transfer.writable.close === "function") {
+                        await transfer.writable.close();
+                    }
 
-            if (this.handlers.onFileReceived) {
-                this.handlers.onFileReceived({
-                    transferId,
-                    kind: transfer.kind,
-                    fileName: transfer.name,
-                    mimeType: transfer.mime,
-                    size: transfer.size,
-                    blob
+                    if (!this.handlers.onFileReceived) {
+                        return;
+                    }
+
+                    if (transfer.writable) {
+                        this.handlers.onFileReceived({
+                            transferId,
+                            kind: transfer.kind,
+                            fileName: transfer.name,
+                            mimeType: transfer.mime,
+                            size: transfer.size,
+                            blob: null,
+                            savedToDisk: true
+                        });
+                        return;
+                    }
+
+                    const ordered = [];
+                    for (let i = 0; i < transfer.totalChunks; i += 1) {
+                        const chunk = transfer.chunks[i];
+                        if (chunk) {
+                            ordered.push(chunk);
+                        }
+                    }
+                    const blob = new Blob(ordered, { type: transfer.mime });
+                    this.handlers.onFileReceived({
+                        transferId,
+                        kind: transfer.kind,
+                        fileName: transfer.name,
+                        mimeType: transfer.mime,
+                        size: transfer.size,
+                        blob,
+                        savedToDisk: false
+                    });
+                })
+                .catch((error) => {
+                    if (this.handlers.onError) {
+                        this.handlers.onError(error);
+                    }
+                })
+                .finally(() => {
+                    this.incomingTransfers.delete(transferId);
                 });
+        }
+    }
+
+    _waitTransferAck(transferId) {
+        return new Promise((resolve, reject) => {
+            const timer = window.setTimeout(() => {
+                this.outgoingTransferAcks.delete(transferId);
+                reject(new Error("等待对方确认接收文件超时。"));
+            }, FILE_ACK_TIMEOUT_MS);
+
+            this.outgoingTransferAcks.set(transferId, {
+                timer,
+                resolve,
+                reject
+            });
+        });
+    }
+
+    _flushCachedChunksToWritable(transfer) {
+        if (!transfer || !transfer.writable) {
+            return;
+        }
+        for (let i = 0; i < transfer.chunks.length; i += 1) {
+            const chunk = transfer.chunks[i];
+            if (!chunk) {
+                continue;
+            }
+            transfer.writeQueue = transfer.writeQueue.then(() => transfer.writable.write(new Uint8Array(chunk)));
+            transfer.chunks[i] = null;
+        }
+    }
+
+    _resetIncomingTransfers() {
+        const ids = Array.from(this.incomingTransfers.keys());
+        for (let i = 0; i < ids.length; i += 1) {
+            const transfer = this.incomingTransfers.get(ids[i]);
+            this._cleanupIncomingTransfer(transfer, { closeWritable: true });
+        }
+    }
+
+    _cleanupIncomingTransfer(transfer, options = {}) {
+        if (!transfer) {
+            return;
+        }
+        this.incomingTransfers.delete(transfer.id);
+        if (options.closeWritable && transfer.writable && typeof transfer.writable.close === "function") {
+            try {
+                transfer.writable.close();
+            } catch (_error) {
+                // Ignore close errors.
             }
         }
+    }
+
+    _resetOutgoingTransferAcks(reasonText) {
+        const ids = Array.from(this.outgoingTransferAcks.keys());
+        for (let i = 0; i < ids.length; i += 1) {
+            const id = ids[i];
+            const pending = this.outgoingTransferAcks.get(id);
+            if (!pending) {
+                continue;
+            }
+            clearTimeout(pending.timer);
+            pending.reject(new Error(reasonText || "文件发送失败"));
+            this.outgoingTransferAcks.delete(id);
+        }
+    }
+
+    async _createLocalMediaStream(options = {}) {
+        if (!navigator.mediaDevices || typeof navigator.mediaDevices.getUserMedia !== "function") {
+            throw new Error("当前浏览器不支持媒体采集。");
+        }
+
+        const showVideo = options.showVideo !== false;
+        const requireAudio = options.requireAudio !== false;
+
+        const candidates = [];
+        candidates.push({ audio: requireAudio, video: showVideo });
+        if (showVideo) {
+            candidates.push({ audio: requireAudio, video: false });
+        }
+        candidates.push({ audio: false, video: showVideo });
+        if (showVideo) {
+            candidates.push({ audio: false, video: false });
+        }
+
+        let stream = null;
+        for (let i = 0; i < candidates.length; i += 1) {
+            const c = candidates[i];
+            try {
+                stream = await navigator.mediaDevices.getUserMedia({
+                    audio: c.audio,
+                    video: c.video ? { facingMode: "user" } : false
+                });
+                break;
+            } catch (_error) {
+                // Try next fallback.
+            }
+        }
+
+        if (!stream) {
+            stream = new MediaStream();
+        }
+
+        if (showVideo && stream.getVideoTracks().length === 0) {
+            const blackTrack = this._createBlackVideoTrack();
+            if (blackTrack) {
+                stream.addTrack(blackTrack);
+            }
+        }
+
+        return {
+            stream,
+            requestedVideo: showVideo,
+            hasVideoTrack: stream.getVideoTracks().length > 0
+        };
+    }
+
+    _createBlackVideoTrack() {
+        try {
+            const canvas = document.createElement("canvas");
+            canvas.width = 640;
+            canvas.height = 360;
+            const ctx = canvas.getContext("2d");
+            if (!ctx || typeof canvas.captureStream !== "function") {
+                return null;
+            }
+            ctx.fillStyle = "#000";
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            const stream = canvas.captureStream(1);
+            const track = stream.getVideoTracks()[0] || null;
+            return track;
+        } catch (_error) {
+            return null;
+        }
+    }
+
+    _sendIfConnected(payload) {
+        if (!this.connection || !this.connection.open) {
+            return;
+        }
+        this.connection.send(payload);
     }
 
     _toArrayBuffer(value) {
@@ -449,7 +733,7 @@ class PeerManager {
         if (!call) {
             return;
         }
-        if (this.mediaCall) {
+        if (this.mediaCall || this.pendingIncomingCall) {
             call.close();
             return;
         }
@@ -479,9 +763,14 @@ class PeerManager {
         this.mediaCall = call;
 
         call.on("stream", (stream) => {
-            this._setRemoteMediaStream(stream);
+            const hasVideoTrack = stream && stream.getVideoTracks().length > 0;
+            this._setRemoteMediaStream(stream, { hasVideoTrack });
             if (this.handlers.onCallState) {
-                this.handlers.onCallState({ state: "connected", incoming: Boolean(options.incoming) });
+                this.handlers.onCallState({
+                    state: "connected",
+                    incoming: Boolean(options.incoming),
+                    hasVideoTrack
+                });
             }
         });
 
@@ -489,7 +778,7 @@ class PeerManager {
             if (this.mediaCall === call) {
                 this.mediaCall = null;
             }
-            this._setRemoteMediaStream(null);
+            this._setRemoteMediaStream(null, { hasVideoTrack: false });
             this._stopLocalMedia();
             if (this.handlers.onCallState) {
                 this.handlers.onCallState({ state: "idle", incoming: Boolean(options.incoming) });
@@ -506,18 +795,23 @@ class PeerManager {
         });
     }
 
-    _setLocalMediaStream(stream) {
+    _setLocalMediaStream(stream, info = {}) {
         this._stopLocalMedia();
         this.localMediaStream = stream || null;
         if (this.handlers.onLocalStream) {
-            this.handlers.onLocalStream(this.localMediaStream);
+            this.handlers.onLocalStream(this.localMediaStream, {
+                hasVideoTrack: Boolean(info.hasVideoTrack),
+                requestedVideo: Boolean(info.requestedVideo)
+            });
         }
     }
 
-    _setRemoteMediaStream(stream) {
+    _setRemoteMediaStream(stream, info = {}) {
         this.remoteMediaStream = stream || null;
         if (this.handlers.onRemoteStream) {
-            this.handlers.onRemoteStream(this.remoteMediaStream);
+            this.handlers.onRemoteStream(this.remoteMediaStream, {
+                hasVideoTrack: Boolean(info.hasVideoTrack)
+            });
         }
     }
 
@@ -529,7 +823,7 @@ class PeerManager {
             this.localMediaStream = null;
         }
         if (this.handlers.onLocalStream) {
-            this.handlers.onLocalStream(null);
+            this.handlers.onLocalStream(null, { hasVideoTrack: false, requestedVideo: false });
         }
     }
 

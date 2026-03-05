@@ -534,6 +534,16 @@ button.danger:hover {
     gap: 6px;
 }
 
+.transfer-progress {
+    width: min(260px, 100%);
+    height: 8px;
+}
+
+.transfer-meta {
+    font-size: 0.78rem;
+    opacity: 0.9;
+}
+
 .attachment-link {
     color: inherit;
     text-decoration: underline;
@@ -577,6 +587,13 @@ button.danger:hover {
     gap: 10px;
 }
 
+.video-settings {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 0.92rem;
+}
+
 .video-grid {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -597,10 +614,43 @@ button.danger:hover {
     object-fit: cover;
 }
 
+.video-pane.video-off::after {
+    content: "黑屏（未开启画面）";
+    font-size: 0.82rem;
+    color: #d1d5db;
+}
+
 .video-actions {
     display: flex;
     gap: 10px;
     justify-content: flex-end;
+}
+
+.file-offer-modal {
+    position: fixed;
+    inset: 0;
+    z-index: 11100;
+    background: rgba(17, 24, 39, 0.72);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+}
+
+.file-offer-card {
+    width: min(480px, 100%);
+    border-radius: 12px;
+    background: #fff;
+    padding: 18px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.file-offer-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 10px;
 }
 
 @media (max-width: 760px) {

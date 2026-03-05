@@ -116,6 +116,12 @@
                 <strong>视频通话</strong>
                 <span id="video-status">未开始</span>
             </div>
+            <div class="video-settings">
+                <label>
+                    <input id="video-show-toggle" type="checkbox" checked />
+                    展示我的画面
+                </label>
+            </div>
             <div class="video-grid">
                 <div class="video-pane">
                     <span>对方画面</span>
@@ -126,9 +132,25 @@
                     <video id="local-video" autoplay playsinline muted></video>
                 </div>
             </div>
+            <div id="incoming-call-actions" class="video-actions hidden">
+                <button id="accept-video-call">接听</button>
+                <button id="reject-video-call" class="danger">挂断</button>
+            </div>
             <div class="video-actions">
                 <button id="hangup-video" class="danger">挂断</button>
                 <button id="close-video-modal" class="secondary">关闭窗口</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="file-offer-modal" class="file-offer-modal hidden">
+        <div class="file-offer-card">
+            <h3>收到文件</h3>
+            <p id="file-offer-text">对方正在发送文件</p>
+            <p class="hint">接受后会优先让你选择保存位置；若暂未选择，将先缓存到内存。</p>
+            <div class="file-offer-actions">
+                <button id="accept-file-offer">接受并继续</button>
+                <button id="reject-file-offer" class="danger">拒绝并断开</button>
             </div>
         </div>
     </div>
