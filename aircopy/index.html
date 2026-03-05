@@ -56,7 +56,16 @@
         <div id="chat-interface" class="screen hidden">
             <div class="sidebar">
                 <div class="sidebar-header">
-                    <h3>会话</h3>
+                    <div class="sidebar-header-main">
+                        <h3>会话</h3>
+                        <button id="settings-toggle" class="settings-toggle" type="button" aria-label="打开设置">☰</button>
+                    </div>
+                    <div id="sidebar-settings" class="sidebar-settings hidden">
+                        <label class="setting-row" for="hang-mode-toggle">
+                            <span>挂机模式</span>
+                            <input id="hang-mode-toggle" type="checkbox" />
+                        </label>
+                    </div>
                 </div>
                 <ul id="session-list">
                     <li class="session-item active" data-id="group-chat">

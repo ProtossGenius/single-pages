@@ -3,6 +3,7 @@
     const LEGACY_CHAT_STORAGE_KEY = "aircopy.chat.state.v2";
     const SELF_ID_STORAGE_KEY = "aircopy.self.id.v1";
     const VIDEO_PREF_STORAGE_KEY = "aircopy.video.pref.v1";
+    const HANG_MODE_STORAGE_KEY = "aircopy.hang.mode.v1";
     const CHAT_HISTORY_MAX = 300;
     const EMOJI_SET = ["😀", "😁", "😂", "🤣", "😊", "😍", "😘", "😎", "🤔", "😭", "😡", "👍", "👎", "🙏", "👏", "🎉"];
 
@@ -29,6 +30,8 @@
         isMobileLayout: false,
         sidebarCollapsedDesktop: false,
         sessionOpenMobile: false,
+        settingsOpen: false,
+        hangModeEnabled: false,
         recordingVoice: false,
         voiceRecorder: null,
         voiceChunks: [],
@@ -41,6 +44,10 @@
         videoPrefByPeer: {},
         transferViews: {},
         objectUrls: [],
+        keepAliveAudioContext: null,
+        keepAliveAudioSource: null,
+        keepAliveWakeLock: null,
+        keepAliveSyncToken: 0,
         modeTask: Promise.resolve(),
         scannerTask: Promise.resolve()
     };
@@ -65,6 +72,9 @@
         chatStatus: document.getElementById("chat-status"),
         chatUnread: document.getElementById("chat-unread"),
         sessionList: document.getElementById("session-list"),
+        settingsToggle: document.getElementById("settings-toggle"),
+        sidebarSettings: document.getElementById("sidebar-settings"),
+        hangModeToggle: document.getElementById("hang-mode-toggle"),
         peerSessionName: document.getElementById("peer-session-name"),
         peerSessionStatus: document.getElementById("peer-session-status"),
         peerSessionUnread: document.getElementById("peer-session-unread"),
@@ -229,10 +239,17 @@
     function init() {
         ensureLocalPersistentId();
         loadVideoPrefs();
+        loadHangModeSetting();
         const seed = Math.floor(Math.random() * 9000 + 1000);
         elements.displayName.value = `用户_${seed}`;
         peerManager.setDisplayName(getDisplayName());
         peerManager.setPersistentId(appState.localPersistentId);
+        if (elements.hangModeToggle) {
+            elements.hangModeToggle.checked = appState.hangModeEnabled;
+        }
+        if (elements.settingsToggle) {
+            elements.settingsToggle.setAttribute("aria-expanded", "false");
+        }
         elements.displayName.addEventListener("input", () => {
             peerManager.setDisplayName(getDisplayName());
         });
@@ -278,11 +295,22 @@
                 setSessionPanelOpen(false);
             }
         });
+        if (elements.settingsToggle) {
+            elements.settingsToggle.addEventListener("click", () => {
+                setSettingsPanelOpen(!appState.settingsOpen);
+            });
+        }
+        if (elements.hangModeToggle) {
+            elements.hangModeToggle.addEventListener("change", () => {
+                setHangModeEnabled(Boolean(elements.hangModeToggle.checked));
+            });
+        }
 
         document.addEventListener("keydown", (event) => {
             if (event.key === "Escape") {
                 closeQrModal();
                 setSessionPanelOpen(false);
+                setSettingsPanelOpen(false);
                 closeEmojiPanel();
                 closeVideoModal({ keepCall: true });
                 if (appState.incomingFileOffer) {
@@ -295,6 +323,7 @@
             if (!document.hidden) {
                 clearUnread();
             }
+            void syncBackgroundKeepAlive();
         });
 
         elements.sendBtn.addEventListener("click", sendCurrentMessage);
@@ -328,10 +357,17 @@
             }
         });
         document.addEventListener("click", (event) => {
+            const target = event.target;
+            const insideSettings =
+                target instanceof HTMLElement &&
+                target.closest &&
+                (target.closest("#sidebar-settings") || target.closest("#settings-toggle"));
+            if (appState.settingsOpen && !insideSettings) {
+                setSettingsPanelOpen(false);
+            }
             if (!elements.emojiPanel || elements.emojiPanel.classList.contains("hidden")) {
                 return;
             }
-            const target = event.target;
             if (
                 target instanceof HTMLElement &&
                 target.closest &&
@@ -345,6 +381,8 @@
         updateLayoutMode();
         initEmojiPanel();
         syncVideoPrefForCurrentPeer();
+        setSettingsPanelOpen(false);
+        setHangModeEnabled(appState.hangModeEnabled, { persist: false });
         setConnectionState(false);
         updateVideoButton();
         loadPersistedChatState();
@@ -412,6 +450,43 @@
         if (appState.sessionOpenMobile) {
             clearUnread();
         }
+    }
+
+    function setSettingsPanelOpen(open) {
+        appState.settingsOpen = Boolean(open);
+        if (elements.sidebarSettings) {
+            elements.sidebarSettings.classList.toggle("hidden", !appState.settingsOpen);
+        }
+        if (elements.settingsToggle) {
+            elements.settingsToggle.setAttribute("aria-expanded", appState.settingsOpen ? "true" : "false");
+        }
+    }
+
+    function loadHangModeSetting() {
+        try {
+            appState.hangModeEnabled = localStorage.getItem(HANG_MODE_STORAGE_KEY) === "1";
+        } catch (_error) {
+            appState.hangModeEnabled = false;
+        }
+    }
+
+    function persistHangModeSetting() {
+        try {
+            localStorage.setItem(HANG_MODE_STORAGE_KEY, appState.hangModeEnabled ? "1" : "0");
+        } catch (_error) {
+            // Ignore storage failures.
+        }
+    }
+
+    function setHangModeEnabled(enabled, options = {}) {
+        appState.hangModeEnabled = Boolean(enabled);
+        if (elements.hangModeToggle && elements.hangModeToggle.checked !== appState.hangModeEnabled) {
+            elements.hangModeToggle.checked = appState.hangModeEnabled;
+        }
+        if (options.persist !== false) {
+            persistHangModeSetting();
+        }
+        void syncBackgroundKeepAlive();
     }
 
     function applySessionPanelState() {
@@ -2086,6 +2161,145 @@
             elements.peerSessionStatus.classList.toggle("online", appState.connected);
             elements.peerSessionStatus.classList.toggle("offline", !appState.connected);
         }
+        void syncBackgroundKeepAlive();
+    }
+
+    function shouldEnableBackgroundKeepAlive() {
+        return appState.hangModeEnabled && appState.connected;
+    }
+
+    async function syncBackgroundKeepAlive() {
+        const token = ++appState.keepAliveSyncToken;
+        if (!shouldEnableBackgroundKeepAlive()) {
+            await releaseWakeLock();
+            await stopSilentAudioLoop();
+            return;
+        }
+        await ensureSilentAudioLoop();
+        if (token !== appState.keepAliveSyncToken || !shouldEnableBackgroundKeepAlive()) {
+            await releaseWakeLock();
+            await stopSilentAudioLoop();
+            return;
+        }
+        await ensureWakeLock();
+        if (token !== appState.keepAliveSyncToken || !shouldEnableBackgroundKeepAlive()) {
+            await releaseWakeLock();
+            await stopSilentAudioLoop();
+        }
+    }
+
+    async function ensureSilentAudioLoop() {
+        if (appState.keepAliveAudioContext) {
+            if (appState.keepAliveAudioContext.state === "suspended") {
+                try {
+                    await appState.keepAliveAudioContext.resume();
+                } catch (_error) {
+                    // Ignore resume failures.
+                }
+            }
+            return;
+        }
+        const AudioContextCtor = window.AudioContext || window.webkitAudioContext;
+        if (!AudioContextCtor) {
+            return;
+        }
+        let context = null;
+        let source = null;
+        try {
+            context = new AudioContextCtor();
+            source = context.createBufferSource();
+            const silentBuffer = context.createBuffer(1, 2205, 22050);
+            const gainNode = context.createGain();
+            gainNode.gain.value = 0;
+            source.buffer = silentBuffer;
+            source.loop = true;
+            source.connect(gainNode);
+            gainNode.connect(context.destination);
+            source.start(0);
+            if (context.state === "suspended") {
+                await context.resume();
+            }
+            appState.keepAliveAudioContext = context;
+            appState.keepAliveAudioSource = source;
+        } catch (_error) {
+            // Ignore unsupported/autoplay errors.
+            if (source) {
+                try {
+                    source.stop(0);
+                } catch (_e) {
+                    // Ignore cleanup failures.
+                }
+            }
+            if (context) {
+                try {
+                    await context.close();
+                } catch (_e) {
+                    // Ignore cleanup failures.
+                }
+            }
+        }
+    }
+
+    async function stopSilentAudioLoop() {
+        const source = appState.keepAliveAudioSource;
+        appState.keepAliveAudioSource = null;
+        if (source) {
+            try {
+                source.stop(0);
+            } catch (_error) {
+                // Ignore if already stopped.
+            }
+            try {
+                source.disconnect();
+            } catch (_error) {
+                // Ignore disconnection failures.
+            }
+        }
+        const context = appState.keepAliveAudioContext;
+        appState.keepAliveAudioContext = null;
+        if (context) {
+            try {
+                await context.close();
+            } catch (_error) {
+                // Ignore close failures.
+            }
+        }
+    }
+
+    async function ensureWakeLock() {
+        if (!navigator.wakeLock || typeof navigator.wakeLock.request !== "function") {
+            return;
+        }
+        if (appState.keepAliveWakeLock) {
+            return;
+        }
+        try {
+            const sentinel = await navigator.wakeLock.request("screen");
+            appState.keepAliveWakeLock = sentinel;
+            sentinel.addEventListener("release", () => {
+                if (appState.keepAliveWakeLock === sentinel) {
+                    appState.keepAliveWakeLock = null;
+                }
+                if (shouldEnableBackgroundKeepAlive() && !document.hidden) {
+                    void syncBackgroundKeepAlive();
+                }
+            });
+        } catch (_error) {
+            // Ignore unsupported/permission failures.
+        }
+    }
+
+    async function releaseWakeLock() {
+        const sentinel = appState.keepAliveWakeLock;
+        appState.keepAliveWakeLock = null;
+        if (!sentinel) {
+            return;
+        }
+        try {
+            await sentinel.release();
+        } catch (_error) {
+            // Ignore release failures.
+        }
     }
 
     function markUnreadIfNeeded(isPeerMessage) {
@@ -2293,6 +2507,8 @@
         closeQrModal();
         closeEmojiPanel();
         closeFileOfferModal();
+        void releaseWakeLock();
+        void stopSilentAudioLoop();
         releaseObjectUrls();
         stopScanIfRunning();
         peerManager.destroy();
