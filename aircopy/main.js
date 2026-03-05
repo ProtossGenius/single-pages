@@ -7,6 +7,9 @@
         currentQrText: "",
         lastScanErrorAt: 0,
         scanControls: null,
+        smartRegionTimer: null,
+        smartCanvas: null,
+        smartCtx: null,
         localPeerId: "",
         modeTask: Promise.resolve(),
         scannerTask: Promise.resolve()
@@ -206,10 +209,12 @@
                 appState.scanControls = await scanPromise;
                 appState.scannerRunning = true;
                 updateScanButton();
+                startSmartRegionLoop(sessionId);
                 setStatus("摄像头已开启，正在识别二维码…");
             } catch (error) {
                 appState.scannerRunning = false;
                 appState.scanControls = null;
+                stopSmartRegionLoop();
                 updateScanButton();
                 setStatus(`启动扫码失败：${toErrorMessage(error)}`);
             }
@@ -235,9 +240,287 @@
             }
             appState.scannerRunning = false;
             appState.scanControls = null;
+            stopSmartRegionLoop();
             updateScanButton();
         });
         return appState.scannerTask;
+    }
+
+    function startSmartRegionLoop(sessionId) {
+        stopSmartRegionLoop();
+        if (typeof jsQR !== "function") {
+            return;
+        }
+
+        const tick = () => {
+            if (!appState.scannerRunning || sessionId !== appState.scanSessionId) {
+                return;
+            }
+            tryDecodeDarkRegions(sessionId);
+            appState.smartRegionTimer = window.setTimeout(tick, 220);
+        };
+        appState.smartRegionTimer = window.setTimeout(tick, 320);
+    }
+
+    function stopSmartRegionLoop() {
+        if (appState.smartRegionTimer) {
+            clearTimeout(appState.smartRegionTimer);
+            appState.smartRegionTimer = null;
+        }
+    }
+
+    function tryDecodeDarkRegions(sessionId) {
+        if (appState.handlingScan || !appState.scannerRunning || sessionId !== appState.scanSessionId) {
+            return;
+        }
+        const video = elements.reader.querySelector("video");
+        if (!video || !video.videoWidth || !video.videoHeight) {
+            return;
+        }
+        const frame = captureFrame(video, 900);
+        if (!frame) {
+            return;
+        }
+
+        const candidates = detectDarkRegionCandidates(frame.imageData, frame.width, frame.height);
+        if (candidates.length === 0) {
+            return;
+        }
+
+        for (let i = 0; i < candidates.length; i += 1) {
+            const rect = candidates[i];
+            let roi;
+            try {
+                roi = appState.smartCtx.getImageData(rect.x, rect.y, rect.w, rect.h);
+            } catch (_error) {
+                continue;
+            }
+            const result = jsQR(roi.data, rect.w, rect.h, {
+                inversionAttempts: "attemptBoth"
+            });
+            if (result && result.data) {
+                onScanSuccess(result.data, sessionId);
+                return;
+            }
+        }
+    }
+
+    function captureFrame(video, maxEdge) {
+        const sourceW = video.videoWidth;
+        const sourceH = video.videoHeight;
+        if (!sourceW || !sourceH) {
+            return null;
+        }
+        const scale = Math.min(1, maxEdge / Math.max(sourceW, sourceH));
+        const width = Math.max(1, Math.floor(sourceW * scale));
+        const height = Math.max(1, Math.floor(sourceH * scale));
+
+        if (!appState.smartCanvas) {
+            appState.smartCanvas = document.createElement("canvas");
+            appState.smartCtx = appState.smartCanvas.getContext("2d", { willReadFrequently: true });
+        }
+        if (!appState.smartCtx) {
+            return null;
+        }
+
+        appState.smartCanvas.width = width;
+        appState.smartCanvas.height = height;
+        appState.smartCtx.drawImage(video, 0, 0, width, height);
+        const imageData = appState.smartCtx.getImageData(0, 0, width, height);
+        return { imageData, width, height };
+    }
+
+    function detectDarkRegionCandidates(imageData, width, height) {
+        const pixels = imageData.data;
+        const cellSize = Math.max(10, Math.floor(Math.min(width, height) / 28));
+        const cols = Math.max(1, Math.floor(width / cellSize));
+        const rows = Math.max(1, Math.floor(height / cellSize));
+
+        const darkRatio = new Float32Array(rows * cols);
+        const flagged = new Uint8Array(rows * cols);
+        const visited = new Uint8Array(rows * cols);
+        const stride = width * 4;
+
+        for (let gy = 0; gy < rows; gy += 1) {
+            for (let gx = 0; gx < cols; gx += 1) {
+                const startX = gx * cellSize;
+                const startY = gy * cellSize;
+                const endX = Math.min(width, startX + cellSize);
+                const endY = Math.min(height, startY + cellSize);
+                let samples = 0;
+                let dark = 0;
+
+                for (let y = startY; y < endY; y += 2) {
+                    const rowOffset = y * stride;
+                    for (let x = startX; x < endX; x += 2) {
+                        const index = rowOffset + x * 4;
+                        const r = pixels[index];
+                        const g = pixels[index + 1];
+                        const b = pixels[index + 2];
+                        const lum = (r * 38 + g * 75 + b * 15) >> 7;
+                        samples += 1;
+                        if (lum < 90) {
+                            dark += 1;
+                        }
+                    }
+                }
+
+                const idx = gy * cols + gx;
+                const ratio = samples ? dark / samples : 0;
+                darkRatio[idx] = ratio;
+                if (ratio > 0.28) {
+                    flagged[idx] = 1;
+                }
+            }
+        }
+
+        const candidates = [];
+        const queueX = [];
+        const queueY = [];
+        for (let gy = 0; gy < rows; gy += 1) {
+            for (let gx = 0; gx < cols; gx += 1) {
+                const startIdx = gy * cols + gx;
+                if (!flagged[startIdx] || visited[startIdx]) {
+                    continue;
+                }
+                let head = 0;
+                queueX.length = 0;
+                queueY.length = 0;
+                queueX.push(gx);
+                queueY.push(gy);
+                visited[startIdx] = 1;
+
+                let minX = gx;
+                let maxX = gx;
+                let minY = gy;
+                let maxY = gy;
+                let cellCount = 0;
+                let darkSum = 0;
+
+                while (head < queueX.length) {
+                    const cx = queueX[head];
+                    const cy = queueY[head];
+                    head += 1;
+                    const idx = cy * cols + cx;
+                    cellCount += 1;
+                    darkSum += darkRatio[idx];
+                    minX = Math.min(minX, cx);
+                    maxX = Math.max(maxX, cx);
+                    minY = Math.min(minY, cy);
+                    maxY = Math.max(maxY, cy);
+
+                    for (let oy = -1; oy <= 1; oy += 1) {
+                        for (let ox = -1; ox <= 1; ox += 1) {
+                            if (ox === 0 && oy === 0) {
+                                continue;
+                            }
+                            const nx = cx + ox;
+                            const ny = cy + oy;
+                            if (nx < 0 || ny < 0 || nx >= cols || ny >= rows) {
+                                continue;
+                            }
+                            const nIdx = ny * cols + nx;
+                            if (!flagged[nIdx] || visited[nIdx]) {
+                                continue;
+                            }
+                            visited[nIdx] = 1;
+                            queueX.push(nx);
+                            queueY.push(ny);
+                        }
+                    }
+                }
+
+                const avgDark = darkSum / Math.max(1, cellCount);
+                if (cellCount < 5 || avgDark < 0.3) {
+                    continue;
+                }
+
+                const rect = expandToSquare(
+                    (minX - 1) * cellSize,
+                    (minY - 1) * cellSize,
+                    (maxX - minX + 3) * cellSize,
+                    (maxY - minY + 3) * cellSize,
+                    width,
+                    height
+                );
+                if (!rect) {
+                    continue;
+                }
+
+                const aspect = rect.w / rect.h;
+                if (aspect < 0.6 || aspect > 1.7) {
+                    continue;
+                }
+                if (rect.w < 70 || rect.h < 70) {
+                    continue;
+                }
+
+                candidates.push({
+                    x: rect.x,
+                    y: rect.y,
+                    w: rect.w,
+                    h: rect.h,
+                    score: cellCount * avgDark
+                });
+            }
+        }
+
+        candidates.sort((a, b) => b.score - a.score);
+        const deduped = [];
+        for (let i = 0; i < candidates.length; i += 1) {
+            const current = candidates[i];
+            let overlap = false;
+            for (let j = 0; j < deduped.length; j += 1) {
+                if (rectIoU(current, deduped[j]) > 0.58) {
+                    overlap = true;
+                    break;
+                }
+            }
+            if (!overlap) {
+                deduped.push(current);
+            }
+            if (deduped.length >= 8) {
+                break;
+            }
+        }
+        return deduped;
+    }
+
+    function expandToSquare(x, y, w, h, maxW, maxH) {
+        const cx = x + w / 2;
+        const cy = y + h / 2;
+        const side = Math.max(w, h) * 1.26;
+        const half = side / 2;
+        let left = Math.floor(cx - half);
+        let top = Math.floor(cy - half);
+        let right = Math.ceil(cx + half);
+        let bottom = Math.ceil(cy + half);
+
+        left = Math.max(0, left);
+        top = Math.max(0, top);
+        right = Math.min(maxW, right);
+        bottom = Math.min(maxH, bottom);
+        const rw = right - left;
+        const rh = bottom - top;
+        if (rw <= 0 || rh <= 0) {
+            return null;
+        }
+        return { x: left, y: top, w: rw, h: rh };
+    }
+
+    function rectIoU(a, b) {
+        const x1 = Math.max(a.x, b.x);
+        const y1 = Math.max(a.y, b.y);
+        const x2 = Math.min(a.x + a.w, b.x + b.w);
+        const y2 = Math.min(a.y + a.h, b.y + b.h);
+        const iw = Math.max(0, x2 - x1);
+        const ih = Math.max(0, y2 - y1);
+        const inter = iw * ih;
+        if (inter <= 0) {
+            return 0;
+        }
+        const union = a.w * a.h + b.w * b.h - inter;
+        return union > 0 ? inter / union : 0;
     }
 
     function handleScanFrame(result, error, sessionId) {
