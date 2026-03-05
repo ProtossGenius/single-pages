@@ -11,6 +11,12 @@
         smartCanvas: null,
         smartCtx: null,
         localPeerId: "",
+        peerName: "",
+        connected: false,
+        unreadCount: 0,
+        isMobileLayout: false,
+        sidebarCollapsedDesktop: false,
+        sessionOpenMobile: false,
         modeTask: Promise.resolve(),
         scannerTask: Promise.resolve()
     };
@@ -30,6 +36,16 @@
         qrModal: document.getElementById("qr-modal"),
         qrModalClose: document.getElementById("qr-modal-close"),
         qrcodeLarge: document.getElementById("qrcode-large"),
+        chatTitle: document.getElementById("chat-title"),
+        chatStatus: document.getElementById("chat-status"),
+        chatUnread: document.getElementById("chat-unread"),
+        sessionList: document.getElementById("session-list"),
+        peerSessionName: document.getElementById("peer-session-name"),
+        peerSessionStatus: document.getElementById("peer-session-status"),
+        peerSessionUnread: document.getElementById("peer-session-unread"),
+        sessionToggle: document.getElementById("session-toggle"),
+        sessionBackdrop: document.getElementById("session-backdrop"),
+        chatInterfaceRoot: document.getElementById("chat-interface"),
         displayName: document.getElementById("display-name"),
         statusText: document.getElementById("status-text"),
         chatMessages: document.getElementById("chat-messages"),
@@ -42,19 +58,34 @@
         onLocalId: (id) => {
             appState.localPeerId = id;
         },
-        onConnected: () => {
+        onConnected: (info) => {
+            if (info && info.peerName) {
+                setPeerName(info.peerName);
+            }
+            setConnectionState(true);
+            clearUnread();
             enterChatInterface();
             setStatus("连接成功。");
         },
         onConnectionClosed: () => {
             appendMessage("system", "连接已断开。", true);
+            setPeerName("");
+            setConnectionState(false);
             setStatus("连接已断开，可重新扫码连接。");
         },
         onError: (error) => {
             setStatus(`连接异常：${toErrorMessage(error)}`);
         },
         onMessage: (message) => {
+            if (message.type === "hello") {
+                const remoteName = message.name || appState.peerName || "对方";
+                setPeerName(remoteName);
+                appendMessage("system", `hello ${getDisplayName()} 与 ${remoteName}`, true);
+                markUnreadIfNeeded(true);
+                return;
+            }
             appendMessage(message.from, message.body, message.type === "hello");
+            markUnreadIfNeeded(message.from === "peer");
         },
         onStateChange: (state) => {
             if (state === "disconnected") {
@@ -100,10 +131,27 @@
                 closeQrModal();
             }
         });
+        elements.sessionToggle.addEventListener("click", toggleSessionPanel);
+        elements.sessionBackdrop.addEventListener("click", () => {
+            setSessionPanelOpen(false);
+        });
+        elements.sessionList.addEventListener("click", () => {
+            clearUnread();
+            if (appState.isMobileLayout) {
+                setSessionPanelOpen(false);
+            }
+        });
 
         document.addEventListener("keydown", (event) => {
             if (event.key === "Escape") {
                 closeQrModal();
+                setSessionPanelOpen(false);
+            }
+        });
+        window.addEventListener("resize", updateLayoutMode);
+        document.addEventListener("visibilitychange", () => {
+            if (!document.hidden) {
+                clearUnread();
             }
         });
 
@@ -116,6 +164,8 @@
             }
         });
 
+        updateLayoutMode();
+        setConnectionState(false);
         const isMobile = /Android|webOS|iPhone|iPod|iPad|Mobile/i.test(navigator.userAgent);
         setMode(isMobile ? "scanner" : "qr", { force: true });
     }
@@ -152,6 +202,44 @@
         });
 
         return appState.modeTask;
+    }
+
+    function updateLayoutMode() {
+        appState.isMobileLayout = window.matchMedia("(max-width: 760px)").matches;
+        if (!appState.isMobileLayout) {
+            appState.sessionOpenMobile = false;
+        }
+        applySessionPanelState();
+    }
+
+    function toggleSessionPanel() {
+        if (appState.isMobileLayout) {
+            setSessionPanelOpen(!appState.sessionOpenMobile);
+            return;
+        }
+        appState.sidebarCollapsedDesktop = !appState.sidebarCollapsedDesktop;
+        if (!appState.sidebarCollapsedDesktop) {
+            clearUnread();
+        }
+        applySessionPanelState();
+    }
+
+    function setSessionPanelOpen(open) {
+        appState.sessionOpenMobile = Boolean(open);
+        applySessionPanelState();
+        if (appState.sessionOpenMobile) {
+            clearUnread();
+        }
+    }
+
+    function applySessionPanelState() {
+        if (appState.isMobileLayout) {
+            elements.chatInterfaceRoot.classList.toggle("session-open", appState.sessionOpenMobile);
+            elements.chatInterfaceRoot.classList.remove("sidebar-collapsed");
+        } else {
+            elements.chatInterfaceRoot.classList.remove("session-open");
+            elements.chatInterfaceRoot.classList.toggle("sidebar-collapsed", appState.sidebarCollapsedDesktop);
+        }
     }
 
     async function ensurePeerReady() {
@@ -563,6 +651,7 @@
         try {
             await stopScanIfRunning();
             setStatus("已识别 peerId，正在发起连接…");
+            setSessionPanelOpen(false);
             peerManager.connect(remotePeerId);
         } catch (error) {
             setStatus(`发起连接失败：${toErrorMessage(error)}`);
@@ -693,11 +782,12 @@
 
     function enterChatInterface() {
         closeQrModal();
+        setSessionPanelOpen(false);
         elements.connectionSetup.classList.add("hidden");
         elements.chatInterface.classList.remove("hidden");
         if (!elements.chatMessages.dataset.inited) {
             elements.chatMessages.dataset.inited = "1";
-            appendMessage("system", "连接成功：hello world", true);
+            appendMessage("system", "连接成功，等待双方 hello 消息…", true);
         }
     }
 
@@ -711,14 +801,35 @@
         } else {
             div.classList.add("peer");
         }
-        div.textContent = text;
+
+        const timestamp = document.createElement("span");
+        timestamp.className = "message-time";
+        timestamp.textContent = formatNowHHMM();
+        div.appendChild(timestamp);
+
+        const body = document.createElement("span");
+        body.className = "message-body";
+        body.textContent = text;
+        div.appendChild(body);
+
         elements.chatMessages.appendChild(div);
         elements.chatMessages.scrollTop = elements.chatMessages.scrollHeight;
+    }
+
+    function formatNowHHMM() {
+        const now = new Date();
+        const hh = String(now.getHours()).padStart(2, "0");
+        const mm = String(now.getMinutes()).padStart(2, "0");
+        return `${hh}:${mm}`;
     }
 
     function sendCurrentMessage() {
         const text = elements.messageInput.value.trim();
         if (!text) {
+            return;
+        }
+        if (!appState.connected) {
+            setStatus("尚未连接，当前无法发送消息。");
             return;
         }
         try {
@@ -732,17 +843,95 @@
 
     async function resetToSetup() {
         closeQrModal();
+        setSessionPanelOpen(false);
         await stopScanIfRunning();
         peerManager.destroy();
         appState.localPeerId = "";
+        appState.peerName = "";
         appState.currentQrText = "";
         appState.handlingScan = false;
+        appState.sidebarCollapsedDesktop = false;
         elements.chatMessages.innerHTML = "";
         delete elements.chatMessages.dataset.inited;
+        setConnectionState(false);
+        clearUnread();
+        setPeerName("");
         elements.chatInterface.classList.add("hidden");
         elements.connectionSetup.classList.remove("hidden");
         await setMode("qr", { force: true });
         setStatus("已退出会话，请重新扫码连接。");
+    }
+
+    function setPeerName(name) {
+        appState.peerName = String(name || "").trim();
+        const viewName = appState.peerName || "当前会话";
+        if (elements.chatTitle) {
+            elements.chatTitle.textContent = viewName;
+        }
+        if (elements.peerSessionName) {
+            elements.peerSessionName.textContent = viewName;
+        }
+    }
+
+    function setConnectionState(connected) {
+        appState.connected = Boolean(connected);
+        if (elements.sendBtn) {
+            elements.sendBtn.disabled = !appState.connected;
+        }
+        if (elements.messageInput) {
+            elements.messageInput.disabled = !appState.connected;
+            if (!appState.connected) {
+                elements.messageInput.placeholder = "连接后可发送消息...";
+            } else {
+                elements.messageInput.placeholder = "输入消息...";
+            }
+        }
+
+        const statusText = appState.connected ? "在线" : "离线";
+        if (elements.chatStatus) {
+            elements.chatStatus.textContent = statusText;
+            elements.chatStatus.classList.toggle("online", appState.connected);
+            elements.chatStatus.classList.toggle("offline", !appState.connected);
+        }
+        if (elements.peerSessionStatus) {
+            elements.peerSessionStatus.textContent = statusText;
+            elements.peerSessionStatus.classList.toggle("online", appState.connected);
+            elements.peerSessionStatus.classList.toggle("offline", !appState.connected);
+        }
+    }
+
+    function markUnreadIfNeeded(isPeerMessage) {
+        if (!isPeerMessage) {
+            return;
+        }
+        const sidebarClosed = appState.isMobileLayout ? !appState.sessionOpenMobile : appState.sidebarCollapsedDesktop;
+        const shouldCount = document.hidden || sidebarClosed;
+        if (!shouldCount) {
+            return;
+        }
+        appState.unreadCount += 1;
+        renderUnread();
+    }
+
+    function clearUnread() {
+        if (appState.unreadCount === 0) {
+            return;
+        }
+        appState.unreadCount = 0;
+        renderUnread();
+    }
+
+    function renderUnread() {
+        const count = appState.unreadCount;
+        const view = count > 99 ? "99+" : String(count);
+        if (elements.chatUnread) {
+            elements.chatUnread.textContent = view;
+            elements.chatUnread.classList.toggle("hidden", count <= 0);
+        }
+        if (elements.peerSessionUnread) {
+            elements.peerSessionUnread.textContent = view;
+            elements.peerSessionUnread.classList.toggle("hidden", count <= 0);
+        }
     }
 
     function getDisplayName() {

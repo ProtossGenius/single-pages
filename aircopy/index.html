@@ -12,7 +12,7 @@
         <div id="connection-setup" class="screen">
             <div class="header">
                 <h1>AirCopy</h1>
-                <p>第一阶段：点对点建链（连接后显示 hello world）</p>
+                <p>第一阶段：点对点建链（连接后显示 hello 双方名字）</p>
             </div>
             
             <div class="content">
@@ -60,14 +60,20 @@
                 <ul id="session-list">
                     <li class="session-item active" data-id="group-chat">
                         <span class="avatar">G</span>
-                        <span class="name">群聊</span>
+                        <span id="peer-session-name" class="name">当前会话</span>
+                        <span id="peer-session-status" class="session-status offline">离线</span>
+                        <span id="peer-session-unread" class="session-unread hidden">0</span>
                     </li>
                 </ul>
             </div>
             
             <div class="main-chat">
                 <div class="chat-header">
-                    <h3 id="chat-title">群聊</h3>
+                    <button id="session-toggle" class="session-toggle" type="button">
+                        <span id="chat-title" class="chat-title-text">当前会话</span>
+                        <span id="chat-status" class="chat-status offline">离线</span>
+                        <span id="chat-unread" class="unread-badge hidden">0</span>
+                    </button>
                     <div class="header-actions">
                         <button id="join-group" class="hidden">加入对方群聊</button>
                         <button id="exit-chat">退出</button>
@@ -90,6 +96,8 @@
                     </div>
                 </div>
             </div>
+
+            <div id="session-backdrop" class="session-backdrop"></div>
         </div>
     </div>
 

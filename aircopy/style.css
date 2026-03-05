@@ -4,11 +4,17 @@
     padding: 0;
 }
 
+html,
+body {
+    height: 100%;
+    overflow: hidden;
+}
+
 body {
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
     background-color: #f0f2f5;
     color: #333;
-    height: 100vh;
+    height: 100dvh;
     display: flex;
     justify-content: center;
     align-items: center;
@@ -17,7 +23,8 @@ body {
 #app {
     width: 100%;
     max-width: 1000px;
-    height: 90vh;
+    height: min(90vh, 900px);
+    max-height: 100dvh;
     background: white;
     box-shadow: 0 10px 30px rgba(0,0,0,0.1);
     border-radius: 12px;
@@ -202,6 +209,7 @@ body {
 /* 聊天界面样式 */
 #chat-interface {
     flex-direction: row;
+    position: relative;
 }
 
 .sidebar {
@@ -256,6 +264,7 @@ body {
     flex: 1;
     display: flex;
     flex-direction: column;
+    min-height: 0;
 }
 
 .chat-header {
@@ -264,6 +273,85 @@ body {
     display: flex;
     justify-content: space-between;
     align-items: center;
+    gap: 10px;
+}
+
+.session-toggle {
+    border: none;
+    background: transparent;
+    color: inherit;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 180px;
+    max-width: 70%;
+    text-align: left;
+    padding: 4px 6px;
+    border-radius: 6px;
+}
+
+.session-toggle:hover {
+    background: #f3f4f6;
+}
+
+.chat-title-text {
+    font-size: 1.02rem;
+    font-weight: 600;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.chat-status,
+.session-status {
+    font-size: 0.72rem;
+    padding: 2px 6px;
+    border-radius: 999px;
+    color: #fff;
+    background: #6b7280;
+}
+
+.chat-status.online,
+.session-status.online {
+    background: #16a34a;
+}
+
+.chat-status.offline,
+.session-status.offline {
+    background: #6b7280;
+}
+
+.unread-badge,
+.session-unread {
+    min-width: 20px;
+    height: 20px;
+    padding: 0 6px;
+    border-radius: 999px;
+    background: #ef4444;
+    color: #fff;
+    font-size: 0.72rem;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.session-item {
+    position: relative;
+}
+
+.session-status {
+    margin-left: auto;
+}
+
+.session-unread {
+    margin-left: 6px;
+}
+
+#chat-interface.sidebar-collapsed .sidebar {
+    width: 0;
+    min-width: 0;
+    border-right: none;
+    overflow: hidden;
 }
 
 .messages-container {
@@ -274,6 +362,7 @@ body {
     display: flex;
     flex-direction: column;
     gap: 10px;
+    min-height: 0;
 }
 
 .chat-input-area {
@@ -368,6 +457,18 @@ button.secondary {
     border-radius: 10px;
     line-height: 1.35;
     word-break: break-word;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.message-time {
+    font-size: 0.72rem;
+    opacity: 0.75;
+}
+
+.message-body {
+    white-space: pre-wrap;
 }
 
 .message.me {
@@ -388,9 +489,15 @@ button.secondary {
     color: #664d03;
 }
 
+.session-backdrop {
+    display: none;
+}
+
 @media (max-width: 760px) {
     #app {
-        height: 100vh;
+        width: 100vw;
+        height: 100dvh;
+        max-height: 100dvh;
         border-radius: 0;
     }
 
@@ -408,6 +515,44 @@ button.secondary {
     }
 
     .sidebar {
-        display: none;
+        position: absolute;
+        left: 0;
+        top: 0;
+        bottom: 0;
+        width: min(82vw, 320px);
+        z-index: 40;
+        transform: translateX(-106%);
+        transition: transform 0.22s ease;
+        box-shadow: 8px 0 24px rgba(0, 0, 0, 0.22);
+    }
+
+    #chat-interface.session-open .sidebar {
+        transform: translateX(0);
+    }
+
+    .session-backdrop {
+        display: block;
+        position: absolute;
+        inset: 0;
+        z-index: 30;
+        background: rgba(0, 0, 0, 0.36);
+    }
+
+    #chat-interface:not(.session-open) .session-backdrop {
+        display: none !important;
+    }
+
+    .chat-header {
+        padding: 12px 14px;
+    }
+
+    .session-toggle {
+        min-width: 200px;
+        max-width: 72%;
+        padding: 8px 6px;
+    }
+
+    .chat-title-text {
+        font-size: 1rem;
     }
 }

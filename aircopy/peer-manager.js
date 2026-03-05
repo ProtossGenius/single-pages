@@ -8,6 +8,7 @@ class PeerManager {
         this.localPeerId = "";
         this.displayName = "匿名用户";
         this.helloSent = false;
+        this.remoteDisplayName = "";
     }
 
     async init(displayName) {
@@ -91,6 +92,7 @@ class PeerManager {
             this.connection = null;
         }
         this.helloSent = false;
+        this.remoteDisplayName = "";
     }
 
     destroy() {
@@ -115,10 +117,15 @@ class PeerManager {
         }
         this.connection = conn;
         this.helloSent = false;
+        this.remoteDisplayName = (conn.metadata && conn.metadata.name) ? String(conn.metadata.name) : "";
 
         conn.on("open", () => {
             if (this.handlers.onConnected) {
-                this.handlers.onConnected({ peerId: conn.peer, isIncoming });
+                this.handlers.onConnected({
+                    peerId: conn.peer,
+                    isIncoming,
+                    peerName: this.remoteDisplayName
+                });
             }
             this._sendHello();
         });
@@ -151,17 +158,9 @@ class PeerManager {
         this.helloSent = true;
         this.connection.send({
             t: "hello",
-            b: "hello world",
+            b: "hello",
             name: this.displayName
         });
-        if (this.handlers.onMessage) {
-            this.handlers.onMessage({
-                from: "me",
-                type: "hello",
-                body: "hello world",
-                name: this.displayName
-            });
-        }
     }
 
     _onData(rawPayload) {
@@ -177,6 +176,9 @@ class PeerManager {
         const body = payload && payload.b ? String(payload.b) : "";
         const type = payload && payload.t ? String(payload.t) : "text";
         const name = payload && payload.name ? String(payload.name) : "";
+        if (name) {
+            this.remoteDisplayName = name;
+        }
 
         if (this.handlers.onMessage) {
             this.handlers.onMessage({
