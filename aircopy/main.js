@@ -3,6 +3,7 @@
     const LEGACY_CHAT_STORAGE_KEY = "aircopy.chat.state.v2";
     const SELF_ID_STORAGE_KEY = "aircopy.self.id.v1";
     const NODE_HINT_STORAGE_KEY = "aircopy.node.hint.v1";
+    const CONNECTOR_MODE_STORAGE_KEY = "aircopy.connector.mode.v1";
     const VIDEO_PREF_STORAGE_KEY = "aircopy.video.pref.v1";
     const HANG_MODE_STORAGE_KEY = "aircopy.hang.mode.v1";
     const CHAT_HISTORY_MAX = 300;
@@ -23,6 +24,7 @@
         smartCtx: null,
         localPeerId: "",
         localPersistentId: "",
+        preferredConnectorMode: "",
         recentNodeHint: null,
         remotePersistentId: "",
         currentConversationId: "",
@@ -268,6 +270,7 @@
     function init() {
         ensureLocalPersistentId();
         loadPersistedNodeHint();
+        loadConnectorModePreference();
         loadVideoPrefs();
         loadHangModeSetting();
         const seed = Math.floor(Math.random() * 9000 + 1000);
@@ -417,18 +420,20 @@
         updateVideoButton();
         loadPersistedChatState();
         const isMobile = /Android|webOS|iPhone|iPod|iPad|Mobile/i.test(navigator.userAgent);
-        setMode(isMobile ? "scanner" : "qr", { force: true });
+        setMode(getPreferredConnectorMode(isMobile ? "scanner" : "qr"), { force: true });
         void tryAutoReconnectFromPersistedNode();
     }
 
     function setMode(mode, options = {}) {
         appState.modeTask = appState.modeTask.then(async () => {
-            if (!options.force && mode === appState.mode) {
+            const normalizedMode = normalizeConnectorMode(mode);
+            if (!options.force && normalizedMode === appState.mode) {
                 return;
             }
 
-            appState.mode = mode;
-            const isQr = mode === "qr";
+            appState.mode = normalizedMode;
+            persistConnectorModePreference(normalizedMode);
+            const isQr = normalizedMode === "qr";
             if (isQr) {
                 await stopScanIfRunning();
             }
@@ -501,6 +506,36 @@
         }
     }
 
+    function normalizeConnectorMode(mode) {
+        return mode === "scanner" ? "scanner" : "qr";
+    }
+
+    function loadConnectorModePreference() {
+        try {
+            const raw = String(localStorage.getItem(CONNECTOR_MODE_STORAGE_KEY) || "").trim();
+            appState.preferredConnectorMode = raw === "scanner" || raw === "qr" ? raw : "";
+        } catch (_error) {
+            appState.preferredConnectorMode = "";
+        }
+    }
+
+    function persistConnectorModePreference(mode) {
+        const normalized = normalizeConnectorMode(mode);
+        appState.preferredConnectorMode = normalized;
+        try {
+            localStorage.setItem(CONNECTOR_MODE_STORAGE_KEY, normalized);
+        } catch (_error) {
+            // Ignore storage failures.
+        }
+    }
+
+    function getPreferredConnectorMode(fallbackMode = "qr") {
+        if (appState.preferredConnectorMode === "qr" || appState.preferredConnectorMode === "scanner") {
+            return appState.preferredConnectorMode;
+        }
+        return normalizeConnectorMode(fallbackMode);
+    }
+
     function persistHangModeSetting() {
         try {
             localStorage.setItem(HANG_MODE_STORAGE_KEY, appState.hangModeEnabled ? "1" : "0");
@@ -534,7 +569,7 @@
         elements.chatInterface.classList.add("hidden");
         elements.connectionSetup.classList.remove("hidden");
         elements.backToChat.classList.toggle("hidden", !appState.connected);
-        const preferred = appState.isMobileLayout ? "scanner" : "qr";
+        const preferred = getPreferredConnectorMode(appState.isMobileLayout ? "scanner" : "qr");
         setMode(preferred, { force: true });
     }
 
@@ -1262,9 +1297,24 @@
         appState.handlingScan = true;
         try {
             await stopScanIfRunning();
+            const connectResult = peerManager.connect(remotePeerId);
+            if (connectResult && connectResult.reused) {
+                const knownPersistentId = appState.remotePersistentId || connectResult.peerPersistentId || "";
+                const knownPeerName = connectResult.peerName || appState.peerName || "";
+                bindConversation(knownPersistentId, knownPeerName, remotePeerId);
+                rememberPeerNode({
+                    persistentId: knownPersistentId,
+                    peerName: knownPeerName,
+                    peerId: remotePeerId
+                });
+                setConnectionState(true);
+                clearUnread();
+                enterChatInterface();
+                setStatus("已连接到该节点，已打开对应会话。");
+                return;
+            }
             setStatus("已识别 peerId，正在发起连接…");
             setSessionPanelOpen(false);
-            peerManager.connect(remotePeerId);
         } catch (error) {
             setStatus(`发起连接失败：${toErrorMessage(error)}`);
         } finally {
@@ -2273,7 +2323,8 @@
         setPeerName("", { persist: false });
         elements.chatInterface.classList.add("hidden");
         elements.connectionSetup.classList.remove("hidden");
-        await setMode("qr", { force: true });
+        const preferredMode = getPreferredConnectorMode(appState.isMobileLayout ? "scanner" : "qr");
+        await setMode(preferredMode, { force: true });
         setStatus("已退出会话，请重新扫码连接。");
     }
 

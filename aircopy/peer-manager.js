@@ -13,6 +13,7 @@ class PeerManager {
         this.persistentId = "";
         this.helloSent = false;
         this.remoteDisplayName = "";
+        this.remotePersistentId = "";
         this.heartbeatTimer = null;
         this.heartbeatSequence = 0;
 
@@ -86,6 +87,15 @@ class PeerManager {
             throw new Error("不能连接到自己。");
         }
 
+        if (this.connection && this.connection.open && this.connection.peer === remoteId) {
+            return {
+                reused: true,
+                peerId: remoteId,
+                peerName: this.remoteDisplayName,
+                peerPersistentId: this.remotePersistentId
+            };
+        }
+
         const conn = this.peer.connect(remoteId, {
             reliable: true,
             metadata: {
@@ -94,6 +104,10 @@ class PeerManager {
             }
         });
         this._attachConnection(conn, false);
+        return {
+            reused: false,
+            peerId: remoteId
+        };
     }
 
     sendText(text) {
@@ -312,6 +326,7 @@ class PeerManager {
         this._resetOutgoingTransferAcks("连接已断开");
         this.helloSent = false;
         this.remoteDisplayName = "";
+        this.remotePersistentId = "";
     }
 
     destroy() {
@@ -347,7 +362,7 @@ class PeerManager {
         this.connection = conn;
         this.helloSent = false;
         this.remoteDisplayName = (conn.metadata && conn.metadata.name) ? String(conn.metadata.name) : "";
-        const remotePersistentId = (conn.metadata && conn.metadata.pid) ? String(conn.metadata.pid) : "";
+        this.remotePersistentId = isIncoming && conn.metadata && conn.metadata.pid ? String(conn.metadata.pid) : "";
 
         conn.on("open", () => {
             if (this.handlers.onConnected) {
@@ -355,7 +370,7 @@ class PeerManager {
                     peerId: conn.peer,
                     isIncoming,
                     peerName: this.remoteDisplayName,
-                    peerPersistentId: remotePersistentId
+                    peerPersistentId: this.remotePersistentId
                 });
             }
             this._sendHello();
@@ -370,6 +385,7 @@ class PeerManager {
             if (this.connection === conn) {
                 this.connection = null;
                 this.helloSent = false;
+                this.remotePersistentId = "";
                 this._stopHeartbeatLoop();
             }
             this.hangupVideoCall();
@@ -432,6 +448,9 @@ class PeerManager {
         const persistentId = payload && payload.pid ? String(payload.pid) : "";
         if (name) {
             this.remoteDisplayName = name;
+        }
+        if (persistentId) {
+            this.remotePersistentId = persistentId;
         }
 
         if (this.handlers.onMessage) {
