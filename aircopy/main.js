@@ -1,4 +1,9 @@
 (function () {
+    const CHAT_STORAGE_KEY = "aircopy.chat.state.v3";
+    const LEGACY_CHAT_STORAGE_KEY = "aircopy.chat.state.v2";
+    const SELF_ID_STORAGE_KEY = "aircopy.self.id.v1";
+    const CHAT_HISTORY_MAX = 300;
+
     const appState = {
         mode: "qr",
         scannerRunning: false,
@@ -11,9 +16,14 @@
         smartCanvas: null,
         smartCtx: null,
         localPeerId: "",
+        localPersistentId: "",
+        remotePersistentId: "",
+        currentConversationId: "",
         peerName: "",
         connected: false,
         unreadCount: 0,
+        chatHistory: [],
+        conversations: {},
         isMobileLayout: false,
         sidebarCollapsedDesktop: false,
         sessionOpenMobile: false,
@@ -33,6 +43,7 @@
         scanTrigger: document.getElementById("scan-trigger"),
         regenOffer: document.getElementById("regen-offer"),
         enlargeQr: document.getElementById("enlarge-qr"),
+        backToChat: document.getElementById("back-to-chat"),
         qrModal: document.getElementById("qr-modal"),
         qrModalClose: document.getElementById("qr-modal-close"),
         qrcodeLarge: document.getElementById("qrcode-large"),
@@ -45,6 +56,7 @@
         peerSessionUnread: document.getElementById("peer-session-unread"),
         sessionToggle: document.getElementById("session-toggle"),
         sessionBackdrop: document.getElementById("session-backdrop"),
+        openConnector: document.getElementById("open-connector"),
         chatInterfaceRoot: document.getElementById("chat-interface"),
         displayName: document.getElementById("display-name"),
         statusText: document.getElementById("status-text"),
@@ -60,7 +72,10 @@
         },
         onConnected: (info) => {
             if (info && info.peerName) {
-                setPeerName(info.peerName);
+                setPeerName(info.peerName, { persist: false });
+            }
+            if (info) {
+                bindConversation(info.peerPersistentId || "", info.peerName || appState.peerName || "", info.peerId || "");
             }
             setConnectionState(true);
             clearUnread();
@@ -69,7 +84,8 @@
         },
         onConnectionClosed: () => {
             appendMessage("system", "连接已断开。", true);
-            setPeerName("");
+            setPeerName("", { persist: false });
+            appState.remotePersistentId = "";
             setConnectionState(false);
             setStatus("连接已断开，可重新扫码连接。");
         },
@@ -77,6 +93,10 @@
             setStatus(`连接异常：${toErrorMessage(error)}`);
         },
         onMessage: (message) => {
+            const remotePersistentId = message && message.persistentId ? String(message.persistentId) : "";
+            if (remotePersistentId) {
+                bindConversation(remotePersistentId, message.name || appState.peerName || "", message.peerId || "");
+            }
             if (message.type === "hello") {
                 const remoteName = message.name || appState.peerName || "对方";
                 setPeerName(remoteName);
@@ -99,9 +119,11 @@
     init();
 
     function init() {
+        ensureLocalPersistentId();
         const seed = Math.floor(Math.random() * 9000 + 1000);
         elements.displayName.value = `用户_${seed}`;
         peerManager.setDisplayName(getDisplayName());
+        peerManager.setPersistentId(appState.localPersistentId);
         elements.displayName.addEventListener("input", () => {
             peerManager.setDisplayName(getDisplayName());
         });
@@ -122,6 +144,9 @@
         elements.regenOffer.addEventListener("click", () => {
             regenerateOffer();
         });
+        elements.backToChat.addEventListener("click", () => {
+            showChatScreen();
+        });
 
         elements.enlargeQr.addEventListener("click", openQrModal);
         elements.qrcode.addEventListener("dblclick", openQrModal);
@@ -134,6 +159,9 @@
         elements.sessionToggle.addEventListener("click", toggleSessionPanel);
         elements.sessionBackdrop.addEventListener("click", () => {
             setSessionPanelOpen(false);
+        });
+        elements.openConnector.addEventListener("click", () => {
+            showConnectorScreen();
         });
         elements.sessionList.addEventListener("click", () => {
             clearUnread();
@@ -166,6 +194,7 @@
 
         updateLayoutMode();
         setConnectionState(false);
+        loadPersistedChatState();
         const isMobile = /Android|webOS|iPhone|iPod|iPad|Mobile/i.test(navigator.userAgent);
         setMode(isMobile ? "scanner" : "qr", { force: true });
     }
@@ -240,6 +269,183 @@
             elements.chatInterfaceRoot.classList.remove("session-open");
             elements.chatInterfaceRoot.classList.toggle("sidebar-collapsed", appState.sidebarCollapsedDesktop);
         }
+    }
+
+    function showConnectorScreen() {
+        elements.chatInterface.classList.add("hidden");
+        elements.connectionSetup.classList.remove("hidden");
+        elements.backToChat.classList.toggle("hidden", !appState.connected);
+        const preferred = appState.isMobileLayout ? "scanner" : "qr";
+        setMode(preferred, { force: true });
+    }
+
+    function showChatScreen() {
+        elements.connectionSetup.classList.add("hidden");
+        elements.chatInterface.classList.remove("hidden");
+        elements.backToChat.classList.add("hidden");
+        clearUnread();
+    }
+
+    function ensureLocalPersistentId() {
+        let persistentId = "";
+        try {
+            persistentId = String(localStorage.getItem(SELF_ID_STORAGE_KEY) || "").trim();
+        } catch (_error) {
+            // Ignore storage failures and fallback to runtime ID.
+        }
+        if (!persistentId) {
+            persistentId = createPersistentId();
+            try {
+                localStorage.setItem(SELF_ID_STORAGE_KEY, persistentId);
+            } catch (_error) {
+                // Ignore storage failures and continue with runtime ID.
+            }
+        }
+        appState.localPersistentId = persistentId;
+    }
+
+    function createPersistentId() {
+        if (window.crypto && typeof window.crypto.getRandomValues === "function") {
+            const bytes = new Uint8Array(12);
+            window.crypto.getRandomValues(bytes);
+            let hex = "";
+            for (let i = 0; i < bytes.length; i += 1) {
+                hex += bytes[i].toString(16).padStart(2, "0");
+            }
+            return `p${hex}`;
+        }
+        return `p${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`;
+    }
+
+    function bindConversation(remotePersistentId, peerName = "", fallbackPeerId = "") {
+        const normalizedPid = String(remotePersistentId || "").trim();
+        let targetId = normalizedPid ? `pid:${normalizedPid}` : "";
+        const fallbackId = String(fallbackPeerId || "").trim();
+        if (!targetId && fallbackId) {
+            targetId = `peer:${fallbackId}`;
+        }
+        if (!targetId) {
+            return;
+        }
+
+        if (normalizedPid) {
+            migrateTempConversationToPersistent(targetId, fallbackId);
+            appState.remotePersistentId = normalizedPid;
+        }
+
+        const conversation = ensureConversation(targetId);
+        if (peerName) {
+            conversation.peerName = String(peerName);
+        }
+
+        const switched = appState.currentConversationId !== targetId;
+        appState.currentConversationId = targetId;
+        appState.chatHistory = conversation.messages.slice(-CHAT_HISTORY_MAX);
+        appState.unreadCount = Math.max(0, Number(conversation.unreadCount || 0));
+        setPeerName(conversation.peerName || peerName || "", { persist: false });
+
+        if (switched || elements.chatMessages.dataset.inited) {
+            renderHistoryFromState();
+        }
+        if (isChatActive()) {
+            clearUnread();
+        } else {
+            renderUnread();
+        }
+        persistChatState();
+    }
+
+    function migrateTempConversationToPersistent(targetId, fallbackPeerId) {
+        const tempKeys = [];
+        if (fallbackPeerId) {
+            tempKeys.push(`peer:${fallbackPeerId}`);
+        }
+        if (appState.currentConversationId && appState.currentConversationId.startsWith("peer:")) {
+            tempKeys.push(appState.currentConversationId);
+        }
+        let targetConversation = ensureConversation(targetId);
+        for (let i = 0; i < tempKeys.length; i += 1) {
+            const tempId = tempKeys[i];
+            if (!tempId || tempId === targetId || !appState.conversations[tempId]) {
+                continue;
+            }
+            const tempConversation = appState.conversations[tempId];
+            targetConversation.messages = mergeMessages(targetConversation.messages, tempConversation.messages);
+            targetConversation.unreadCount = Math.max(
+                Number(targetConversation.unreadCount || 0),
+                Number(tempConversation.unreadCount || 0)
+            );
+            if (!targetConversation.peerName && tempConversation.peerName) {
+                targetConversation.peerName = tempConversation.peerName;
+            }
+            delete appState.conversations[tempId];
+        }
+    }
+
+    function mergeMessages(baseMessages, extraMessages) {
+        const merged = []
+            .concat(Array.isArray(baseMessages) ? baseMessages : [])
+            .concat(Array.isArray(extraMessages) ? extraMessages : []);
+        if (merged.length <= CHAT_HISTORY_MAX) {
+            return merged;
+        }
+        return merged.slice(-CHAT_HISTORY_MAX);
+    }
+
+    function ensureConversation(conversationId) {
+        const id = String(conversationId || "").trim();
+        if (!id) {
+            return null;
+        }
+        if (!appState.conversations[id]) {
+            appState.conversations[id] = {
+                id,
+                peerName: "",
+                unreadCount: 0,
+                messages: []
+            };
+        }
+        return appState.conversations[id];
+    }
+
+    function ensureActiveConversation() {
+        if (appState.currentConversationId) {
+            return ensureConversation(appState.currentConversationId);
+        }
+        const fallbackId = appState.remotePersistentId ? `pid:${appState.remotePersistentId}` : `local:${appState.localPersistentId}`;
+        appState.currentConversationId = fallbackId;
+        return ensureConversation(fallbackId);
+    }
+
+    function syncConversationFromState() {
+        if (
+            !appState.currentConversationId &&
+            !appState.remotePersistentId &&
+            appState.chatHistory.length === 0 &&
+            !appState.peerName &&
+            Number(appState.unreadCount || 0) === 0
+        ) {
+            return;
+        }
+        const conversation = ensureActiveConversation();
+        if (!conversation) {
+            return;
+        }
+        conversation.peerName = appState.peerName || conversation.peerName || "";
+        conversation.unreadCount = Math.max(0, Number(appState.unreadCount || 0));
+        conversation.messages = appState.chatHistory.slice(-CHAT_HISTORY_MAX).map((msg) => ({
+            from: msg.from,
+            text: msg.text,
+            isSystem: Boolean(msg.isSystem),
+            timeText: msg.timeText
+        }));
+    }
+
+    function isChatActive() {
+        if (document.hidden) {
+            return false;
+        }
+        return !elements.chatInterface.classList.contains("hidden");
     }
 
     async function ensurePeerReady() {
@@ -783,20 +989,42 @@
     function enterChatInterface() {
         closeQrModal();
         setSessionPanelOpen(false);
-        elements.connectionSetup.classList.add("hidden");
-        elements.chatInterface.classList.remove("hidden");
+        showChatScreen();
         if (!elements.chatMessages.dataset.inited) {
             elements.chatMessages.dataset.inited = "1";
-            appendMessage("system", "连接成功，等待双方 hello 消息…", true);
+            if (appState.chatHistory.length > 0) {
+                renderHistoryFromState();
+            } else {
+                appendMessage("system", "连接成功，等待双方 hello 消息…", true);
+            }
         }
     }
 
-    function appendMessage(from, text, isSystem = false) {
+    function appendMessage(from, text, isSystem = false, options = {}) {
+        ensureActiveConversation();
+        const message = {
+            from,
+            text: String(text || ""),
+            isSystem: Boolean(isSystem || from === "system"),
+            timeText: options.timeText || formatNowHHMM()
+        };
+        renderMessage(message);
+        if (options.persist !== false) {
+            appState.chatHistory.push(message);
+            if (appState.chatHistory.length > CHAT_HISTORY_MAX) {
+                appState.chatHistory = appState.chatHistory.slice(-CHAT_HISTORY_MAX);
+            }
+            syncConversationFromState();
+            persistChatState();
+        }
+    }
+
+    function renderMessage(message) {
         const div = document.createElement("div");
         div.className = "message";
-        if (isSystem || from === "system") {
+        if (message.isSystem || message.from === "system") {
             div.classList.add("system");
-        } else if (from === "me") {
+        } else if (message.from === "me") {
             div.classList.add("me");
         } else {
             div.classList.add("peer");
@@ -804,16 +1032,23 @@
 
         const timestamp = document.createElement("span");
         timestamp.className = "message-time";
-        timestamp.textContent = formatNowHHMM();
+        timestamp.textContent = message.timeText || formatNowHHMM();
         div.appendChild(timestamp);
 
         const body = document.createElement("span");
         body.className = "message-body";
-        body.textContent = text;
+        body.textContent = message.text || "";
         div.appendChild(body);
 
         elements.chatMessages.appendChild(div);
         elements.chatMessages.scrollTop = elements.chatMessages.scrollHeight;
+    }
+
+    function renderHistoryFromState() {
+        elements.chatMessages.innerHTML = "";
+        for (let i = 0; i < appState.chatHistory.length; i += 1) {
+            renderMessage(appState.chatHistory[i]);
+        }
     }
 
     function formatNowHHMM() {
@@ -848,21 +1083,25 @@
         peerManager.destroy();
         appState.localPeerId = "";
         appState.peerName = "";
+        appState.remotePersistentId = "";
+        appState.currentConversationId = "";
         appState.currentQrText = "";
         appState.handlingScan = false;
         appState.sidebarCollapsedDesktop = false;
+        appState.chatHistory = [];
+        appState.unreadCount = 0;
         elements.chatMessages.innerHTML = "";
         delete elements.chatMessages.dataset.inited;
         setConnectionState(false);
-        clearUnread();
-        setPeerName("");
+        renderUnread();
+        setPeerName("", { persist: false });
         elements.chatInterface.classList.add("hidden");
         elements.connectionSetup.classList.remove("hidden");
         await setMode("qr", { force: true });
         setStatus("已退出会话，请重新扫码连接。");
     }
 
-    function setPeerName(name) {
+    function setPeerName(name, options = {}) {
         appState.peerName = String(name || "").trim();
         const viewName = appState.peerName || "当前会话";
         if (elements.chatTitle) {
@@ -870,6 +1109,10 @@
         }
         if (elements.peerSessionName) {
             elements.peerSessionName.textContent = viewName;
+        }
+        if (options.persist !== false) {
+            syncConversationFromState();
+            persistChatState();
         }
     }
 
@@ -904,9 +1147,8 @@
         if (!isPeerMessage) {
             return;
         }
-        const sidebarClosed = appState.isMobileLayout ? !appState.sessionOpenMobile : appState.sidebarCollapsedDesktop;
-        const shouldCount = document.hidden || sidebarClosed;
-        if (!shouldCount) {
+        if (isChatActive()) {
+            clearUnread();
             return;
         }
         appState.unreadCount += 1;
@@ -918,6 +1160,7 @@
             return;
         }
         appState.unreadCount = 0;
+        syncConversationFromState();
         renderUnread();
     }
 
@@ -932,6 +1175,8 @@
             elements.peerSessionUnread.textContent = view;
             elements.peerSessionUnread.classList.toggle("hidden", count <= 0);
         }
+        syncConversationFromState();
+        persistChatState();
     }
 
     function getDisplayName() {
@@ -976,6 +1221,116 @@
         } catch (_jsonError) {
             return String(error);
         }
+    }
+
+    function loadPersistedChatState() {
+        const sanitizeMessages = (messages) => {
+            if (!Array.isArray(messages)) {
+                return [];
+            }
+            return messages
+                .map((item) => ({
+                    from: item && item.from ? String(item.from) : "system",
+                    text: item && item.text ? String(item.text) : "",
+                    isSystem: Boolean(item && item.isSystem),
+                    timeText: item && item.timeText ? String(item.timeText) : formatNowHHMM()
+                }))
+                .slice(-CHAT_HISTORY_MAX);
+        };
+        try {
+            const raw = localStorage.getItem(CHAT_STORAGE_KEY) || localStorage.getItem(LEGACY_CHAT_STORAGE_KEY);
+            if (!raw) {
+                return;
+            }
+            const parsed = JSON.parse(raw);
+            if (!parsed) {
+                return;
+            }
+
+            if (parsed.version === 3 && parsed.conversations && typeof parsed.conversations === "object") {
+                const nextConversations = {};
+                const ids = Object.keys(parsed.conversations);
+                for (let i = 0; i < ids.length; i += 1) {
+                    const id = ids[i];
+                    const item = parsed.conversations[id];
+                    nextConversations[id] = {
+                        id,
+                        peerName: item && item.peerName ? String(item.peerName) : "",
+                        unreadCount: Math.max(0, Number((item && item.unreadCount) || 0)),
+                        messages: sanitizeMessages(item && item.messages)
+                    };
+                }
+                appState.conversations = nextConversations;
+                const preferredId = parsed.currentConversationId ? String(parsed.currentConversationId) : "";
+                const fallbackId = Object.keys(appState.conversations)[0] || "";
+                appState.currentConversationId = preferredId && appState.conversations[preferredId] ? preferredId : fallbackId;
+            } else if (Array.isArray(parsed.messages)) {
+                const legacyConversationId = "legacy:single";
+                appState.conversations = {
+                    [legacyConversationId]: {
+                        id: legacyConversationId,
+                        peerName: parsed.peerName ? String(parsed.peerName) : "",
+                        unreadCount: Math.max(0, Number(parsed.unreadCount || 0)),
+                        messages: sanitizeMessages(parsed.messages)
+                    }
+                };
+                appState.currentConversationId = legacyConversationId;
+            } else {
+                return;
+            }
+
+            const current = ensureConversation(appState.currentConversationId);
+            if (current) {
+                appState.chatHistory = current.messages.slice(-CHAT_HISTORY_MAX);
+                appState.unreadCount = Math.max(0, Number(current.unreadCount || 0));
+                setPeerName(current.peerName || "", { persist: false });
+            } else {
+                appState.chatHistory = [];
+                appState.unreadCount = 0;
+                setPeerName("", { persist: false });
+            }
+            renderUnread();
+        } catch (_error) {
+            // Ignore malformed local cache and continue.
+        }
+    }
+
+    function persistChatState() {
+        try {
+            syncConversationFromState();
+            const ids = Object.keys(appState.conversations);
+            const serializedConversations = {};
+            for (let i = 0; i < ids.length; i += 1) {
+                const id = ids[i];
+                const conversation = appState.conversations[id];
+                serializedConversations[id] = {
+                    peerName: conversation.peerName || "",
+                    unreadCount: Math.max(0, Number(conversation.unreadCount || 0)),
+                    messages: sanitizeForStorage(conversation.messages)
+                };
+            }
+            const payload = {
+                version: 3,
+                selfPersistentId: appState.localPersistentId,
+                currentConversationId: appState.currentConversationId,
+                conversations: serializedConversations
+            };
+            localStorage.setItem(CHAT_STORAGE_KEY, JSON.stringify(payload));
+        } catch (_error) {
+            // Ignore storage failures (private mode/quota).
+        }
+    }
+
+    function sanitizeForStorage(messages) {
+        if (!Array.isArray(messages)) {
+            return [];
+        }
+        return messages.slice(-CHAT_HISTORY_MAX).map((msg) => ({
+            from: msg.from,
+            text: msg.text,
+            isSystem: Boolean(msg.isSystem),
+            timeText: msg.timeText
+        }));
     }
 
     window.addEventListener("beforeunload", () => {

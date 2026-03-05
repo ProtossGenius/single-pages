@@ -7,6 +7,7 @@ class PeerManager {
         this.connection = null;
         this.localPeerId = "";
         this.displayName = "匿名用户";
+        this.persistentId = "";
         this.helloSent = false;
         this.remoteDisplayName = "";
     }
@@ -70,7 +71,10 @@ class PeerManager {
 
         const conn = this.peer.connect(remoteId, {
             reliable: true,
-            metadata: { name: this.displayName }
+            metadata: {
+                name: this.displayName,
+                pid: this.persistentId
+            }
         });
         this._attachConnection(conn, false);
     }
@@ -82,7 +86,8 @@ class PeerManager {
         this.connection.send({
             t: "text",
             b: text,
-            name: this.displayName
+            name: this.displayName,
+            pid: this.persistentId
         });
     }
 
@@ -108,6 +113,10 @@ class PeerManager {
         this.displayName = name || "匿名用户";
     }
 
+    setPersistentId(id) {
+        this.persistentId = String(id || "").trim();
+    }
+
     _attachConnection(conn, isIncoming) {
         if (!conn) {
             return;
@@ -118,13 +127,15 @@ class PeerManager {
         this.connection = conn;
         this.helloSent = false;
         this.remoteDisplayName = (conn.metadata && conn.metadata.name) ? String(conn.metadata.name) : "";
+        const remotePersistentId = (conn.metadata && conn.metadata.pid) ? String(conn.metadata.pid) : "";
 
         conn.on("open", () => {
             if (this.handlers.onConnected) {
                 this.handlers.onConnected({
                     peerId: conn.peer,
                     isIncoming,
-                    peerName: this.remoteDisplayName
+                    peerName: this.remoteDisplayName,
+                    peerPersistentId: remotePersistentId
                 });
             }
             this._sendHello();
@@ -159,7 +170,8 @@ class PeerManager {
         this.connection.send({
             t: "hello",
             b: "hello",
-            name: this.displayName
+            name: this.displayName,
+            pid: this.persistentId
         });
     }
 
@@ -176,6 +188,7 @@ class PeerManager {
         const body = payload && payload.b ? String(payload.b) : "";
         const type = payload && payload.t ? String(payload.t) : "text";
         const name = payload && payload.name ? String(payload.name) : "";
+        const persistentId = payload && payload.pid ? String(payload.pid) : "";
         if (name) {
             this.remoteDisplayName = name;
         }
@@ -185,7 +198,9 @@ class PeerManager {
                 from: "peer",
                 type,
                 body,
-                name
+                name,
+                persistentId,
+                peerId: this.connection ? this.connection.peer : ""
             });
         }
     }
