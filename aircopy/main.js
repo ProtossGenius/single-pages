@@ -1812,8 +1812,7 @@
         const offer = appState.incomingFileOffer;
         closeFileOfferModal();
         peerManager.rejectIncomingFile(offer.transferId, "用户拒绝");
-        peerManager.closeConnection();
-        setStatus("已拒绝文件并断开连接。");
+        setStatus("已取消本次文件接收，连接保持不变。");
     }
 
     async function chooseWritableForIncomingFile(offer) {
