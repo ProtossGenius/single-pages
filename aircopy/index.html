@@ -76,7 +76,6 @@
                         <span id="chat-unread" class="unread-badge hidden">0</span>
                     </button>
                     <div class="header-actions">
-                        <button id="join-group" class="hidden">加入对方群聊</button>
                         <button id="open-connector">连接更多</button>
                         <button id="exit-chat">退出</button>
                     </div>
@@ -89,9 +88,12 @@
                 <div class="chat-input-area">
                     <div class="input-actions">
                         <button id="send-file" disabled>文件</button>
-                        <button id="send-emoji" disabled>😊</button>
+                        <button id="send-emoji" disabled>表情</button>
+                        <button id="record-voice" disabled>语音</button>
                         <button id="video-call" disabled>视频</button>
+                        <input id="file-input" type="file" class="hidden" />
                     </div>
+                    <div id="emoji-panel" class="emoji-panel hidden" aria-label="表情面板"></div>
                     <div class="input-wrapper">
                         <textarea id="message-input" placeholder="输入消息..."></textarea>
                         <button id="send-btn">发送</button>
@@ -106,6 +108,29 @@
     <div id="qr-modal" class="qr-modal hidden">
         <button id="qr-modal-close" class="qr-modal-close">关闭</button>
         <div id="qrcode-large" class="qrcode-large"></div>
+    </div>
+
+    <div id="video-modal" class="video-modal hidden">
+        <div class="video-card">
+            <div class="video-card-header">
+                <strong>视频通话</strong>
+                <span id="video-status">未开始</span>
+            </div>
+            <div class="video-grid">
+                <div class="video-pane">
+                    <span>对方画面</span>
+                    <video id="remote-video" autoplay playsinline></video>
+                </div>
+                <div class="video-pane">
+                    <span>本地画面</span>
+                    <video id="local-video" autoplay playsinline muted></video>
+                </div>
+            </div>
+            <div class="video-actions">
+                <button id="hangup-video" class="danger">挂断</button>
+                <button id="close-video-modal" class="secondary">关闭窗口</button>
+            </div>
+        </div>
     </div>
 
     <!-- 引入必要的库 -->

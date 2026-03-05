@@ -374,6 +374,7 @@ body {
     margin-bottom: 10px;
     display: flex;
     gap: 10px;
+    flex-wrap: wrap;
 }
 
 .input-wrapper {
@@ -405,6 +406,14 @@ button:hover {
 
 button.secondary {
     background: #6c757d;
+}
+
+button.danger {
+    background: #dc3545;
+}
+
+button.danger:hover {
+    background: #bd2130;
 }
 
 #exit-chat {
@@ -493,6 +502,107 @@ button.secondary {
     display: none;
 }
 
+.emoji-panel {
+    margin-bottom: 10px;
+    display: grid;
+    grid-template-columns: repeat(8, minmax(0, 1fr));
+    gap: 8px;
+    padding: 10px;
+    border: 1px solid #e5e7eb;
+    border-radius: 8px;
+    background: #f8fafc;
+}
+
+.emoji-btn {
+    border: 1px solid #dbe2ea;
+    background: #fff;
+    color: #111827;
+    padding: 6px 0;
+    font-size: 1.15rem;
+    line-height: 1;
+    border-radius: 6px;
+}
+
+.emoji-btn:hover {
+    background: #eef2ff;
+}
+
+.message.file .message-body,
+.message.voice .message-body {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.attachment-link {
+    color: inherit;
+    text-decoration: underline;
+    text-underline-offset: 2px;
+}
+
+.message.peer .attachment-link,
+.message.system .attachment-link {
+    color: #1d4ed8;
+}
+
+.voice-audio {
+    width: min(320px, 100%);
+}
+
+.video-modal {
+    position: fixed;
+    inset: 0;
+    z-index: 11000;
+    background: rgba(17, 24, 39, 0.78);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+}
+
+.video-card {
+    width: min(920px, 100%);
+    background: #fff;
+    border-radius: 12px;
+    padding: 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.video-card-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 10px;
+}
+
+.video-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+}
+
+.video-pane {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.video-pane video {
+    width: 100%;
+    aspect-ratio: 16 / 9;
+    border-radius: 8px;
+    background: #111827;
+    object-fit: cover;
+}
+
+.video-actions {
+    display: flex;
+    gap: 10px;
+    justify-content: flex-end;
+}
+
 @media (max-width: 760px) {
     #app {
         width: 100vw;
@@ -554,5 +664,13 @@ button.secondary {
 
     .chat-title-text {
         font-size: 1rem;
+    }
+
+    .emoji-panel {
+        grid-template-columns: repeat(6, minmax(0, 1fr));
+    }
+
+    .video-grid {
+        grid-template-columns: 1fr;
     }
 }

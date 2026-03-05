@@ -3,6 +3,7 @@
     const LEGACY_CHAT_STORAGE_KEY = "aircopy.chat.state.v2";
     const SELF_ID_STORAGE_KEY = "aircopy.self.id.v1";
     const CHAT_HISTORY_MAX = 300;
+    const EMOJI_SET = ["😀", "😁", "😂", "🤣", "😊", "😍", "😘", "😎", "🤔", "😭", "😡", "👍", "👎", "🙏", "👏", "🎉"];
 
     const appState = {
         mode: "qr",
@@ -27,6 +28,13 @@
         isMobileLayout: false,
         sidebarCollapsedDesktop: false,
         sessionOpenMobile: false,
+        recordingVoice: false,
+        voiceRecorder: null,
+        voiceChunks: [],
+        voiceStream: null,
+        voiceSendAfterStop: true,
+        videoCalling: false,
+        objectUrls: [],
         modeTask: Promise.resolve(),
         scannerTask: Promise.resolve()
     };
@@ -63,7 +71,19 @@
         chatMessages: document.getElementById("chat-messages"),
         messageInput: document.getElementById("message-input"),
         sendBtn: document.getElementById("send-btn"),
-        exitChat: document.getElementById("exit-chat")
+        exitChat: document.getElementById("exit-chat"),
+        sendFile: document.getElementById("send-file"),
+        sendEmoji: document.getElementById("send-emoji"),
+        recordVoice: document.getElementById("record-voice"),
+        videoCall: document.getElementById("video-call"),
+        fileInput: document.getElementById("file-input"),
+        emojiPanel: document.getElementById("emoji-panel"),
+        videoModal: document.getElementById("video-modal"),
+        videoStatus: document.getElementById("video-status"),
+        localVideo: document.getElementById("local-video"),
+        remoteVideo: document.getElementById("remote-video"),
+        hangupVideo: document.getElementById("hangup-video"),
+        closeVideoModal: document.getElementById("close-video-modal")
     };
 
     const peerManager = new PeerManager({
@@ -87,6 +107,7 @@
             setPeerName("", { persist: false });
             appState.remotePersistentId = "";
             setConnectionState(false);
+            resetVideoUI("未开始");
             setStatus("连接已断开，可重新扫码连接。");
         },
         onError: (error) => {
@@ -106,6 +127,74 @@
             }
             appendMessage(message.from, message.body, message.type === "hello");
             markUnreadIfNeeded(message.from === "peer");
+        },
+        onFileReceived: (payload) => {
+            appendAttachmentMessage("peer", payload);
+            markUnreadIfNeeded(true);
+            if (payload.kind === "voice") {
+                setStatus(`收到语音：${payload.fileName}`);
+            } else {
+                setStatus(`收到文件：${payload.fileName}`);
+            }
+        },
+        onIncomingCall: async (info) => {
+            const display = info && info.metadata && info.metadata.name ? String(info.metadata.name) : (appState.peerName || "对方");
+            let accepted = false;
+            try {
+                accepted = window.confirm(`${display} 发起视频通话，是否接听？`);
+            } catch (_error) {
+                accepted = false;
+            }
+            if (!accepted) {
+                peerManager.rejectIncomingCall();
+                setStatus("已拒绝视频通话。");
+                return;
+            }
+            try {
+                await peerManager.acceptIncomingCall({ video: true, audio: true });
+                appState.videoCalling = true;
+                openVideoModal();
+                updateVideoButton();
+                setVideoStatus("连接中...");
+            } catch (error) {
+                setStatus(`接听失败：${toErrorMessage(error)}`);
+                peerManager.hangupVideoCall();
+            }
+        },
+        onLocalStream: (stream) => {
+            elements.localVideo.srcObject = stream || null;
+        },
+        onRemoteStream: (stream) => {
+            elements.remoteVideo.srcObject = stream || null;
+            if (stream) {
+                openVideoModal();
+            }
+        },
+        onCallState: (state) => {
+            const next = state && state.state ? state.state : "idle";
+            if (next === "calling") {
+                setVideoStatus("呼叫中...");
+                appState.videoCalling = true;
+            } else if (next === "connecting") {
+                setVideoStatus("连接中...");
+                appState.videoCalling = true;
+            } else if (next === "connected") {
+                setVideoStatus("通话中");
+                appState.videoCalling = true;
+            } else if (next === "rejected") {
+                setVideoStatus("对方未接听");
+                appState.videoCalling = false;
+            } else if (next === "error") {
+                setVideoStatus("通话异常");
+                appState.videoCalling = false;
+            } else {
+                setVideoStatus("未开始");
+                appState.videoCalling = false;
+                if (elements.videoModal && !elements.videoModal.classList.contains("hidden")) {
+                    closeVideoModal();
+                }
+            }
+            updateVideoButton();
         },
         onStateChange: (state) => {
             if (state === "disconnected") {
@@ -174,6 +263,8 @@
             if (event.key === "Escape") {
                 closeQrModal();
                 setSessionPanelOpen(false);
+                closeEmojiPanel();
+                closeVideoModal();
             }
         });
         window.addEventListener("resize", updateLayoutMode);
@@ -185,15 +276,48 @@
 
         elements.sendBtn.addEventListener("click", sendCurrentMessage);
         elements.exitChat.addEventListener("click", resetToSetup);
+        elements.sendFile.addEventListener("click", () => {
+            if (!appState.connected) {
+                setStatus("尚未连接，当前无法发送文件。");
+                return;
+            }
+            elements.fileInput.click();
+        });
+        elements.fileInput.addEventListener("change", onFileInputChanged);
+        elements.sendEmoji.addEventListener("click", toggleEmojiPanel);
+        elements.recordVoice.addEventListener("click", toggleVoiceRecording);
+        elements.videoCall.addEventListener("click", toggleVideoCall);
+        elements.hangupVideo.addEventListener("click", () => {
+            peerManager.hangupVideoCall();
+            appState.videoCalling = false;
+            updateVideoButton();
+        });
+        elements.closeVideoModal.addEventListener("click", closeVideoModal);
         elements.messageInput.addEventListener("keydown", (event) => {
             if (event.key === "Enter" && !event.shiftKey) {
                 event.preventDefault();
                 sendCurrentMessage();
             }
         });
+        document.addEventListener("click", (event) => {
+            if (!elements.emojiPanel || elements.emojiPanel.classList.contains("hidden")) {
+                return;
+            }
+            const target = event.target;
+            if (
+                target instanceof HTMLElement &&
+                target.closest &&
+                (target.closest("#emoji-panel") || target.closest("#send-emoji"))
+            ) {
+                return;
+            }
+            closeEmojiPanel();
+        });
 
         updateLayoutMode();
+        initEmojiPanel();
         setConnectionState(false);
+        updateVideoButton();
         loadPersistedChatState();
         const isMobile = /Android|webOS|iPhone|iPod|iPad|Mobile/i.test(navigator.userAgent);
         setMode(isMobile ? "scanner" : "qr", { force: true });
@@ -437,7 +561,12 @@
             from: msg.from,
             text: msg.text,
             isSystem: Boolean(msg.isSystem),
-            timeText: msg.timeText
+            timeText: msg.timeText,
+            kind: msg.kind || "text",
+            fileName: msg.fileName || "",
+            fileSize: Math.max(0, Number(msg.fileSize || 0)),
+            mimeType: msg.mimeType || "",
+            blobUrl: msg.blobUrl || ""
         }));
     }
 
@@ -1000,13 +1129,299 @@
         }
     }
 
+    function initEmojiPanel() {
+        if (!elements.emojiPanel) {
+            return;
+        }
+        elements.emojiPanel.innerHTML = "";
+        for (let i = 0; i < EMOJI_SET.length; i += 1) {
+            const emoji = EMOJI_SET[i];
+            const btn = document.createElement("button");
+            btn.type = "button";
+            btn.className = "emoji-btn";
+            btn.textContent = emoji;
+            btn.setAttribute("aria-label", `插入表情 ${emoji}`);
+            btn.addEventListener("click", () => {
+                insertTextAtCursor(elements.messageInput, emoji);
+                elements.messageInput.focus();
+            });
+            elements.emojiPanel.appendChild(btn);
+        }
+    }
+
+    function toggleEmojiPanel() {
+        if (!appState.connected) {
+            setStatus("尚未连接，当前无法发送表情。");
+            return;
+        }
+        elements.emojiPanel.classList.toggle("hidden");
+    }
+
+    function closeEmojiPanel() {
+        elements.emojiPanel.classList.add("hidden");
+    }
+
+    function insertTextAtCursor(textarea, text) {
+        if (!textarea) {
+            return;
+        }
+        const start = Number(textarea.selectionStart || 0);
+        const end = Number(textarea.selectionEnd || 0);
+        const current = textarea.value || "";
+        textarea.value = `${current.slice(0, start)}${text}${current.slice(end)}`;
+        const cursor = start + text.length;
+        textarea.selectionStart = cursor;
+        textarea.selectionEnd = cursor;
+    }
+
+    async function onFileInputChanged(event) {
+        const input = event && event.target ? event.target : null;
+        const files = input && input.files ? input.files : null;
+        const file = files && files.length > 0 ? files[0] : null;
+        if (!file) {
+            return;
+        }
+        try {
+            const transfer = await peerManager.sendFile(file, { kind: "file" });
+            appendAttachmentMessage("me", {
+                kind: "file",
+                fileName: transfer.fileName,
+                mimeType: transfer.mimeType,
+                size: transfer.size,
+                blob: file
+            });
+            setStatus(`文件已发送：${transfer.fileName}`);
+        } catch (error) {
+            setStatus(`文件发送失败：${toErrorMessage(error)}`);
+        } finally {
+            if (input) {
+                input.value = "";
+            }
+        }
+    }
+
+    function appendAttachmentMessage(from, payload) {
+        const kind = payload && payload.kind === "voice" ? "voice" : "file";
+        const fileName = payload && payload.fileName ? String(payload.fileName) : (kind === "voice" ? "语音" : "文件");
+        const size = Math.max(0, Number((payload && payload.size) || 0));
+        const mimeType = payload && payload.mimeType ? String(payload.mimeType) : "application/octet-stream";
+        const blob = payload && payload.blob ? payload.blob : null;
+        const blobUrl = blob ? createObjectUrl(blob) : "";
+        const prefix = kind === "voice" ? "语音" : "文件";
+        const text = `${prefix}：${fileName}${size > 0 ? ` (${formatFileSize(size)})` : ""}`;
+        appendMessage(from, text, false, {
+            kind,
+            fileName,
+            fileSize: size,
+            mimeType,
+            blobUrl
+        });
+    }
+
+    function createObjectUrl(blob) {
+        if (!blob || typeof URL === "undefined" || typeof URL.createObjectURL !== "function") {
+            return "";
+        }
+        const url = URL.createObjectURL(blob);
+        appState.objectUrls.push(url);
+        return url;
+    }
+
+    function releaseObjectUrls() {
+        if (typeof URL === "undefined" || typeof URL.revokeObjectURL !== "function") {
+            appState.objectUrls = [];
+            return;
+        }
+        while (appState.objectUrls.length > 0) {
+            const url = appState.objectUrls.pop();
+            try {
+                URL.revokeObjectURL(url);
+            } catch (_error) {
+                // Ignore invalid object URLs.
+            }
+        }
+    }
+
+    function formatFileSize(size) {
+        if (!size || size < 1024) {
+            return `${size || 0} B`;
+        }
+        if (size < 1024 * 1024) {
+            return `${(size / 1024).toFixed(1)} KB`;
+        }
+        return `${(size / (1024 * 1024)).toFixed(2)} MB`;
+    }
+
+    async function toggleVoiceRecording() {
+        if (!appState.connected) {
+            setStatus("尚未连接，当前无法发送语音。");
+            return;
+        }
+        if (appState.recordingVoice) {
+            await stopVoiceRecording(true);
+            return;
+        }
+        await startVoiceRecording();
+    }
+
+    async function startVoiceRecording() {
+        if (typeof MediaRecorder === "undefined" || !navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+            setStatus("当前浏览器不支持语音录制。");
+            return;
+        }
+        try {
+            const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            const recorder = new MediaRecorder(stream);
+            appState.voiceRecorder = recorder;
+            appState.voiceStream = stream;
+            appState.voiceChunks = [];
+            appState.voiceSendAfterStop = true;
+            appState.recordingVoice = true;
+            updateVoiceButton();
+            setStatus("录音中，再次点击“语音”结束并发送。");
+
+            recorder.ondataavailable = (event) => {
+                if (event.data && event.data.size > 0) {
+                    appState.voiceChunks.push(event.data);
+                }
+            };
+
+            recorder.onstop = async () => {
+                const sendAfterStop = appState.voiceSendAfterStop;
+                const chunks = appState.voiceChunks.slice();
+                appState.voiceChunks = [];
+                appState.recordingVoice = false;
+                appState.voiceRecorder = null;
+                appState.voiceSendAfterStop = true;
+                if (appState.voiceStream) {
+                    appState.voiceStream.getTracks().forEach((track) => track.stop());
+                    appState.voiceStream = null;
+                }
+                updateVoiceButton();
+                if (!sendAfterStop || chunks.length === 0) {
+                    return;
+                }
+                const mimeType = recorder.mimeType || "audio/webm";
+                const blob = new Blob(chunks, { type: mimeType });
+                const fileName = `voice-${Date.now()}.webm`;
+                try {
+                    const transfer = await peerManager.sendFile(blob, { kind: "voice", fileName, mimeType });
+                    appendAttachmentMessage("me", {
+                        kind: "voice",
+                        fileName: transfer.fileName,
+                        mimeType: transfer.mimeType,
+                        size: transfer.size,
+                        blob
+                    });
+                    setStatus("语音已发送。");
+                } catch (error) {
+                    setStatus(`语音发送失败：${toErrorMessage(error)}`);
+                }
+            };
+
+            recorder.start(200);
+        } catch (error) {
+            setStatus(`启动录音失败：${toErrorMessage(error)}`);
+            appState.recordingVoice = false;
+            updateVoiceButton();
+        }
+    }
+
+    async function stopVoiceRecording(sendAfterStop) {
+        if (!appState.voiceRecorder) {
+            return;
+        }
+        appState.voiceSendAfterStop = Boolean(sendAfterStop);
+        try {
+            appState.voiceRecorder.stop();
+        } catch (_error) {
+            appState.recordingVoice = false;
+            updateVoiceButton();
+        }
+    }
+
+    async function toggleVideoCall() {
+        if (!appState.connected) {
+            setStatus("尚未连接，当前无法发起视频通话。");
+            return;
+        }
+        if (appState.videoCalling) {
+            peerManager.hangupVideoCall();
+            appState.videoCalling = false;
+            updateVideoButton();
+            setStatus("已挂断视频通话。");
+            return;
+        }
+        await startVideoCall();
+    }
+
+    async function startVideoCall() {
+        try {
+            await peerManager.startVideoCall({ video: true, audio: true });
+            appState.videoCalling = true;
+            openVideoModal();
+            setVideoStatus("呼叫中...");
+            updateVideoButton();
+        } catch (error) {
+            setStatus(`发起视频通话失败：${toErrorMessage(error)}`);
+            appState.videoCalling = false;
+            updateVideoButton();
+        }
+    }
+
+    function setVideoStatus(text) {
+        if (elements.videoStatus) {
+            elements.videoStatus.textContent = text || "未开始";
+        }
+    }
+
+    function resetVideoUI(statusText) {
+        setVideoStatus(statusText || "未开始");
+        if (elements.localVideo) {
+            elements.localVideo.srcObject = null;
+        }
+        if (elements.remoteVideo) {
+            elements.remoteVideo.srcObject = null;
+        }
+        appState.videoCalling = false;
+        updateVideoButton();
+    }
+
+    function openVideoModal() {
+        elements.videoModal.classList.remove("hidden");
+    }
+
+    function closeVideoModal() {
+        elements.videoModal.classList.add("hidden");
+    }
+
+    function updateVideoButton() {
+        if (!elements.videoCall) {
+            return;
+        }
+        elements.videoCall.textContent = appState.videoCalling ? "挂断视频" : "视频";
+    }
+
+    function updateVoiceButton() {
+        if (!elements.recordVoice) {
+            return;
+        }
+        elements.recordVoice.textContent = appState.recordingVoice ? "停止录音" : "语音";
+    }
+
     function appendMessage(from, text, isSystem = false, options = {}) {
         ensureActiveConversation();
+        const kind = options.kind || "text";
         const message = {
             from,
             text: String(text || ""),
             isSystem: Boolean(isSystem || from === "system"),
-            timeText: options.timeText || formatNowHHMM()
+            timeText: options.timeText || formatNowHHMM(),
+            kind,
+            fileName: options.fileName ? String(options.fileName) : "",
+            fileSize: Math.max(0, Number(options.fileSize || 0)),
+            mimeType: options.mimeType ? String(options.mimeType) : "",
+            blobUrl: options.blobUrl ? String(options.blobUrl) : ""
         };
         renderMessage(message);
         if (options.persist !== false) {
@@ -1022,6 +1437,9 @@
     function renderMessage(message) {
         const div = document.createElement("div");
         div.className = "message";
+        if (message.kind === "file" || message.kind === "voice") {
+            div.classList.add(message.kind);
+        }
         if (message.isSystem || message.from === "system") {
             div.classList.add("system");
         } else if (message.from === "me") {
@@ -1035,13 +1453,44 @@
         timestamp.textContent = message.timeText || formatNowHHMM();
         div.appendChild(timestamp);
 
-        const body = document.createElement("span");
-        body.className = "message-body";
-        body.textContent = message.text || "";
+        const body = renderMessageBody(message);
         div.appendChild(body);
 
         elements.chatMessages.appendChild(div);
         elements.chatMessages.scrollTop = elements.chatMessages.scrollHeight;
+    }
+
+    function renderMessageBody(message) {
+        const body = document.createElement("span");
+        body.className = "message-body";
+        if (message.kind === "file" || message.kind === "voice") {
+            const info = document.createElement("span");
+            info.textContent = message.text || "";
+            body.appendChild(info);
+
+            if (message.blobUrl) {
+                if (message.kind === "voice") {
+                    const audio = document.createElement("audio");
+                    audio.className = "voice-audio";
+                    audio.controls = true;
+                    audio.src = message.blobUrl;
+                    body.appendChild(audio);
+                }
+                const link = document.createElement("a");
+                link.className = "attachment-link";
+                link.href = message.blobUrl;
+                link.download = message.fileName || "aircopy-file";
+                link.textContent = message.kind === "voice" ? "下载语音" : "下载文件";
+                body.appendChild(link);
+            } else {
+                const tip = document.createElement("span");
+                tip.textContent = "（刷新后附件不可恢复）";
+                body.appendChild(tip);
+            }
+            return body;
+        }
+        body.textContent = message.text || "";
+        return body;
     }
 
     function renderHistoryFromState() {
@@ -1078,7 +1527,12 @@
 
     async function resetToSetup() {
         closeQrModal();
+        closeEmojiPanel();
         setSessionPanelOpen(false);
+        appState.videoCalling = false;
+        if (appState.recordingVoice) {
+            await stopVoiceRecording(false);
+        }
         await stopScanIfRunning();
         peerManager.destroy();
         appState.localPeerId = "";
@@ -1093,6 +1547,9 @@
         elements.chatMessages.innerHTML = "";
         delete elements.chatMessages.dataset.inited;
         setConnectionState(false);
+        resetVideoUI("未开始");
+        closeVideoModal();
+        releaseObjectUrls();
         renderUnread();
         setPeerName("", { persist: false });
         elements.chatInterface.classList.add("hidden");
@@ -1121,14 +1578,30 @@
         if (elements.sendBtn) {
             elements.sendBtn.disabled = !appState.connected;
         }
+        if (elements.sendFile) {
+            elements.sendFile.disabled = !appState.connected;
+        }
+        if (elements.sendEmoji) {
+            elements.sendEmoji.disabled = !appState.connected;
+        }
+        if (elements.recordVoice) {
+            elements.recordVoice.disabled = !appState.connected;
+        }
+        if (elements.videoCall) {
+            elements.videoCall.disabled = !appState.connected;
+        }
         if (elements.messageInput) {
             elements.messageInput.disabled = !appState.connected;
-            if (!appState.connected) {
-                elements.messageInput.placeholder = "连接后可发送消息...";
-            } else {
-                elements.messageInput.placeholder = "输入消息...";
+            elements.messageInput.placeholder = appState.connected ? "输入消息..." : "连接后可发送消息...";
+        }
+        if (!appState.connected) {
+            closeEmojiPanel();
+            if (appState.recordingVoice) {
+                stopVoiceRecording(false);
             }
         }
+        updateVoiceButton();
+        updateVideoButton();
 
         const statusText = appState.connected ? "在线" : "离线";
         if (elements.chatStatus) {
@@ -1233,7 +1706,12 @@
                     from: item && item.from ? String(item.from) : "system",
                     text: item && item.text ? String(item.text) : "",
                     isSystem: Boolean(item && item.isSystem),
-                    timeText: item && item.timeText ? String(item.timeText) : formatNowHHMM()
+                    timeText: item && item.timeText ? String(item.timeText) : formatNowHHMM(),
+                    kind: item && item.kind ? String(item.kind) : "text",
+                    fileName: item && item.fileName ? String(item.fileName) : "",
+                    fileSize: Math.max(0, Number((item && item.fileSize) || 0)),
+                    mimeType: item && item.mimeType ? String(item.mimeType) : "",
+                    blobUrl: ""
                 }))
                 .slice(-CHAT_HISTORY_MAX);
         };
@@ -1329,12 +1807,18 @@
             from: msg.from,
             text: msg.text,
             isSystem: Boolean(msg.isSystem),
-            timeText: msg.timeText
+            timeText: msg.timeText,
+            kind: msg.kind || "text",
+            fileName: msg.fileName || "",
+            fileSize: Math.max(0, Number(msg.fileSize || 0)),
+            mimeType: msg.mimeType || ""
         }));
     }
 
     window.addEventListener("beforeunload", () => {
         closeQrModal();
+        closeEmojiPanel();
+        releaseObjectUrls();
         stopScanIfRunning();
         peerManager.destroy();
     });
