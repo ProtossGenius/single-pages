@@ -8,8 +8,40 @@
     const HANG_MODE_STORAGE_KEY = "aircopy.hang.mode.v1";
     const CHAT_HISTORY_MAX = 300;
     const AUTO_RECONNECT_INTERVAL_MS = 5000;
+    const PEER_INIT_TIMEOUT_MS = 20000;
     const EMOJI_SET = ["😀", "😁", "😂", "🤣", "😊", "😍", "😘", "😎", "🤔", "😭", "😡", "👍", "👎", "🙏", "👏", "🎉"];
     const HEART_FLOAT_CHARS = ["❤", "♥", "❥"];
+    const INIT_STAGE_ORDER = ["bootstrap", "location", "dependency", "peer", "qrcode"];
+    const INIT_STAGE_LABELS = {
+        bootstrap: "页面启动",
+        location: "页面地址解析",
+        dependency: "依赖检查",
+        peer: "Peer 节点初始化",
+        qrcode: "二维码生成"
+    };
+    const SCRIPT_LOAD_TIMEOUT_MS = 4500;
+    const DEPENDENCY_CDN_URLS = {
+        peerjs: [
+            "https://cdn.jsdelivr.net/npm/peerjs@1.5.4/dist/peerjs.min.js",
+            "https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js",
+            "./vendor/peerjs.min.js"
+        ],
+        qrcode: [
+            "https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js",
+            "https://unpkg.com/qrcodejs@1.0.0/qrcode.min.js",
+            "./vendor/qrcode.min.js"
+        ],
+        zxing: [
+            "https://cdn.jsdelivr.net/npm/@zxing/browser@0.1.5/umd/zxing-browser.min.js",
+            "https://unpkg.com/@zxing/browser@0.1.5/umd/zxing-browser.min.js",
+            "./vendor/zxing-browser.min.js"
+        ],
+        jsqr: [
+            "https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js",
+            "https://unpkg.com/jsqr@1.4.0/dist/jsQR.min.js",
+            "./vendor/jsQR.min.js"
+        ]
+    };
 
     const appState = {
         mode: "qr",
@@ -58,6 +90,7 @@
         autoReconnectLastFailureAt: 0,
         autoReconnectLastFailureReason: "",
         peerInitTask: null,
+        initStages: createDefaultInitStages(),
         modeTask: Promise.resolve(),
         scannerTask: Promise.resolve()
     };
@@ -121,7 +154,7 @@
         rejectFileOffer: document.getElementById("reject-file-offer")
     };
 
-    const peerManager = new PeerManager({
+    const peerManager = (typeof PeerManager === "function") ? new PeerManager({
         onLocalId: (id) => {
             appState.localPeerId = id;
         },
@@ -275,19 +308,47 @@
                 setStatus("Peer 服务连接断开，尝试刷新二维码重连。");
             }
         }
+    }) : null;
+
+    let codeReader = null;
+
+    window.addEventListener("error", (event) => {
+        const reason = event && event.error ? toErrorMessage(event.error) : (event && event.message ? String(event.message) : "未知脚本错误");
+        console.error("[AirCopy][Fatal]", reason, event && event.error ? event.error : "");
+        setStatus(`初始化失败：${reason}`);
+    });
+    window.addEventListener("unhandledrejection", (event) => {
+        const reason = event && event.reason ? toErrorMessage(event.reason) : "未知 Promise 异常";
+        console.error("[AirCopy][UnhandledPromise]", reason, event && event.reason ? event.reason : "");
+        setStatus(`初始化失败：${reason}`);
     });
 
-    const codeReader = new ZXingBrowser.BrowserQRCodeReader();
+    void init().catch((error) => {
+        console.error("[AirCopy][InitError]", error);
+        setStatus(`初始化失败：${toErrorMessage(error)}`);
+    });
 
-    init();
-
-    function init() {
+    async function init() {
+        appState.initStages = createDefaultInitStages();
+        setInitStage("bootstrap", "running", "入口脚本已启动");
         ensureLocalPersistentId();
         loadPersistedNodeHint();
         loadConnectorModePreference();
         loadVideoPrefs();
         loadHangModeSetting();
         renderBaseUrlText();
+        setInitStage("location", "success", "已读取当前页面链接");
+        if (!peerManager) {
+            const detail = "PeerManager 脚本未加载，请确认 peer-manager.js 可访问";
+            setInitStage("peer", "error", detail);
+            setStatus(`初始化失败：${detail}`);
+            return;
+        }
+        setStatus("正在加载依赖资源…");
+        await loadRuntimeDependencies();
+        if (!validateRuntimeDependencies()) {
+            return;
+        }
         const seed = Math.floor(Math.random() * 9000 + 1000);
         elements.displayName.value = `用户_${seed}`;
         peerManager.setDisplayName(getDisplayName());
@@ -435,6 +496,7 @@
         loadPersistedChatState();
         const isMobile = /Android|webOS|iPhone|iPod|iPad|Mobile/i.test(navigator.userAgent);
         const initialMode = getPreferredConnectorMode(isMobile ? "scanner" : "qr");
+        setInitStage("bootstrap", "success", "基础页面初始化完成");
         void (async () => {
             await setMode(initialMode, { force: true });
             const hasUrlPeerTarget = await tryConnectToUrlPeerIdOnFirstLoad();
@@ -444,14 +506,265 @@
         })();
     }
 
+    function createDefaultInitStages() {
+        return INIT_STAGE_ORDER.reduce((result, stage) => {
+            result[stage] = {
+                state: "pending",
+                detail: ""
+            };
+            return result;
+        }, {});
+    }
+
+    function getInitStageMarker(state) {
+        if (state === "success") {
+            return "✓";
+        }
+        if (state === "running") {
+            return "…";
+        }
+        if (state === "error") {
+            return "✗";
+        }
+        return "·";
+    }
+
+    function getInitStageStateLabel(state) {
+        if (state === "success") {
+            return "完成";
+        }
+        if (state === "running") {
+            return "进行中";
+        }
+        if (state === "error") {
+            return "失败";
+        }
+        return "等待";
+    }
+
+    function setInitStage(stage, state, detail = "") {
+        if (!appState.initStages[stage]) {
+            return;
+        }
+        appState.initStages[stage] = {
+            state: state || "pending",
+            detail: detail ? String(detail) : ""
+        };
+        const stageLabel = INIT_STAGE_LABELS[stage] || stage;
+        const marker = getInitStageMarker(state);
+        const stateLabel = getInitStageStateLabel(state);
+        const detailText = detail ? ` | ${detail}` : "";
+        console.info(`[AirCopy][Init] ${marker} ${stageLabel} ${stateLabel}${detailText}`);
+    }
+
+    function getHostFromUrl(url) {
+        try {
+            return new URL(String(url)).host || String(url);
+        } catch (_error) {
+            return String(url);
+        }
+    }
+
+    function loadScriptOnce(url, timeoutMs = SCRIPT_LOAD_TIMEOUT_MS) {
+        return new Promise((resolve, reject) => {
+            const existing = document.querySelector(`script[data-aircopy-src="${url}"]`);
+            if (existing && existing.dataset.loaded === "1") {
+                resolve(url);
+                return;
+            }
+            const script = existing || document.createElement("script");
+            if (!existing) {
+                script.src = url;
+                script.async = true;
+                script.dataset.aircopySrc = url;
+                document.head.appendChild(script);
+            }
+
+            let settled = false;
+            const done = (ok, value) => {
+                if (settled) {
+                    return;
+                }
+                settled = true;
+                window.clearTimeout(timer);
+                script.onload = null;
+                script.onerror = null;
+                if (ok) {
+                    script.dataset.loaded = "1";
+                    resolve(value);
+                } else {
+                    reject(value);
+                }
+            };
+
+            const timer = window.setTimeout(() => {
+                done(false, new Error(`加载超时: ${url}`));
+                if (!existing) {
+                    try {
+                        script.remove();
+                    } catch (_removeError) {
+                        // Ignore.
+                    }
+                }
+            }, Math.max(1000, Number(timeoutMs) || SCRIPT_LOAD_TIMEOUT_MS));
+
+            script.onload = () => done(true, url);
+            script.onerror = () => {
+                done(false, new Error(`加载失败: ${url}`));
+                if (!existing) {
+                    try {
+                        script.remove();
+                    } catch (_removeError) {
+                        // Ignore.
+                    }
+                }
+            };
+        });
+    }
+
+    async function loadDependencyFromUrls(label, urls, checkReady, options = {}) {
+        if (typeof checkReady === "function" && checkReady()) {
+            return true;
+        }
+        const list = Array.isArray(urls) ? urls : [];
+        let lastError = null;
+        for (let i = 0; i < list.length; i += 1) {
+            const url = String(list[i] || "").trim();
+            if (!url) {
+                continue;
+            }
+            const host = getHostFromUrl(url);
+            setStatus(`正在加载 ${label}（${host}）…`);
+            try {
+                await loadScriptOnce(url, SCRIPT_LOAD_TIMEOUT_MS);
+                if (typeof checkReady !== "function" || checkReady()) {
+                    console.info(`[AirCopy][Dependency] ${label} loaded from ${host}`);
+                    return true;
+                }
+                lastError = new Error(`${label} 脚本已加载但全局对象不可用`);
+            } catch (error) {
+                lastError = error;
+                console.warn(`[AirCopy][Dependency] ${label} load failed from ${host}`, error);
+            }
+        }
+        if (options.optional) {
+            console.warn(`[AirCopy][Dependency] ${label} not available, continue without it`, lastError || "");
+            return false;
+        }
+        throw (lastError || new Error(`${label} 加载失败`));
+    }
+
+    async function loadRuntimeDependencies() {
+        setInitStage("dependency", "running", "开始加载第三方依赖");
+        try {
+            await loadDependencyFromUrls("PeerJS", DEPENDENCY_CDN_URLS.peerjs, hasPeerDependency);
+            await loadDependencyFromUrls("QRCode", DEPENDENCY_CDN_URLS.qrcode, hasQrDependency);
+            await loadDependencyFromUrls("ZXing", DEPENDENCY_CDN_URLS.zxing, hasScannerDependency, { optional: true });
+            await loadDependencyFromUrls("jsQR", DEPENDENCY_CDN_URLS.jsqr, () => typeof jsQR === "function", { optional: true });
+            setInitStage("dependency", "success", "依赖加载完成");
+        } catch (error) {
+            setInitStage("dependency", "error", toErrorMessage(error));
+            throw error;
+        }
+    }
+
+    function hasPeerDependency() {
+        return typeof window.Peer === "function";
+    }
+
+    function hasQrDependency() {
+        return typeof window.QRCode === "function";
+    }
+
+    function hasScannerDependency() {
+        return Boolean(window.ZXingBrowser && window.ZXingBrowser.BrowserQRCodeReader);
+    }
+
+    function validateRuntimeDependencies() {
+        const missingCore = [];
+        if (!hasPeerDependency()) {
+            missingCore.push("PeerJS");
+        }
+        if (!hasQrDependency()) {
+            missingCore.push("QRCode");
+        }
+        const warnings = [];
+        if (!hasScannerDependency()) {
+            warnings.push("ZXing（内置扫码不可用）");
+        }
+
+        if (missingCore.length > 0) {
+            const detail = `缺少 ${missingCore.join(", ")}`;
+            setInitStage("dependency", "error", detail);
+            setStatus(`依赖加载失败：${detail}。请检查网络或 CDN 是否可用。`);
+            return false;
+        }
+
+        const detail = warnings.length > 0 ? `可选依赖缺失：${warnings.join("，")}` : "依赖加载正常";
+        setInitStage("dependency", "success", detail);
+        return true;
+    }
+
+    function ensureCodeReader() {
+        if (codeReader) {
+            return codeReader;
+        }
+        if (!hasScannerDependency()) {
+            throw new Error("扫码依赖 ZXing 未加载，无法启动内置扫码。");
+        }
+        codeReader = new ZXingBrowser.BrowserQRCodeReader();
+        return codeReader;
+    }
+
+    function withTimeout(taskPromise, timeoutMs, message) {
+        const timeout = Math.max(0, Number(timeoutMs) || 0);
+        if (!timeout) {
+            return Promise.resolve(taskPromise);
+        }
+        return new Promise((resolve, reject) => {
+            let settled = false;
+            const timer = window.setTimeout(() => {
+                if (settled) {
+                    return;
+                }
+                settled = true;
+                reject(new Error(message || "操作超时"));
+            }, timeout);
+            Promise.resolve(taskPromise)
+                .then((value) => {
+                    if (settled) {
+                        return;
+                    }
+                    settled = true;
+                    window.clearTimeout(timer);
+                    resolve(value);
+                })
+                .catch((error) => {
+                    if (settled) {
+                        return;
+                    }
+                    settled = true;
+                    window.clearTimeout(timer);
+                    reject(error);
+                });
+        });
+    }
+
     function getCurrentBaseUrl() {
         try {
-            const url = new URL(window.location.href);
+            const href = String(window.location.href || document.URL || "").trim();
+            const url = new URL(href);
             url.searchParams.delete("pairId");
             url.searchParams.delete("peerId");
             return url.toString();
         } catch (_error) {
-            return `${window.location.origin}${window.location.pathname}`;
+            const origin = String(window.location.origin || "").trim();
+            const path = String(window.location.pathname || "").trim();
+            const fallback = `${origin}${path}`;
+            if (fallback) {
+                return fallback;
+            }
+            return String(window.location.href || document.URL || "").trim();
         }
     }
 
@@ -459,7 +772,9 @@
         if (!elements.baseUrlText) {
             return;
         }
-        elements.baseUrlText.textContent = getCurrentBaseUrl();
+        const baseUrl = String(getCurrentBaseUrl() || "").trim();
+        elements.baseUrlText.textContent = baseUrl || "(无法解析当前地址)";
+        console.info(`[AirCopy][URL] base=${elements.baseUrlText.textContent} href=${window.location.href}`);
     }
 
     function setMode(mode, options = {}) {
@@ -488,7 +803,11 @@
                     await regenerateOffer();
                 }
             } else {
-                setStatus("已切到扫码模式，点击“开始扫码”后扫描对方页面 URL 二维码即可连接。");
+                if (hasScannerDependency()) {
+                    setStatus("已切到扫码模式，点击“开始扫码”后扫描对方页面 URL 二维码即可连接。");
+                } else {
+                    setStatus("已切到扫码模式，但扫码依赖未加载。请检查网络后刷新页面。");
+                }
             }
             updateScanButton();
         }).catch((error) => {
@@ -1093,11 +1412,31 @@
         if (appState.localPeerId) {
             return appState.localPeerId;
         }
+        if (!hasPeerDependency()) {
+            setInitStage("dependency", "error", "PeerJS 未加载");
+            throw new Error("PeerJS 未加载，无法初始化节点。");
+        }
         if (!appState.peerInitTask) {
-            appState.peerInitTask = peerManager.init(getDisplayName())
+            setInitStage("peer", "running", "正在连接 Peer 信令服务");
+            appState.peerInitTask = withTimeout(
+                peerManager.init(getDisplayName()),
+                PEER_INIT_TIMEOUT_MS,
+                `Peer 初始化超时（>${Math.round(PEER_INIT_TIMEOUT_MS / 1000)} 秒）`
+            )
                 .then((id) => {
                     appState.localPeerId = id;
+                    setInitStage("peer", "success", `peerId=${formatPeerIdHint(id)}`);
                     return id;
+                })
+                .catch((error) => {
+                    appState.localPeerId = "";
+                    try {
+                        peerManager.destroy();
+                    } catch (_destroyError) {
+                        // Ignore cleanup errors.
+                    }
+                    setInitStage("peer", "error", toErrorMessage(error));
+                    throw error;
                 })
                 .finally(() => {
                     appState.peerInitTask = null;
@@ -1112,12 +1451,15 @@
         }
         try {
             setScanVisualSuccess(false);
+            setInitStage("qrcode", "running", "开始生成二维码链接");
             setStatus("正在初始化 Peer 节点并生成二维码…");
             const peerId = await ensurePeerReady();
             const encoded = encodePeerSignal(peerId);
             renderQr(encoded);
+            setInitStage("qrcode", "success", `链接长度=${encoded.length}`);
             setStatus(`请让对方扫码该二维码（长度 ${encoded.length}）。扫码后将直接发起连接。`);
         } catch (error) {
+            setInitStage("qrcode", "error", toErrorMessage(error));
             setStatus(`生成二维码失败：${toErrorMessage(error)}`);
         }
     }
@@ -1127,11 +1469,16 @@
             if (appState.mode !== "scanner" || appState.scannerRunning) {
                 return;
             }
+            if (!hasScannerDependency()) {
+                setStatus("扫码依赖未加载，无法启动内置扫码。请检查网络后刷新页面。");
+                return;
+            }
             if (!window.isSecureContext) {
                 setStatus(`当前不是安全上下文，无法调用摄像头。请使用 https 或 localhost。当前地址：${window.location.origin}`);
                 return;
             }
             try {
+                const reader = ensureCodeReader();
                 setScanVisualSuccess(false);
                 await ensurePeerReady();
                 appState.scanSessionId += 1;
@@ -1140,12 +1487,12 @@
                 const readerView = ensureScannerView();
                 const deviceId = await pickCameraDeviceId();
                 const scanPromise = deviceId
-                    ? codeReader.decodeFromVideoDevice(
+                    ? reader.decodeFromVideoDevice(
                         deviceId,
                         readerView,
                         (result, error) => handleScanFrame(result, error, sessionId)
                     )
-                    : codeReader.decodeFromConstraints(
+                    : reader.decodeFromConstraints(
                         getScannerConstraints(),
                         readerView,
                         (result, error) => handleScanFrame(result, error, sessionId)
@@ -1177,7 +1524,7 @@
                 if (appState.scanControls && typeof appState.scanControls.stop === "function") {
                     appState.scanControls.stop();
                 }
-                if (typeof codeReader.reset === "function") {
+                if (codeReader && typeof codeReader.reset === "function") {
                     codeReader.reset();
                 }
             } catch (_error) {
@@ -1609,6 +1956,9 @@
     }
 
     function renderQr(text) {
+        if (!hasQrDependency()) {
+            throw new Error("二维码依赖 QRCode 未加载。");
+        }
         appState.currentQrText = text;
         elements.qrcode.innerHTML = "";
         const size = Math.min(320, Math.max(260, Math.floor((window.innerWidth || 1000) * 0.32)));
@@ -1636,6 +1986,9 @@
 
     function renderLargeQrIfOpen() {
         if (elements.qrModal.classList.contains("hidden") || !appState.currentQrText) {
+            return;
+        }
+        if (!hasQrDependency()) {
             return;
         }
         elements.qrcodeLarge.innerHTML = "";
@@ -2705,11 +3058,16 @@
 
     function setStatus(text) {
         elements.statusText.textContent = text;
+        console.info(`[AirCopy][Status] ${text}`);
     }
 
     async function pickCameraDeviceId() {
         try {
-            if (ZXingBrowser.BrowserCodeReader && typeof ZXingBrowser.BrowserCodeReader.listVideoInputDevices === "function") {
+            if (
+                window.ZXingBrowser
+                && ZXingBrowser.BrowserCodeReader
+                && typeof ZXingBrowser.BrowserCodeReader.listVideoInputDevices === "function"
+            ) {
                 const cameras = await ZXingBrowser.BrowserCodeReader.listVideoInputDevices();
                 if (Array.isArray(cameras) && cameras.length > 0) {
                     const back = cameras.find((camera) => /back|rear|environment|后置/i.test(camera.label || ""));

@@ -117,6 +117,9 @@ fi
 cp -a "$SRC_DIR"/. "$TARGET_DIR"/
 
 while IFS= read -r -d '' js_file; do
+  if [[ "$js_file" == *.min.js ]]; then
+    continue
+  fi
   terser "$js_file" --compress --mangle --output "$js_file"
 done < <(find "$TARGET_DIR" -type f -name "*.js" -print0)
 

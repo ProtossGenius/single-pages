@@ -173,17 +173,7 @@
         </div>
     </div>
 
-    <!-- 引入必要的库 -->
-    <!-- 二维码生成库 -->
-    <script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
-    <!-- 二维码扫描库 -->
-    <script src="https://cdn.jsdelivr.net/npm/@zxing/browser@latest/umd/zxing-browser.min.js"></script>
-    <!-- 现成二维码解码器（用于候选黑色区域裁切后的解码） -->
-    <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js"></script>
-    <!-- PeerJS（通过信令服务器协商，二维码只需传 peerId） -->
-    <script src="https://cdn.jsdelivr.net/npm/peerjs@1.5.4/dist/peerjs.min.js"></script>
-    
-    <!-- 应用逻辑 -->
+    <!-- 应用逻辑（第三方依赖由 main.js 动态加载并做多源回退） -->
     <script src="peer-manager.js"></script>
     <script src="main.js"></script>
 </body>
