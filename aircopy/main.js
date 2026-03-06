@@ -7,6 +7,8 @@
     const VIDEO_PREF_STORAGE_KEY = "aircopy.video.pref.v1";
     const HANG_MODE_STORAGE_KEY = "aircopy.hang.mode.v1";
     const CHAT_HISTORY_MAX = 300;
+    const STATUS_LOG_MAX = 240;
+    const STATUS_LOG_EXPORT_MAX = 120;
     const AUTO_RECONNECT_INTERVAL_MS = 5000;
     const PEER_INIT_TIMEOUT_MS = 20000;
     const EMOJI_SET = ["😀", "😁", "😂", "🤣", "😊", "😍", "😘", "😎", "🤔", "😭", "😡", "👍", "👎", "🙏", "👏", "🎉"];
@@ -66,6 +68,7 @@
         unreadCount: 0,
         chatHistory: [],
         conversations: {},
+        statusLogs: [],
         isMobileLayout: false,
         sidebarCollapsedDesktop: false,
         sessionOpenMobile: false,
@@ -76,6 +79,7 @@
         voiceChunks: [],
         voiceStream: null,
         voiceSendAfterStop: true,
+        lastVideoPlayHintAt: 0,
         videoState: "idle",
         videoModalOpen: false,
         incomingCallInfo: null,
@@ -118,6 +122,7 @@
         sessionList: document.getElementById("session-list"),
         settingsToggle: document.getElementById("settings-toggle"),
         sidebarSettings: document.getElementById("sidebar-settings"),
+        copyLatestLogs: document.getElementById("copy-latest-logs"),
         hangModeToggle: document.getElementById("hang-mode-toggle"),
         peerSessionName: document.getElementById("peer-session-name"),
         peerSessionStatus: document.getElementById("peer-session-status"),
@@ -265,6 +270,7 @@
                 const noVideo = !info || !info.hasVideoTrack;
                 elements.localVideo.parentElement.classList.toggle("video-off", noVideo);
             }
+            ensureVideoPlayback(elements.localVideo, { muted: true });
         },
         onRemoteStream: (stream, info) => {
             elements.remoteVideo.srcObject = stream || null;
@@ -272,6 +278,7 @@
                 const noVideo = !info || !info.hasVideoTrack;
                 elements.remoteVideo.parentElement.classList.toggle("video-off", noVideo);
             }
+            ensureVideoPlayback(elements.remoteVideo, { muted: false });
             if (stream) {
                 openVideoModal({ incoming: false });
             }
@@ -414,6 +421,9 @@
                 setHangModeEnabled(Boolean(elements.hangModeToggle.checked));
             });
         }
+        if (elements.copyLatestLogs) {
+            elements.copyLatestLogs.addEventListener("click", copyLatestLogs);
+        }
 
         document.addEventListener("keydown", (event) => {
             if (event.key === "Escape") {
@@ -456,6 +466,12 @@
             updateVideoButton();
         });
         elements.closeVideoModal.addEventListener("click", () => closeVideoModal({ keepCall: true }));
+        elements.localVideo.addEventListener("click", () => {
+            ensureVideoPlayback(elements.localVideo, { muted: true });
+        });
+        elements.remoteVideo.addEventListener("click", () => {
+            ensureVideoPlayback(elements.remoteVideo, { muted: false });
+        });
         elements.acceptFileOffer.addEventListener("click", acceptIncomingFileOffer);
         elements.rejectFileOffer.addEventListener("click", rejectIncomingFileOffer);
         elements.messageInput.addEventListener("keydown", (event) => {
@@ -2640,6 +2656,37 @@
         updateVideoButton();
     }
 
+    function ensureVideoPlayback(videoElement, options = {}) {
+        if (!videoElement) {
+            return;
+        }
+        videoElement.autoplay = true;
+        videoElement.playsInline = true;
+        videoElement.setAttribute("playsinline", "true");
+        if (typeof options.muted === "boolean") {
+            videoElement.muted = options.muted;
+        }
+        if (!videoElement.srcObject || typeof videoElement.play !== "function") {
+            return;
+        }
+        const playPromise = videoElement.play();
+        if (!playPromise || typeof playPromise.catch !== "function") {
+            return;
+        }
+        playPromise.catch((error) => {
+            const errorName = error && error.name ? String(error.name) : "";
+            if (errorName === "NotAllowedError" || errorName === "AbortError") {
+                const now = Date.now();
+                if (now - appState.lastVideoPlayHintAt > 2500) {
+                    appState.lastVideoPlayHintAt = now;
+                    setStatus("Safari 可能拦截了自动播放，请点一下视频画面继续播放。");
+                }
+                return;
+            }
+            console.warn("[AirCopy][VideoPlay] play failed", error);
+        });
+    }
+
     function setVideoStatus(text) {
         if (elements.videoStatus) {
             elements.videoStatus.textContent = text || "未开始";
@@ -3057,8 +3104,89 @@
     }
 
     function setStatus(text) {
-        elements.statusText.textContent = text;
-        console.info(`[AirCopy][Status] ${text}`);
+        const message = String(text || "");
+        elements.statusText.textContent = message;
+        appendStatusLog(message, "status");
+        console.info(`[AirCopy][Status] ${message}`);
+    }
+
+    function appendStatusLog(message, source = "status") {
+        const text = String(message || "").trim();
+        if (!text) {
+            return;
+        }
+        appState.statusLogs.push({
+            ts: Date.now(),
+            source: String(source || "status"),
+            text
+        });
+        if (appState.statusLogs.length > STATUS_LOG_MAX) {
+            appState.statusLogs.splice(0, appState.statusLogs.length - STATUS_LOG_MAX);
+        }
+    }
+
+    function formatLogTimestamp(ts) {
+        const stamp = Number(ts) || Date.now();
+        try {
+            return new Date(stamp).toLocaleString("zh-CN", { hour12: false });
+        } catch (_error) {
+            return String(stamp);
+        }
+    }
+
+    function buildLatestLogsText() {
+        const lines = [];
+        lines.push("[AirCopy] 最新日志");
+        lines.push(`导出时间: ${formatLogTimestamp(Date.now())}`);
+        lines.push(`页面: ${window.location.href}`);
+        lines.push(`UA: ${navigator.userAgent || "unknown"}`);
+        lines.push("");
+        const records = appState.statusLogs.slice(-STATUS_LOG_EXPORT_MAX);
+        if (records.length === 0) {
+            lines.push("(暂无日志)");
+        } else {
+            for (let i = 0; i < records.length; i += 1) {
+                const item = records[i];
+                lines.push(`${formatLogTimestamp(item.ts)} [${item.source}] ${item.text}`);
+            }
+        }
+        return lines.join("\n");
+    }
+
+    async function copyTextToClipboard(text) {
+        if (navigator.clipboard && window.isSecureContext) {
+            await navigator.clipboard.writeText(String(text || ""));
+            return;
+        }
+        const textarea = document.createElement("textarea");
+        textarea.value = String(text || "");
+        textarea.setAttribute("readonly", "readonly");
+        textarea.style.position = "fixed";
+        textarea.style.left = "-9999px";
+        textarea.style.top = "0";
+        document.body.appendChild(textarea);
+        textarea.focus();
+        textarea.select();
+        let copied = false;
+        try {
+            copied = document.execCommand("copy");
+        } finally {
+            textarea.remove();
+        }
+        if (!copied) {
+            throw new Error("浏览器拒绝剪贴板写入");
+        }
+    }
+
+    async function copyLatestLogs() {
+        const logs = buildLatestLogsText();
+        try {
+            await copyTextToClipboard(logs);
+            const copiedCount = Math.min(appState.statusLogs.length, STATUS_LOG_EXPORT_MAX);
+            setStatus(`已复制最新日志（${copiedCount} 条）。`);
+        } catch (error) {
+            setStatus(`复制日志失败：${toErrorMessage(error)}`);
+        }
     }
 
     async function pickCameraDeviceId() {

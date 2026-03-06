@@ -703,36 +703,69 @@ class PeerManager {
         if (!navigator.mediaDevices || typeof navigator.mediaDevices.getUserMedia !== "function") {
             throw new Error("当前浏览器不支持媒体采集。");
         }
+        if (typeof window !== "undefined" && window.isSecureContext === false) {
+            throw new Error("当前页面不是 HTTPS，iPad Safari 无法访问摄像头/麦克风。");
+        }
 
         const showVideo = options.showVideo !== false;
         const requireAudio = options.requireAudio !== false;
+        if (!showVideo && !requireAudio) {
+            return {
+                stream: new MediaStream(),
+                requestedVideo: false,
+                hasVideoTrack: false
+            };
+        }
 
         const candidates = [];
-        candidates.push({ audio: requireAudio, video: showVideo });
-        if (showVideo) {
-            candidates.push({ audio: requireAudio, video: false });
+        if (showVideo && requireAudio) {
+            candidates.push({ audio: true, video: { facingMode: { ideal: "user" } } });
+            candidates.push({ audio: true, video: true });
+        } else {
+            candidates.push({ audio: requireAudio, video: showVideo });
         }
-        candidates.push({ audio: false, video: showVideo });
         if (showVideo) {
-            candidates.push({ audio: false, video: false });
+            candidates.push({ audio: false, video: { facingMode: { ideal: "user" } } });
+            candidates.push({ audio: false, video: true });
+        }
+        if (requireAudio) {
+            candidates.push({ audio: true, video: false });
         }
 
         let stream = null;
+        let lastError = null;
+        let permissionDenied = false;
         for (let i = 0; i < candidates.length; i += 1) {
             const c = candidates[i];
             try {
                 stream = await navigator.mediaDevices.getUserMedia({
                     audio: c.audio,
-                    video: c.video ? { facingMode: "user" } : false
+                    video: c.video
                 });
-                break;
+                if (stream && typeof stream.getTracks === "function" && stream.getTracks().length > 0) {
+                    break;
+                }
+                this._stopStreamTracks(stream);
+                stream = null;
             } catch (_error) {
+                const errorName = _error && _error.name ? String(_error.name) : "";
+                if (errorName === "NotAllowedError" || errorName === "PermissionDeniedError") {
+                    permissionDenied = true;
+                }
+                lastError = _error;
                 // Try next fallback.
             }
         }
 
         if (!stream) {
-            stream = new MediaStream();
+            if (permissionDenied) {
+                const source = showVideo ? "摄像头/麦克风" : "麦克风";
+                throw new Error(`无法访问${source}，请在浏览器网站设置中允许权限后重试。`);
+            }
+            if (lastError && lastError.message) {
+                throw new Error(`媒体采集失败：${lastError.message}`);
+            }
+            throw new Error("媒体采集失败，请确认摄像头和麦克风可用。");
         }
 
         if (showVideo && stream.getVideoTracks().length === 0) {
@@ -740,6 +773,9 @@ class PeerManager {
             if (blackTrack) {
                 stream.addTrack(blackTrack);
             }
+        }
+        if (stream.getTracks().length === 0) {
+            throw new Error("媒体采集失败：未拿到任何可用媒体轨道。");
         }
 
         return {
