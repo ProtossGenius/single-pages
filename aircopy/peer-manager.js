@@ -319,6 +319,7 @@ class PeerManager {
         if (!this.pendingIncomingCall) {
             return;
         }
+        this._sendIfConnected({ t: "call-hangup" });
         this.pendingIncomingCall.close();
         this.pendingIncomingCall = null;
         if (this.handlers.onCallState) {
@@ -327,12 +328,23 @@ class PeerManager {
         this._syncHeartbeatKeepAliveCall();
     }
 
-    hangupVideoCall() {
-        if (this.mediaCall) {
-            this.mediaCall.close();
-            this.mediaCall = null;
+    hangupVideoCall(options = {}) {
+        if (options.notifyPeer !== false) {
+            this._sendIfConnected({ t: "call-hangup" });
         }
+
+        const activeCall = this.mediaCall;
+        this.mediaCall = null;
+        if (activeCall) {
+            activeCall.close();
+        }
+
+        const pendingCall = this.pendingIncomingCall;
         this.pendingIncomingCall = null;
+        if (pendingCall) {
+            pendingCall.close();
+        }
+
         this._setRemoteMediaStream(null, { hasVideoTrack: false });
         this._stopLocalMedia();
         if (this.handlers.onCallState) {
@@ -476,6 +488,10 @@ class PeerManager {
         }
         if (type === "file-start" || type === "file-chunk" || type === "file-end" || type === "file-ack") {
             this._onTransferPayload(payload);
+            return;
+        }
+        if (type === "call-hangup") {
+            this.hangupVideoCall({ notifyPeer: false });
             return;
         }
 
@@ -1013,9 +1029,16 @@ class PeerManager {
         }
 
         call.on("close", () => {
-            if (this.pendingIncomingCall === call) {
-                this.pendingIncomingCall = null;
+            if (this.pendingIncomingCall !== call) {
+                return;
             }
+            this.pendingIncomingCall = null;
+            this._setRemoteMediaStream(null, { hasVideoTrack: false });
+            this._stopLocalMedia();
+            if (this.handlers.onCallState) {
+                this.handlers.onCallState({ state: "idle", incoming: true });
+            }
+            this._syncHeartbeatKeepAliveCall();
         });
     }
 
@@ -1041,9 +1064,12 @@ class PeerManager {
         });
 
         call.on("close", () => {
-            if (this.mediaCall === call) {
-                this.mediaCall = null;
+            const isCurrentCall = this.mediaCall === call;
+            if (!isCurrentCall) {
+                this._syncHeartbeatKeepAliveCall();
+                return;
             }
+            this.mediaCall = null;
             this._setRemoteMediaStream(null, { hasVideoTrack: false });
             this._stopLocalMedia();
             if (this.handlers.onCallState) {

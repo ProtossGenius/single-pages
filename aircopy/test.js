@@ -407,6 +407,35 @@
         };
     }
 
+    function createMockCall(options) {
+        const opts = options || {};
+        const handlers = {};
+        const call = {
+            peer: String(opts.peer || "peer-x"),
+            metadata: opts.metadata || {},
+            closed: false,
+            answeredStream: null,
+            on(eventName, cb) {
+                handlers[eventName] = cb;
+            },
+            emit(eventName, payload) {
+                if (typeof handlers[eventName] === "function") {
+                    handlers[eventName](payload);
+                }
+            },
+            answer(stream) {
+                this.answeredStream = stream || null;
+            },
+            close() {
+                this.closed = true;
+                if (typeof handlers.close === "function") {
+                    handlers.close();
+                }
+            }
+        };
+        return call;
+    }
+
     function addCoreTests(runner) {
         runner.addTest("PeerManager 可用", () => {
             assert(typeof PeerManager === "function", "PeerManager 未加载");
@@ -514,6 +543,48 @@
             assertEqual(payload.b, "hello", "消息内容错误");
             assertEqual(payload.name, "Tester", "name 未写入");
             assertEqual(payload.pid, "pid-t", "pid 未写入");
+        });
+
+        runner.addTest("PeerManager 收到 call-hangup 会同步结束通话", () => {
+            const states = [];
+            const pm = new PeerManager({
+                onCallState(state) {
+                    states.push(state);
+                }
+            });
+            pm.connection = createMockConn("remote-call", { open: true });
+            const activeCall = createMockCall({ peer: "remote-call" });
+            const incomingCall = createMockCall({ peer: "remote-call" });
+            pm.mediaCall = activeCall;
+            pm.pendingIncomingCall = incomingCall;
+
+            pm._onData({ t: "call-hangup" });
+
+            assertEqual(pm.connection.sent.length, 0, "收到 call-hangup 后不应回发挂断消息");
+            assertEqual(pm.mediaCall, null, "mediaCall 应被清理");
+            assertEqual(pm.pendingIncomingCall, null, "pendingIncomingCall 应被清理");
+            assertEqual(activeCall.closed, true, "进行中的通话应被关闭");
+            assertEqual(incomingCall.closed, true, "待接听通话应被关闭");
+            assert(states.length >= 1, "应触发 onCallState");
+            assertEqual(states[states.length - 1].state, "idle", "最终状态应为 idle");
+        });
+
+        runner.addTest("PeerManager 来电未接听时对端取消会回到 idle", () => {
+            const states = [];
+            const pm = new PeerManager({
+                onCallState(state) {
+                    states.push(state);
+                }
+            });
+            pm.connection = createMockConn("remote-call", { open: true });
+            const incoming = createMockCall({ peer: "remote-call" });
+
+            pm._onIncomingCall(incoming);
+            incoming.close();
+
+            assertEqual(pm.pendingIncomingCall, null, "挂起来电应被清理");
+            assert(states.length >= 1, "应触发 onCallState");
+            assertEqual(states[states.length - 1].state, "idle", "对端取消后应回到 idle");
         });
 
         runner.addTest("PeerManager.sendFile 输入校验", async () => {
