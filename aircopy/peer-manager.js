@@ -2,8 +2,9 @@ const AIRCOPY_PEER_PREFIX = "AIRCOPYP1:";
 const FILE_CHUNK_SIZE = 60 * 1024;
 const FILE_ACK_TIMEOUT_MS = 120000;
 const HEARTBEAT_INTERVAL_MS = 5000;
-const HEARTBEAT_ACK_TIMEOUT_MS = 1000;
-const HEARTBEAT_RECONNECT_TIMEOUT_MS = 3000;
+const HEARTBEAT_FAST_INTERVAL_MS = 1000;
+const HEARTBEAT_FAST_THRESHOLD_MS = 15000;
+const HEARTBEAT_DISCONNECT_TIMEOUT_MS = 10 * 60 * 1000;
 
 class PeerManager {
     constructor(handlers = {}) {
@@ -17,12 +18,10 @@ class PeerManager {
         this.remoteDisplayName = "";
         this.remotePersistentId = "";
         this.heartbeatTimer = null;
-        this.heartbeatAckTimer = null;
+        this.currentHeartbeatIntervalMs = HEARTBEAT_INTERVAL_MS;
+        this.lastHeartbeatReplyAt = 0;
         this.heartbeatSequence = 0;
         this.pendingHeartbeatId = "";
-        this.reconnectTimer = null;
-        this.reconnectInProgress = false;
-        this.reconnectTargetPeerId = "";
 
         this.incomingTransfers = new Map();
         this.outgoingTransferAcks = new Map();
@@ -372,9 +371,6 @@ class PeerManager {
         this.remotePersistentId = isIncoming && conn.metadata && conn.metadata.pid ? String(conn.metadata.pid) : "";
 
         conn.on("open", () => {
-            if (this.reconnectInProgress && conn.peer === this.reconnectTargetPeerId) {
-                this._clearReconnectState();
-            }
             if (this.handlers.onConnected) {
                 this.handlers.onConnected({
                     peerId: conn.peer,
@@ -399,9 +395,6 @@ class PeerManager {
         });
 
         conn.on("error", (error) => {
-            if (this.reconnectInProgress && this.connection === conn && conn.peer === this.reconnectTargetPeerId) {
-                return;
-            }
             if (this.handlers.onError) {
                 this.handlers.onError(error);
             }
@@ -756,10 +749,9 @@ class PeerManager {
 
     _startHeartbeatLoop() {
         this._stopHeartbeatLoop();
+        this.lastHeartbeatReplyAt = Date.now();
+        this._setHeartbeatInterval(HEARTBEAT_INTERVAL_MS);
         this._sendHeartbeat();
-        this.heartbeatTimer = window.setInterval(() => {
-            this._sendHeartbeat();
-        }, HEARTBEAT_INTERVAL_MS);
     }
 
     _stopHeartbeatLoop() {
@@ -767,43 +759,61 @@ class PeerManager {
             window.clearInterval(this.heartbeatTimer);
             this.heartbeatTimer = null;
         }
-        if (this.heartbeatAckTimer !== null) {
-            window.clearTimeout(this.heartbeatAckTimer);
-            this.heartbeatAckTimer = null;
-        }
+        this.currentHeartbeatIntervalMs = HEARTBEAT_INTERVAL_MS;
+        this.lastHeartbeatReplyAt = 0;
         this.pendingHeartbeatId = "";
-        this._clearReconnectState();
+    }
+
+    _setHeartbeatInterval(intervalMs) {
+        if (this.currentHeartbeatIntervalMs === intervalMs && this.heartbeatTimer !== null) {
+            return;
+        }
+        if (this.heartbeatTimer !== null) {
+            window.clearInterval(this.heartbeatTimer);
+        }
+        this.currentHeartbeatIntervalMs = intervalMs;
+        this.heartbeatTimer = window.setInterval(() => {
+            this._sendHeartbeat();
+        }, intervalMs);
+    }
+
+    _markHeartbeatResponse(now = Date.now()) {
+        this.lastHeartbeatReplyAt = now;
+        if (this.currentHeartbeatIntervalMs !== HEARTBEAT_INTERVAL_MS) {
+            this._setHeartbeatInterval(HEARTBEAT_INTERVAL_MS);
+        }
     }
 
     _sendHeartbeat() {
         if (!this.connection || !this.connection.open) {
             return;
         }
+        const now = Date.now();
+        const noReplyDuration = this.lastHeartbeatReplyAt > 0 ? now - this.lastHeartbeatReplyAt : 0;
+        if (noReplyDuration >= HEARTBEAT_DISCONNECT_TIMEOUT_MS) {
+            this._handleActiveConnectionClosed("连接已断开");
+            return;
+        }
+        if (noReplyDuration >= HEARTBEAT_FAST_THRESHOLD_MS) {
+            this._setHeartbeatInterval(HEARTBEAT_FAST_INTERVAL_MS);
+        } else if (this.currentHeartbeatIntervalMs !== HEARTBEAT_INTERVAL_MS) {
+            this._setHeartbeatInterval(HEARTBEAT_INTERVAL_MS);
+        }
         this.heartbeatSequence += 1;
-        const heartbeatId = `hb${Date.now().toString(36)}${this.heartbeatSequence.toString(36)}`;
+        const heartbeatId = `hb${now.toString(36)}${this.heartbeatSequence.toString(36)}`;
         this.connection.send({
             t: "heartbeat",
             id: heartbeatId,
-            ts: Date.now(),
+            ts: now,
             name: this.displayName,
             pid: this.persistentId
         });
         this.pendingHeartbeatId = heartbeatId;
-        if (this.heartbeatAckTimer !== null) {
-            window.clearTimeout(this.heartbeatAckTimer);
-        }
-        this.heartbeatAckTimer = window.setTimeout(() => {
-            if (this.pendingHeartbeatId !== heartbeatId) {
-                return;
-            }
-            this.pendingHeartbeatId = "";
-            this.heartbeatAckTimer = null;
-            this._attemptHeartbeatReconnect();
-        }, HEARTBEAT_ACK_TIMEOUT_MS);
     }
 
     _handleIncomingHeartbeat(payload) {
         const heartbeatId = payload && payload.id ? String(payload.id) : "";
+        this._markHeartbeatResponse();
         this._sendIfConnected({
             t: "heartbeat-ack",
             id: heartbeatId,
@@ -820,53 +830,14 @@ class PeerManager {
 
     _handleHeartbeatAck(payload) {
         const heartbeatId = payload && payload.id ? String(payload.id) : "";
+        this._markHeartbeatResponse();
         if (!this.pendingHeartbeatId) {
             return;
         }
         if (heartbeatId && heartbeatId !== this.pendingHeartbeatId) {
             return;
         }
-        if (this.heartbeatAckTimer !== null) {
-            window.clearTimeout(this.heartbeatAckTimer);
-            this.heartbeatAckTimer = null;
-        }
         this.pendingHeartbeatId = "";
-    }
-
-    _attemptHeartbeatReconnect() {
-        if (this.reconnectInProgress) {
-            return;
-        }
-        if (!this.connection || !this.connection.open || !this.peer) {
-            this._handleActiveConnectionClosed("连接已断开");
-            return;
-        }
-        const targetPeerId = this.connection.peer ? String(this.connection.peer) : "";
-        if (!targetPeerId) {
-            this._handleActiveConnectionClosed("连接已断开");
-            return;
-        }
-
-        this.reconnectInProgress = true;
-        this.reconnectTargetPeerId = targetPeerId;
-        this.reconnectTimer = window.setTimeout(() => {
-            this._handleActiveConnectionClosed("连接已断开");
-        }, HEARTBEAT_RECONNECT_TIMEOUT_MS);
-
-        try {
-            this.connect(targetPeerId, { force: true });
-        } catch (_error) {
-            this._handleActiveConnectionClosed("连接已断开");
-        }
-    }
-
-    _clearReconnectState() {
-        if (this.reconnectTimer !== null) {
-            window.clearTimeout(this.reconnectTimer);
-            this.reconnectTimer = null;
-        }
-        this.reconnectInProgress = false;
-        this.reconnectTargetPeerId = "";
     }
 
     _handleActiveConnectionClosed(reasonText) {
