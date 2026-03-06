@@ -7,7 +7,7 @@
     const VIDEO_PREF_STORAGE_KEY = "aircopy.video.pref.v1";
     const HANG_MODE_STORAGE_KEY = "aircopy.hang.mode.v1";
     const CHAT_HISTORY_MAX = 300;
-    const AUTO_RECONNECT_TIMEOUT_MS = 12000;
+    const AUTO_RECONNECT_INTERVAL_MS = 5000;
     const EMOJI_SET = ["😀", "😁", "😂", "🤣", "😊", "😍", "😘", "😎", "🤔", "😭", "😡", "👍", "👎", "🙏", "👏", "🎉"];
     const HEART_FLOAT_CHARS = ["❤", "♥", "❥"];
 
@@ -57,6 +57,9 @@
         autoReconnectAttempted: false,
         autoReconnectInProgress: false,
         autoReconnectTimer: null,
+        autoReconnectTargetPeerId: "",
+        autoReconnectLastFailureAt: 0,
+        autoReconnectLastFailureReason: "",
         peerInitTask: null,
         modeTask: Promise.resolve(),
         scannerTask: Promise.resolve()
@@ -142,22 +145,35 @@
             enterChatInterface();
             setStatus("连接成功。");
         },
-        onConnectionClosed: () => {
-            appendMessage("system", "连接已断开。", true);
-            setPeerName("", { persist: false });
-            appState.remotePersistentId = "";
-            setConnectionState(false);
-            clearAllTransferProgress();
-            resetVideoUI("未开始");
-            closeFileOfferModal();
-            setStatus("连接已断开，可重新扫码连接。");
+        onConnectionClosed: (info) => {
+            const wasConnected = appState.connected;
+            if (wasConnected) {
+                appendMessage("system", "连接已断开。", true);
+                setPeerName("", { persist: false });
+                appState.remotePersistentId = "";
+                setConnectionState(false);
+                clearAllTransferProgress();
+                resetVideoUI("未开始");
+                closeFileOfferModal();
+            }
+            const closedPeerId = info && info.peerId ? String(info.peerId) : "";
+            const reconnectTarget = closedPeerId || (
+                appState.recentNodeHint && appState.recentNodeHint.lastPeerId
+                    ? String(appState.recentNodeHint.lastPeerId)
+                    : ""
+            );
+            const started = startAutoReconnectLoop(reconnectTarget, {
+                immediate: false,
+                announce: wasConnected
+            });
+            if (!started && wasConnected) {
+                setStatus("连接已断开，可重新扫码连接。");
+            }
         },
         onError: (error) => {
-            if (appState.autoReconnectInProgress && !appState.connected) {
-                clearAutoReconnectState();
-                const hintText = getRecentPeerHintText();
-                const suffix = hintText ? `（${hintText}）` : "";
-                setStatus(`自动重连失败：${toErrorMessage(error)}，可重新扫码连接${suffix}。`);
+            if (!appState.connected && isAutoReconnectActive()) {
+                appState.autoReconnectInProgress = false;
+                reportAutoReconnectFailure(error);
                 return;
             }
             setStatus(`连接异常：${toErrorMessage(error)}`);
@@ -711,6 +727,110 @@
             appState.autoReconnectTimer = null;
         }
         appState.autoReconnectInProgress = false;
+        appState.autoReconnectTargetPeerId = "";
+        appState.autoReconnectLastFailureAt = 0;
+        appState.autoReconnectLastFailureReason = "";
+    }
+
+    function isAutoReconnectActive() {
+        const targetPeerId = String(appState.autoReconnectTargetPeerId || "").trim();
+        return Boolean(targetPeerId) && (appState.autoReconnectTimer !== null || appState.autoReconnectInProgress);
+    }
+
+    function getReconnectTargetPeerId() {
+        const directTarget = String(appState.autoReconnectTargetPeerId || "").trim();
+        return directTarget;
+    }
+
+    function reportAutoReconnectFailure(error) {
+        const reason = toErrorMessage(error);
+        const now = Date.now();
+        if (
+            reason &&
+            reason === appState.autoReconnectLastFailureReason &&
+            now - Number(appState.autoReconnectLastFailureAt || 0) < 1200
+        ) {
+            return;
+        }
+        appState.autoReconnectLastFailureReason = reason;
+        appState.autoReconnectLastFailureAt = now;
+        const targetPeerId = getReconnectTargetPeerId();
+        const peerIdHint = formatPeerIdHint(targetPeerId);
+        const targetText = peerIdHint ? `（目标 peerId: ${peerIdHint}）` : "";
+        const logText = `自动重连失败${targetText}：${reason}。5 秒后重试。`;
+        appendMessage("system", logText, true);
+        setStatus(logText);
+    }
+
+    function scheduleAutoReconnectAttempt(delayMs = AUTO_RECONNECT_INTERVAL_MS) {
+        if (appState.autoReconnectTimer !== null) {
+            window.clearTimeout(appState.autoReconnectTimer);
+        }
+        const delay = Math.max(0, Number(delayMs) || 0);
+        appState.autoReconnectTimer = window.setTimeout(() => {
+            void runAutoReconnectAttempt();
+        }, delay);
+    }
+
+    async function runAutoReconnectAttempt() {
+        appState.autoReconnectTimer = null;
+        if (appState.connected) {
+            clearAutoReconnectState();
+            return;
+        }
+
+        const targetPeerId = getReconnectTargetPeerId();
+        if (!targetPeerId) {
+            clearAutoReconnectState();
+            return;
+        }
+        appState.autoReconnectTargetPeerId = targetPeerId;
+        appState.autoReconnectInProgress = true;
+        try {
+            const localPeerId = await ensurePeerReady();
+            if (targetPeerId === localPeerId) {
+                clearAutoReconnectState();
+                setStatus("最近 peerId 指向当前节点，已停止自动重连，请重新扫码连接。");
+                return;
+            }
+            peerManager.connect(targetPeerId);
+        } catch (error) {
+            reportAutoReconnectFailure(error);
+        } finally {
+            appState.autoReconnectInProgress = false;
+            if (!appState.connected && getReconnectTargetPeerId()) {
+                scheduleAutoReconnectAttempt(AUTO_RECONNECT_INTERVAL_MS);
+            }
+        }
+    }
+
+    function startAutoReconnectLoop(peerId, options = {}) {
+        const targetPeerId = String(peerId || "").trim() || (
+            appState.recentNodeHint && appState.recentNodeHint.lastPeerId
+                ? String(appState.recentNodeHint.lastPeerId).trim()
+                : ""
+        );
+        if (!targetPeerId) {
+            return false;
+        }
+        if (appState.localPeerId && targetPeerId === appState.localPeerId) {
+            return false;
+        }
+        const targetChanged = appState.autoReconnectTargetPeerId !== targetPeerId;
+        appState.autoReconnectTargetPeerId = targetPeerId;
+        appState.autoReconnectInProgress = false;
+        if (targetChanged) {
+            appState.autoReconnectLastFailureAt = 0;
+            appState.autoReconnectLastFailureReason = "";
+        }
+
+        scheduleAutoReconnectAttempt(options.immediate ? 0 : AUTO_RECONNECT_INTERVAL_MS);
+        if (options.announce !== false) {
+            const peerIdHint = formatPeerIdHint(targetPeerId);
+            const suffix = peerIdHint ? `（目标 peerId: ${peerIdHint}）` : "";
+            setStatus(`连接已断开，自动重连已启动（每 5 秒重试）${suffix}。`);
+        }
+        return true;
     }
 
     function readUrlPeerIdTarget() {
@@ -747,8 +867,11 @@
                 setStatus("URL 中的 peerId 指向当前节点，已跳过连接。");
                 return true;
             }
+            clearAutoReconnectState();
+            startAutoReconnectLoop(urlPeerId, { immediate: false, announce: false });
             const connectResult = peerManager.connect(urlPeerId);
             if (connectResult && connectResult.reused) {
+                clearAutoReconnectState();
                 const knownPersistentId = appState.remotePersistentId || connectResult.peerPersistentId || "";
                 const knownPeerName = connectResult.peerName || appState.peerName || "";
                 bindConversation(knownPersistentId, knownPeerName, urlPeerId);
@@ -788,18 +911,10 @@
             if (hint.lastPeerId === localPeerId) {
                 return;
             }
-            appState.autoReconnectInProgress = true;
             const peerIdHint = formatPeerIdHint(hint.lastPeerId);
             const peerTitle = hint.peerName || hint.persistentId;
-            setStatus(`检测到历史节点 ${peerTitle}，按最近 peerId 提示 ${peerIdHint} 自动重连中...`);
-            peerManager.connect(hint.lastPeerId);
-            appState.autoReconnectTimer = window.setTimeout(() => {
-                if (!appState.autoReconnectInProgress || appState.connected) {
-                    return;
-                }
-                clearAutoReconnectState();
-                setStatus(`自动重连超时，可重新扫码连接（最近 peerId: ${peerIdHint}）。`);
-            }, AUTO_RECONNECT_TIMEOUT_MS);
+            startAutoReconnectLoop(hint.lastPeerId, { immediate: true, announce: false });
+            setStatus(`检测到历史节点 ${peerTitle}，按最近 peerId 提示 ${peerIdHint} 自动重连中（每 5 秒重试）...`);
         } catch (error) {
             clearAutoReconnectState();
             const hintText = getRecentPeerHintText();
@@ -1362,6 +1477,7 @@
         appState.handlingScan = true;
         try {
             await stopScanIfRunning();
+            clearAutoReconnectState();
             const connectResult = peerManager.connect(remotePeerId);
             if (connectResult && connectResult.reused) {
                 const knownPersistentId = appState.remotePersistentId || connectResult.peerPersistentId || "";

@@ -22,6 +22,9 @@ class PeerManager {
         this.lastHeartbeatReplyAt = 0;
         this.heartbeatSequence = 0;
         this.pendingHeartbeatId = "";
+        this.heartbeatDueAt = 0;
+        this.heartbeatHiddenSinceReplyMs = 0;
+        this.heartbeatHiddenStartedAt = 0;
 
         this.incomingTransfers = new Map();
         this.outgoingTransferAcks = new Map();
@@ -30,6 +33,22 @@ class PeerManager {
         this.mediaCall = null;
         this.localMediaStream = null;
         this.remoteMediaStream = null;
+
+        this._boundHeartbeatVisibilityHandler = () => {
+            this._onHeartbeatVisibilityChange();
+        };
+        this._boundHeartbeatWakeHandler = () => {
+            this._onHeartbeatRuntimeWake();
+        };
+
+        if (typeof document !== "undefined" && document.addEventListener) {
+            document.addEventListener("visibilitychange", this._boundHeartbeatVisibilityHandler);
+        }
+        if (typeof window !== "undefined" && window.addEventListener) {
+            window.addEventListener("focus", this._boundHeartbeatWakeHandler);
+            window.addEventListener("pageshow", this._boundHeartbeatWakeHandler);
+            window.addEventListener("online", this._boundHeartbeatWakeHandler);
+        }
     }
 
     async init(displayName) {
@@ -749,36 +768,124 @@ class PeerManager {
 
     _startHeartbeatLoop() {
         this._stopHeartbeatLoop();
-        this.lastHeartbeatReplyAt = Date.now();
-        this._setHeartbeatInterval(HEARTBEAT_INTERVAL_MS);
+        const now = Date.now();
+        this.lastHeartbeatReplyAt = now;
+        this.heartbeatHiddenSinceReplyMs = 0;
+        this.heartbeatHiddenStartedAt = this._isDocumentHidden() ? now : 0;
+        this.currentHeartbeatIntervalMs = HEARTBEAT_INTERVAL_MS;
         this._sendHeartbeat();
+        this._scheduleHeartbeatTick();
     }
 
     _stopHeartbeatLoop() {
         if (this.heartbeatTimer !== null) {
-            window.clearInterval(this.heartbeatTimer);
+            window.clearTimeout(this.heartbeatTimer);
             this.heartbeatTimer = null;
         }
         this.currentHeartbeatIntervalMs = HEARTBEAT_INTERVAL_MS;
         this.lastHeartbeatReplyAt = 0;
         this.pendingHeartbeatId = "";
+        this.heartbeatDueAt = 0;
+        this.heartbeatHiddenSinceReplyMs = 0;
+        this.heartbeatHiddenStartedAt = 0;
     }
 
     _setHeartbeatInterval(intervalMs) {
-        if (this.currentHeartbeatIntervalMs === intervalMs && this.heartbeatTimer !== null) {
+        if (this.currentHeartbeatIntervalMs === intervalMs) {
+            if (this.heartbeatTimer === null && this.connection && this.connection.open) {
+                this.heartbeatDueAt = Date.now() + intervalMs;
+                this._scheduleHeartbeatTick();
+            }
             return;
         }
-        if (this.heartbeatTimer !== null) {
-            window.clearInterval(this.heartbeatTimer);
-        }
         this.currentHeartbeatIntervalMs = intervalMs;
-        this.heartbeatTimer = window.setInterval(() => {
+        this.heartbeatDueAt = Date.now() + intervalMs;
+        this._scheduleHeartbeatTick();
+    }
+
+    _scheduleHeartbeatTick() {
+        if (this.heartbeatTimer !== null) {
+            window.clearTimeout(this.heartbeatTimer);
+            this.heartbeatTimer = null;
+        }
+        if (!this.connection || !this.connection.open) {
+            return;
+        }
+        if (this.heartbeatDueAt <= 0) {
+            this.heartbeatDueAt = Date.now() + this.currentHeartbeatIntervalMs;
+        }
+        const delay = Math.max(0, this.heartbeatDueAt - Date.now());
+        this.heartbeatTimer = window.setTimeout(() => {
+            this._handleHeartbeatTick();
+        }, delay);
+    }
+
+    _handleHeartbeatTick() {
+        this.heartbeatTimer = null;
+        if (!this.connection || !this.connection.open) {
+            return;
+        }
+        const now = Date.now();
+        if (this.heartbeatDueAt > 0 && now + 10 < this.heartbeatDueAt) {
+            this._scheduleHeartbeatTick();
+            return;
+        }
+        this._sendHeartbeat();
+        this._scheduleHeartbeatTick();
+    }
+
+    _isDocumentHidden() {
+        if (typeof document === "undefined") {
+            return false;
+        }
+        return Boolean(document.hidden);
+    }
+
+    _getHeartbeatHiddenPenalty(now = Date.now()) {
+        let hiddenMs = this.heartbeatHiddenSinceReplyMs;
+        if (this.heartbeatHiddenStartedAt > 0) {
+            hiddenMs += Math.max(0, now - this.heartbeatHiddenStartedAt);
+        }
+        return hiddenMs;
+    }
+
+    _onHeartbeatVisibilityChange() {
+        if (!this.lastHeartbeatReplyAt) {
+            return;
+        }
+        const now = Date.now();
+        if (this._isDocumentHidden()) {
+            if (this.heartbeatHiddenStartedAt === 0) {
+                this.heartbeatHiddenStartedAt = now;
+            }
+            return;
+        }
+        if (this.heartbeatHiddenStartedAt > 0) {
+            this.heartbeatHiddenSinceReplyMs += Math.max(0, now - this.heartbeatHiddenStartedAt);
+            this.heartbeatHiddenStartedAt = 0;
+        }
+        this._onHeartbeatRuntimeWake();
+    }
+
+    _onHeartbeatRuntimeWake() {
+        if (!this.connection || !this.connection.open || !this.lastHeartbeatReplyAt) {
+            return;
+        }
+        const now = Date.now();
+        if (this.heartbeatHiddenStartedAt > 0 && !this._isDocumentHidden()) {
+            this.heartbeatHiddenSinceReplyMs += Math.max(0, now - this.heartbeatHiddenStartedAt);
+            this.heartbeatHiddenStartedAt = 0;
+        }
+        if (this.heartbeatDueAt > 0 && now >= this.heartbeatDueAt - 200) {
             this._sendHeartbeat();
-        }, intervalMs);
+        }
+        this._scheduleHeartbeatTick();
     }
 
     _markHeartbeatResponse(now = Date.now()) {
         this.lastHeartbeatReplyAt = now;
+        this.heartbeatHiddenSinceReplyMs = 0;
+        this.heartbeatHiddenStartedAt = this._isDocumentHidden() ? now : 0;
         if (this.currentHeartbeatIntervalMs !== HEARTBEAT_INTERVAL_MS) {
             this._setHeartbeatInterval(HEARTBEAT_INTERVAL_MS);
         }
@@ -789,9 +896,10 @@ class PeerManager {
             return;
         }
         const now = Date.now();
-        const noReplyDuration = this.lastHeartbeatReplyAt > 0 ? now - this.lastHeartbeatReplyAt : 0;
+        const rawNoReplyDuration = this.lastHeartbeatReplyAt > 0 ? now - this.lastHeartbeatReplyAt : 0;
+        const noReplyDuration = Math.max(0, rawNoReplyDuration - this._getHeartbeatHiddenPenalty(now));
         if (noReplyDuration >= HEARTBEAT_DISCONNECT_TIMEOUT_MS) {
-            this._handleActiveConnectionClosed("连接已断开");
+            this._handleActiveConnectionClosed("心跳超时，连接已断开");
             return;
         }
         if (noReplyDuration >= HEARTBEAT_FAST_THRESHOLD_MS) {
@@ -809,6 +917,7 @@ class PeerManager {
             pid: this.persistentId
         });
         this.pendingHeartbeatId = heartbeatId;
+        this.heartbeatDueAt = now + this.currentHeartbeatIntervalMs;
     }
 
     _handleIncomingHeartbeat(payload) {
@@ -842,6 +951,7 @@ class PeerManager {
 
     _handleActiveConnectionClosed(reasonText) {
         const activeConnection = this.connection;
+        const closedPeerId = activeConnection && activeConnection.peer ? String(activeConnection.peer) : "";
         this.connection = null;
         this.helloSent = false;
         this.remoteDisplayName = "";
@@ -858,7 +968,10 @@ class PeerManager {
         this._resetIncomingTransfers();
         this._resetOutgoingTransferAcks(reasonText || "连接已断开");
         if (this.handlers.onConnectionClosed) {
-            this.handlers.onConnectionClosed();
+            this.handlers.onConnectionClosed({
+                reason: reasonText || "连接已断开",
+                peerId: closedPeerId
+            });
         }
     }
 
