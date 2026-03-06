@@ -1,0 +1,606 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>躺平至上 | 站长工具导航与端对端拷贝入口</title>
+  <meta
+    name="description"
+    content="站长工具导航页，聚合 AirCopy 等子项目，支持拼音/简拼/缺字模糊搜索。可通过端对端拷贝、点对点传输、局域网传文件等关键词快速找到工具。"
+  />
+  <meta
+    name="keywords"
+    content="站长工具,工具导航,端对端拷贝,端到端拷贝,点对点传输,局域网传文件,WebRTC 文件传输,AirCopy"
+  />
+  <meta name="robots" content="index,follow,max-image-preview:large,max-snippet:-1,max-video-preview:-1" />
+  <meta property="og:type" content="website" />
+  <meta property="og:title" content="躺平至上 | 站长工具导航与端对端拷贝入口" />
+  <meta
+    property="og:description"
+    content="收录 AirCopy 等子项目，支持拼音和模糊搜索，快速定位端对端拷贝/点对点传输工具。"
+  />
+  <meta property="og:locale" content="zh_CN" />
+  <meta property="og:url" content="https://www.liedown.top/" />
+  <meta name="theme-color" content="#0f172a" />
+  <link rel="canonical" href="https://www.liedown.top/" />
+  <link rel="icon" type="image/svg+xml" href="./site-icon.svg" />
+  <style>
+    :root {
+      --bg-1: #f2f6fb;
+      --bg-2: #e6edf7;
+      --text-main: #0f172a;
+      --text-sub: #334155;
+      --line: #cbd5e1;
+      --card-bg: #ffffff;
+      --accent: #1d4ed8;
+      --accent-soft: #dbeafe;
+      --shadow: 0 10px 24px rgba(15, 23, 42, 0.09);
+      --radius: 16px;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html,
+    body {
+      margin: 0;
+      padding: 0;
+      min-height: 100%;
+      color: var(--text-main);
+      background:
+        radial-gradient(1200px 600px at 0% 0%, #fefce8 0%, transparent 55%),
+        radial-gradient(1000px 550px at 100% 15%, #e0f2fe 0%, transparent 52%),
+        linear-gradient(160deg, var(--bg-1), var(--bg-2));
+      font-family: "Noto Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif;
+      line-height: 1.6;
+    }
+
+    a {
+      color: inherit;
+    }
+
+    .container {
+      width: min(1040px, calc(100% - 40px));
+      margin: 0 auto;
+      padding: 40px 0 56px;
+    }
+
+    .hero {
+      margin-bottom: 26px;
+    }
+
+    .hero h1 {
+      margin: 0;
+      font-size: clamp(1.7rem, 2.8vw, 2.4rem);
+      line-height: 1.2;
+    }
+
+    .hero-title {
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .hero-title-icon {
+      width: 1.05em;
+      height: 1.05em;
+      border-radius: 0.22em;
+      flex-shrink: 0;
+    }
+
+    .hero p {
+      margin: 10px 0 0;
+      color: var(--text-sub);
+    }
+
+    .search-panel {
+      background: rgba(255, 255, 255, 0.78);
+      backdrop-filter: blur(8px);
+      border: 1px solid rgba(148, 163, 184, 0.35);
+      border-radius: var(--radius);
+      padding: 18px;
+      box-shadow: var(--shadow);
+      margin-bottom: 22px;
+    }
+
+    .search-title {
+      margin: 0 0 10px;
+      font-size: 1rem;
+      color: #1e293b;
+      font-weight: 700;
+    }
+
+    .search-box {
+      position: relative;
+    }
+
+    .search-box input {
+      width: 100%;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 12px 14px;
+      font-size: 1rem;
+      outline: none;
+      transition: border-color 0.2s ease, box-shadow 0.2s ease;
+      background: #fff;
+    }
+
+    .search-box input:focus {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 4px var(--accent-soft);
+    }
+
+    .search-tip,
+    .result-tip {
+      margin: 9px 0 0;
+      font-size: 0.92rem;
+      color: #475569;
+    }
+
+    .cards {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+      gap: 16px;
+      margin-top: 14px;
+    }
+
+    .folder-card {
+      display: block;
+      text-decoration: none;
+      background: var(--card-bg);
+      border: 1px solid rgba(148, 163, 184, 0.45);
+      border-radius: 14px;
+      padding: 16px;
+      box-shadow: 0 6px 18px rgba(15, 23, 42, 0.07);
+      transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
+      min-height: 164px;
+    }
+
+    .folder-card:hover,
+    .folder-card:focus-visible {
+      transform: translateY(-2px);
+      box-shadow: 0 12px 26px rgba(15, 23, 42, 0.12);
+      border-color: rgba(29, 78, 216, 0.35);
+    }
+
+    .folder-top {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      margin-bottom: 10px;
+    }
+
+    .folder-icon {
+      width: 42px;
+      height: 30px;
+      border-radius: 9px;
+      background: linear-gradient(165deg, #60a5fa, #2563eb);
+      position: relative;
+      flex-shrink: 0;
+    }
+
+    .folder-icon::before {
+      content: "";
+      position: absolute;
+      top: -6px;
+      left: 5px;
+      width: 17px;
+      height: 8px;
+      border-radius: 5px 5px 0 0;
+      background: #93c5fd;
+    }
+
+    .folder-path {
+      font-size: 0.85rem;
+      color: #334155;
+      background: #f1f5f9;
+      border: 1px solid #cbd5e1;
+      border-radius: 999px;
+      padding: 2px 8px;
+      white-space: nowrap;
+    }
+
+    .folder-card h2 {
+      margin: 0;
+      font-size: 1.12rem;
+      line-height: 1.3;
+    }
+
+    .folder-card p {
+      margin: 8px 0 0;
+      color: var(--text-sub);
+      font-size: 0.95rem;
+    }
+
+    .folder-tags {
+      margin-top: 12px;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+
+    .folder-tags span {
+      font-size: 0.8rem;
+      padding: 2px 8px;
+      border-radius: 999px;
+      background: #eff6ff;
+      color: #1e3a8a;
+      border: 1px solid #bfdbfe;
+    }
+
+    .seo-block {
+      margin-top: 26px;
+      background: rgba(255, 255, 255, 0.74);
+      border: 1px solid rgba(148, 163, 184, 0.35);
+      border-radius: var(--radius);
+      padding: 18px;
+      color: #334155;
+    }
+
+    .seo-block h2 {
+      margin: 0;
+      font-size: 1.08rem;
+      color: #0f172a;
+    }
+
+    .seo-block p {
+      margin: 10px 0 0;
+    }
+
+    .empty {
+      margin-top: 12px;
+      padding: 16px;
+      border-radius: 12px;
+      border: 1px dashed #94a3b8;
+      background: rgba(255, 255, 255, 0.62);
+      color: #334155;
+    }
+
+    .visually-hidden {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      padding: 0;
+      margin: -1px;
+      overflow: hidden;
+      clip: rect(0, 0, 0, 0);
+      white-space: nowrap;
+      border: 0;
+    }
+
+    .noscript {
+      margin-top: 14px;
+      color: #475569;
+      font-size: 0.95rem;
+    }
+
+    @media (max-width: 640px) {
+      .container {
+        width: min(100%, calc(100% - 24px));
+        padding-top: 26px;
+      }
+
+      .search-panel,
+      .seo-block {
+        padding: 14px;
+      }
+
+      .folder-card {
+        min-height: 146px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main class="container">
+    <header class="hero">
+      <h1 class="hero-title">
+        <img class="hero-title-icon" src="./site-icon.svg" alt="" aria-hidden="true" />
+        <span>躺平至上 · 站长工具导航页</span>
+      </h1>
+    </header>
+
+    <section class="search-panel" aria-labelledby="search-title">
+      <h2 id="search-title" class="search-title">搜索项目</h2>
+      <label class="visually-hidden" for="searchInput">搜索工具名称、关键词或拼音</label>
+      <div class="search-box">
+        <input
+          id="searchInput"
+          type="search"
+          autocomplete="off"
+          placeholder="输入关键词/拼音/简拼，如：端对端拷贝、aircopy、dddkb"
+        />
+      </div>
+      <p class="search-tip">支持中文、拼音、简拼和缺字模糊匹配。</p>
+      <p id="resultTip" class="result-tip" aria-live="polite"></p>
+    </section>
+
+    <section aria-labelledby="tools-title">
+      <h2 id="tools-title" class="visually-hidden">工具列表</h2>
+      <div id="cardGrid" class="cards" role="list"></div>
+      <div id="emptyState" class="empty" hidden>未匹配到工具，试试「端对端拷贝 / 点对点传输 / aircopy」。</div>
+    </section>
+
+    <section class="seo-block" aria-labelledby="seo-title">
+      <h2 id="seo-title">常见检索词</h2>
+      <p>
+        如果你在搜索「端对端拷贝」「端到端拷贝」「点对点传输」「局域网传文件」「WebRTC 文件传输」，可以在本页直接进入 AirCopy。
+      </p>
+    </section>
+
+    <noscript>
+      <p class="noscript">当前页面支持 JavaScript 增强搜索。你仍可直接访问：<a href="./aircopy/">AirCopy 端对端拷贝</a>。</p>
+    </noscript>
+  </main>
+
+  <script src="https://cdn.jsdelivr.net/npm/fuse.js@7.1.0"></script>
+  <script src="https://cdn.jsdelivr.net/npm/pinyin-pro@3.27.0/dist/index.js"></script>
+  <script>
+    const TOOL_LIST = [
+      {
+        id: "aircopy",
+        title: "AirCopy 端对端拷贝",
+        folder: "aircopy",
+        url: "./aircopy/",
+        description: "基于 WebRTC 的端到端文件传输，支持扫码直连与点对点分享。",
+        keywords: [
+          "AirCopy",
+          "端对端拷贝",
+          "端到端拷贝",
+          "点对点传输",
+          "局域网传文件",
+          "WebRTC 文件传输",
+          "P2P 文件快传"
+        ]
+      }
+    ];
+
+    const searchInput = document.getElementById("searchInput");
+    const cardGrid = document.getElementById("cardGrid");
+    const resultTip = document.getElementById("resultTip");
+    const emptyState = document.getElementById("emptyState");
+
+    const normalized = TOOL_LIST.map((tool) => buildSearchDoc(tool));
+
+    const fuse = window.Fuse
+      ? new window.Fuse(normalized, {
+          includeScore: true,
+          shouldSort: true,
+          ignoreLocation: true,
+          threshold: 0.42,
+          keys: [
+            { name: "title", weight: 0.35 },
+            { name: "description", weight: 0.2 },
+            { name: "keywordText", weight: 0.35 },
+            { name: "folder", weight: 0.1 }
+          ]
+        })
+      : null;
+
+    init();
+
+    function init() {
+      const initQuery = new URLSearchParams(window.location.search).get("q") || "";
+      searchInput.value = initQuery;
+      renderByQuery(initQuery);
+      searchInput.addEventListener("input", (event) => {
+        const query = event.target.value;
+        renderByQuery(query);
+        syncQuery(query);
+      });
+      injectStructuredData();
+    }
+
+    function buildSearchDoc(tool) {
+      const keywordText = (tool.keywords || []).join(" ");
+      const rawText = `${tool.title} ${tool.folder} ${tool.description} ${keywordText}`;
+      const normalizedText = normalize(rawText);
+
+      const pinyinInfo = toPinyin(rawText);
+
+      return {
+        ...tool,
+        keywordText,
+        normalizedText,
+        normalizedTitle: normalize(tool.title),
+        normalizedKeywords: normalize(keywordText),
+        pinyinFull: pinyinInfo.full,
+        pinyinInitial: pinyinInfo.initial
+      };
+    }
+
+    function toPinyin(text) {
+      if (!window.pinyinPro || typeof window.pinyinPro.pinyin !== "function") {
+        return { full: "", initial: "" };
+      }
+
+      try {
+        const fullRaw = window.pinyinPro.pinyin(text, { toneType: "none" });
+        const fullText = Array.isArray(fullRaw) ? fullRaw.join("") : String(fullRaw);
+        const initialRaw = window.pinyinPro.pinyin(text, { pattern: "first", toneType: "none" });
+
+        return {
+          full: normalize(fullText),
+          initial: normalize(initialRaw)
+        };
+      } catch (error) {
+        return { full: "", initial: "" };
+      }
+    }
+
+    function normalize(text) {
+      return String(text || "")
+        .toLowerCase()
+        .normalize("NFKC")
+        .replace(/[\s_\-./]+/g, "")
+        .trim();
+    }
+
+    function subsequenceScore(query, target) {
+      if (!query || !target) {
+        return 0;
+      }
+      if (target.includes(query)) {
+        return 1;
+      }
+
+      let qIndex = 0;
+      let streak = 0;
+      let bestStreak = 0;
+      let gaps = 0;
+
+      for (let i = 0; i < target.length && qIndex < query.length; i += 1) {
+        if (target[i] === query[qIndex]) {
+          qIndex += 1;
+          streak += 1;
+          if (streak > bestStreak) {
+            bestStreak = streak;
+          }
+        } else {
+          if (streak > 0) {
+            gaps += 1;
+          }
+          streak = 0;
+        }
+      }
+
+      if (qIndex !== query.length) {
+        return 0;
+      }
+
+      const coverage = query.length / target.length;
+      const continuity = bestStreak / query.length;
+      const gapPenalty = Math.min(0.35, gaps / (target.length + 1));
+
+      return Math.max(0.12, 0.45 + coverage * 0.35 + continuity * 0.3 - gapPenalty);
+    }
+
+    function searchTools(query) {
+      const normalizedQuery = normalize(query);
+      if (!normalizedQuery) {
+        return normalized.map((item) => ({ item, score: 1 }));
+      }
+
+      const scoreMap = new Map();
+
+      if (fuse) {
+        fuse.search(query).forEach((result) => {
+          const fuseScore = 1 - (result.score || 1);
+          scoreMap.set(result.item.id, Math.max(scoreMap.get(result.item.id) || 0, fuseScore));
+        });
+      }
+
+      normalized.forEach((item) => {
+        const customScore = Math.max(
+          subsequenceScore(normalizedQuery, item.normalizedText),
+          subsequenceScore(normalizedQuery, item.normalizedTitle),
+          subsequenceScore(normalizedQuery, item.normalizedKeywords),
+          subsequenceScore(normalizedQuery, item.pinyinFull),
+          subsequenceScore(normalizedQuery, item.pinyinInitial)
+        );
+
+        if (customScore > 0) {
+          scoreMap.set(item.id, Math.max(scoreMap.get(item.id) || 0, customScore));
+        }
+      });
+
+      return normalized
+        .filter((item) => scoreMap.has(item.id))
+        .map((item) => ({ item, score: scoreMap.get(item.id) || 0 }))
+        .sort((a, b) => b.score - a.score);
+    }
+
+    function renderByQuery(query) {
+      const results = searchTools(query);
+      renderCards(results.map((entry) => entry.item));
+
+      const normalizedQuery = normalize(query);
+      if (!normalizedQuery) {
+        resultTip.textContent = `共 ${TOOL_LIST.length} 个工具。`;
+      } else {
+        resultTip.textContent = `关键词“${query}”匹配到 ${results.length} 个工具。`;
+      }
+
+      emptyState.hidden = results.length !== 0;
+    }
+
+    function renderCards(list) {
+      cardGrid.innerHTML = list
+        .map((tool) => {
+          const tags = (tool.keywords || []).slice(0, 4).map((tag) => `<span>${escapeHtml(tag)}</span>`).join("");
+          return `
+            <a class="folder-card" role="listitem" href="${encodeURI(tool.url)}">
+              <div class="folder-top">
+                <span class="folder-icon" aria-hidden="true"></span>
+                <span class="folder-path">/${escapeHtml(tool.folder)}</span>
+              </div>
+              <h2>${escapeHtml(tool.title)}</h2>
+              <p>${escapeHtml(tool.description)}</p>
+              <div class="folder-tags">${tags}</div>
+            </a>
+          `;
+        })
+        .join("");
+    }
+
+    function escapeHtml(text) {
+      return String(text || "")
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/\"/g, "&quot;")
+        .replace(/'/g, "&#39;");
+    }
+
+    function syncQuery(query) {
+      const url = new URL(window.location.href);
+      const clean = query.trim();
+      if (clean) {
+        url.searchParams.set("q", clean);
+      } else {
+        url.searchParams.delete("q");
+      }
+      window.history.replaceState(null, "", url.pathname + url.search);
+    }
+
+    function injectStructuredData() {
+      const script = document.createElement("script");
+      script.type = "application/ld+json";
+
+      const currentPageUrl = new URL("./", window.location.href).href;
+      const graph = [
+        {
+          "@context": "https://schema.org",
+          "@type": "WebSite",
+          name: "站长工具导航",
+          inLanguage: "zh-CN",
+          url: currentPageUrl,
+          description: "站长工具页，提供端对端拷贝等子项目入口。",
+          potentialAction: {
+            "@type": "SearchAction",
+            target: `${currentPageUrl}?q={search_term_string}`,
+            "query-input": "required name=search_term_string"
+          }
+        },
+        {
+          "@context": "https://schema.org",
+          "@type": "ItemList",
+          name: "站长工具子项目列表",
+          itemListElement: TOOL_LIST.map((tool, index) => ({
+            "@type": "ListItem",
+            position: index + 1,
+            name: tool.title,
+            description: tool.description,
+            url: new URL(tool.url, window.location.href).href
+          }))
+        }
+      ];
+
+      script.textContent = JSON.stringify(graph);
+      document.head.appendChild(script);
+    }
+  </script>
+</body>
+</html>

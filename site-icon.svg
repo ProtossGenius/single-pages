@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" role="img" aria-labelledby="title desc">
+  <title id="title">躺平至上图标</title>
+  <desc id="desc">象征躺平至上理念的站点图标：躺平姿态与王冠元素结合。</desc>
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0f172a" />
+      <stop offset="100%" stop-color="#1e3a8a" />
+    </linearGradient>
+    <linearGradient id="gold" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#fde68a" />
+      <stop offset="100%" stop-color="#f59e0b" />
+    </linearGradient>
+  </defs>
+
+  <rect x="12" y="12" width="232" height="232" rx="52" fill="url(#bg)" />
+
+  <path d="M56 174h144" stroke="#93c5fd" stroke-width="10" stroke-linecap="round" />
+  <circle cx="84" cy="142" r="16" fill="#e2e8f0" />
+  <path d="M100 148l48 18 30-14" fill="none" stroke="#e2e8f0" stroke-width="12" stroke-linecap="round" stroke-linejoin="round" />
+  <path d="M138 108l15 18 15-24 15 24 15-18 8 30h-76z" fill="url(#gold)" stroke="#fef3c7" stroke-width="4" stroke-linejoin="round" />
+  <circle cx="168" cy="96" r="5" fill="#fff7d6" />
+  <circle cx="184" cy="92" r="5" fill="#fff7d6" />
+  <circle cx="200" cy="96" r="5" fill="#fff7d6" />
+</svg>
