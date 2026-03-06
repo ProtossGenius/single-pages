@@ -1,7 +1,9 @@
 const AIRCOPY_PEER_PREFIX = "AIRCOPYP1:";
 const FILE_CHUNK_SIZE = 60 * 1024;
 const FILE_ACK_TIMEOUT_MS = 120000;
-const HEARTBEAT_INTERVAL_MS = 15000;
+const HEARTBEAT_INTERVAL_MS = 5000;
+const HEARTBEAT_ACK_TIMEOUT_MS = 1000;
+const HEARTBEAT_RECONNECT_TIMEOUT_MS = 3000;
 
 class PeerManager {
     constructor(handlers = {}) {
@@ -15,7 +17,12 @@ class PeerManager {
         this.remoteDisplayName = "";
         this.remotePersistentId = "";
         this.heartbeatTimer = null;
+        this.heartbeatAckTimer = null;
         this.heartbeatSequence = 0;
+        this.pendingHeartbeatId = "";
+        this.reconnectTimer = null;
+        this.reconnectInProgress = false;
+        this.reconnectTargetPeerId = "";
 
         this.incomingTransfers = new Map();
         this.outgoingTransferAcks = new Map();
@@ -75,7 +82,7 @@ class PeerManager {
         });
     }
 
-    connect(targetPeerId) {
+    connect(targetPeerId, options = {}) {
         if (!this.peer || !this.localPeerId) {
             throw new Error("Peer 尚未初始化完成。");
         }
@@ -87,7 +94,7 @@ class PeerManager {
             throw new Error("不能连接到自己。");
         }
 
-        if (this.connection && this.connection.open && this.connection.peer === remoteId) {
+        if (!options.force && this.connection && this.connection.open && this.connection.peer === remoteId) {
             return {
                 reused: true,
                 peerId: remoteId,
@@ -365,6 +372,9 @@ class PeerManager {
         this.remotePersistentId = isIncoming && conn.metadata && conn.metadata.pid ? String(conn.metadata.pid) : "";
 
         conn.on("open", () => {
+            if (this.reconnectInProgress && conn.peer === this.reconnectTargetPeerId) {
+                this._clearReconnectState();
+            }
             if (this.handlers.onConnected) {
                 this.handlers.onConnected({
                     peerId: conn.peer,
@@ -382,21 +392,16 @@ class PeerManager {
         });
 
         conn.on("close", () => {
-            if (this.connection === conn) {
-                this.connection = null;
-                this.helloSent = false;
-                this.remotePersistentId = "";
-                this._stopHeartbeatLoop();
+            if (this.connection !== conn) {
+                return;
             }
-            this.hangupVideoCall();
-            this._resetIncomingTransfers();
-            this._resetOutgoingTransferAcks("连接已断开");
-            if (this.handlers.onConnectionClosed) {
-                this.handlers.onConnectionClosed();
-            }
+            this._handleActiveConnectionClosed("连接已断开");
         });
 
         conn.on("error", (error) => {
+            if (this.reconnectInProgress && this.connection === conn && conn.peer === this.reconnectTargetPeerId) {
+                return;
+            }
             if (this.handlers.onError) {
                 this.handlers.onError(error);
             }
@@ -436,6 +441,7 @@ class PeerManager {
             return;
         }
         if (type === "heartbeat-ack") {
+            this._handleHeartbeatAck(payload);
             return;
         }
         if (type === "file-start" || type === "file-chunk" || type === "file-end" || type === "file-ack") {
@@ -761,6 +767,12 @@ class PeerManager {
             window.clearInterval(this.heartbeatTimer);
             this.heartbeatTimer = null;
         }
+        if (this.heartbeatAckTimer !== null) {
+            window.clearTimeout(this.heartbeatAckTimer);
+            this.heartbeatAckTimer = null;
+        }
+        this.pendingHeartbeatId = "";
+        this._clearReconnectState();
     }
 
     _sendHeartbeat() {
@@ -768,13 +780,26 @@ class PeerManager {
             return;
         }
         this.heartbeatSequence += 1;
+        const heartbeatId = `hb${Date.now().toString(36)}${this.heartbeatSequence.toString(36)}`;
         this.connection.send({
             t: "heartbeat",
-            id: `hb${Date.now().toString(36)}${this.heartbeatSequence.toString(36)}`,
+            id: heartbeatId,
             ts: Date.now(),
             name: this.displayName,
             pid: this.persistentId
         });
+        this.pendingHeartbeatId = heartbeatId;
+        if (this.heartbeatAckTimer !== null) {
+            window.clearTimeout(this.heartbeatAckTimer);
+        }
+        this.heartbeatAckTimer = window.setTimeout(() => {
+            if (this.pendingHeartbeatId !== heartbeatId) {
+                return;
+            }
+            this.pendingHeartbeatId = "";
+            this.heartbeatAckTimer = null;
+            this._attemptHeartbeatReconnect();
+        }, HEARTBEAT_ACK_TIMEOUT_MS);
     }
 
     _handleIncomingHeartbeat(payload) {
@@ -790,6 +815,79 @@ class PeerManager {
                 peerId: this.connection ? this.connection.peer : "",
                 timestamp: payload && payload.ts ? Number(payload.ts) : Date.now()
             });
+        }
+    }
+
+    _handleHeartbeatAck(payload) {
+        const heartbeatId = payload && payload.id ? String(payload.id) : "";
+        if (!this.pendingHeartbeatId) {
+            return;
+        }
+        if (heartbeatId && heartbeatId !== this.pendingHeartbeatId) {
+            return;
+        }
+        if (this.heartbeatAckTimer !== null) {
+            window.clearTimeout(this.heartbeatAckTimer);
+            this.heartbeatAckTimer = null;
+        }
+        this.pendingHeartbeatId = "";
+    }
+
+    _attemptHeartbeatReconnect() {
+        if (this.reconnectInProgress) {
+            return;
+        }
+        if (!this.connection || !this.connection.open || !this.peer) {
+            this._handleActiveConnectionClosed("连接已断开");
+            return;
+        }
+        const targetPeerId = this.connection.peer ? String(this.connection.peer) : "";
+        if (!targetPeerId) {
+            this._handleActiveConnectionClosed("连接已断开");
+            return;
+        }
+
+        this.reconnectInProgress = true;
+        this.reconnectTargetPeerId = targetPeerId;
+        this.reconnectTimer = window.setTimeout(() => {
+            this._handleActiveConnectionClosed("连接已断开");
+        }, HEARTBEAT_RECONNECT_TIMEOUT_MS);
+
+        try {
+            this.connect(targetPeerId, { force: true });
+        } catch (_error) {
+            this._handleActiveConnectionClosed("连接已断开");
+        }
+    }
+
+    _clearReconnectState() {
+        if (this.reconnectTimer !== null) {
+            window.clearTimeout(this.reconnectTimer);
+            this.reconnectTimer = null;
+        }
+        this.reconnectInProgress = false;
+        this.reconnectTargetPeerId = "";
+    }
+
+    _handleActiveConnectionClosed(reasonText) {
+        const activeConnection = this.connection;
+        this.connection = null;
+        this.helloSent = false;
+        this.remoteDisplayName = "";
+        this.remotePersistentId = "";
+        this._stopHeartbeatLoop();
+        if (activeConnection) {
+            try {
+                activeConnection.close();
+            } catch (_error) {
+                // Ignore close errors.
+            }
+        }
+        this.hangupVideoCall();
+        this._resetIncomingTransfers();
+        this._resetOutgoingTransferAcks(reasonText || "连接已断开");
+        if (this.handlers.onConnectionClosed) {
+            this.handlers.onConnectionClosed();
         }
     }
 
@@ -920,15 +1018,27 @@ function encodePeerSignal(peerId) {
     if (!id) {
         throw new Error("peerId 为空，无法生成二维码。");
     }
-    return `${AIRCOPY_PEER_PREFIX}${id}`;
+    const url = new URL(window.location.href);
+    url.searchParams.set("peerId", id);
+    return url.toString();
 }
 
 function decodePeerSignal(rawText) {
     const text = String(rawText || "").trim();
-    if (!text.startsWith(AIRCOPY_PEER_PREFIX)) {
+    if (text.startsWith(AIRCOPY_PEER_PREFIX)) {
+        const peerId = text.slice(AIRCOPY_PEER_PREFIX.length).trim();
+        if (!peerId) {
+            throw new Error("二维码中的 peerId 为空。");
+        }
+        return peerId;
+    }
+    let parsedUrl = null;
+    try {
+        parsedUrl = new URL(text);
+    } catch (error) {
         throw new Error("二维码内容不是 AirCopy Peer 信令。");
     }
-    const peerId = text.slice(AIRCOPY_PEER_PREFIX.length).trim();
+    const peerId = String(parsedUrl.searchParams.get("peerId") || "").trim();
     if (!peerId) {
         throw new Error("二维码中的 peerId 为空。");
     }
