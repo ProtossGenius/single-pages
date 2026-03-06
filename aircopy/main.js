@@ -17,6 +17,7 @@
         handlingScan: false,
         scanSessionId: 0,
         currentQrText: "",
+        scanVisualSuccess: false,
         lastScanErrorAt: 0,
         scanControls: null,
         smartRegionTimer: null,
@@ -63,6 +64,7 @@
 
     const elements = {
         connectionSetup: document.getElementById("connection-setup"),
+        baseUrlText: document.getElementById("base-url-text"),
         chatInterface: document.getElementById("chat-interface"),
         qrContainer: document.getElementById("qr-container"),
         scannerContainer: document.getElementById("scanner-container"),
@@ -285,6 +287,7 @@
         loadConnectorModePreference();
         loadVideoPrefs();
         loadHangModeSetting();
+        renderBaseUrlText();
         const seed = Math.floor(Math.random() * 9000 + 1000);
         elements.displayName.value = `用户_${seed}`;
         peerManager.setDisplayName(getDisplayName());
@@ -441,6 +444,24 @@
         })();
     }
 
+    function getCurrentBaseUrl() {
+        try {
+            const url = new URL(window.location.href);
+            url.searchParams.delete("pairId");
+            url.searchParams.delete("peerId");
+            return url.toString();
+        } catch (_error) {
+            return `${window.location.origin}${window.location.pathname}`;
+        }
+    }
+
+    function renderBaseUrlText() {
+        if (!elements.baseUrlText) {
+            return;
+        }
+        elements.baseUrlText.textContent = getCurrentBaseUrl();
+    }
+
     function setMode(mode, options = {}) {
         appState.modeTask = appState.modeTask.then(async () => {
             const normalizedMode = normalizeConnectorMode(mode);
@@ -467,7 +488,7 @@
                     await regenerateOffer();
                 }
             } else {
-                setStatus("已切到扫码模式，点击“开始扫码”后扫描对方二维码即可连接。");
+                setStatus("已切到扫码模式，点击“开始扫码”后扫描对方页面 URL 二维码即可连接。");
             }
             updateScanButton();
         }).catch((error) => {
@@ -583,6 +604,7 @@
     }
 
     function showConnectorScreen() {
+        setScanVisualSuccess(false);
         elements.chatInterface.classList.add("hidden");
         elements.connectionSetup.classList.remove("hidden");
         elements.backToChat.classList.toggle("hidden", !appState.connected);
@@ -831,35 +853,46 @@
     function readUrlPeerIdTarget() {
         try {
             const parsed = new URL(window.location.href);
+            const hasPairIdParam = parsed.searchParams.has("pairId");
+            const hasPeerIdParam = parsed.searchParams.has("peerId");
+            const value = String(
+                parsed.searchParams.get("pairId")
+                || parsed.searchParams.get("peerId")
+                || ""
+            ).trim();
             return {
-                hasPeerIdParam: parsed.searchParams.has("peerId"),
-                peerId: String(parsed.searchParams.get("peerId") || "").trim()
+                hasTargetParam: hasPairIdParam || hasPeerIdParam,
+                pairId: value,
+                sourceParam: hasPairIdParam ? "pairId" : (hasPeerIdParam ? "peerId" : "")
             };
         } catch (_error) {
             return {
-                hasPeerIdParam: false,
-                peerId: ""
+                hasTargetParam: false,
+                pairId: "",
+                sourceParam: ""
             };
         }
     }
 
     async function tryConnectToUrlPeerIdOnFirstLoad() {
         const target = readUrlPeerIdTarget();
-        if (!target.hasPeerIdParam) {
+        if (!target.hasTargetParam) {
             return false;
         }
 
+        setScanVisualSuccess(true);
         appState.autoReconnectAttempted = true;
-        const urlPeerId = target.peerId;
+        const urlPeerId = target.pairId;
+        const sourceParam = target.sourceParam || "pairId";
         if (!urlPeerId) {
-            setStatus("URL 中的 peerId 为空，已跳过历史自动重连，请重新扫码连接。");
+            setStatus("URL 中的 pairId/peerId 为空，已跳过历史自动重连，请重新扫码连接。");
             return true;
         }
 
         try {
             const localPeerId = await ensurePeerReady();
             if (urlPeerId === localPeerId) {
-                setStatus("URL 中的 peerId 指向当前节点，已跳过连接。");
+                setStatus(`URL 中的 ${sourceParam} 指向当前节点，已跳过连接。`);
                 return true;
             }
             clearAutoReconnectState();
@@ -881,11 +914,11 @@
                 setStatus("已连接到 URL 指定节点，已打开对应会话。");
                 return true;
             }
-            setStatus("检测到 URL peerId，正在发起连接…");
+            setStatus(`检测到 URL ${sourceParam}，正在发起连接…`);
             setSessionPanelOpen(false);
             return true;
         } catch (error) {
-            setStatus(`URL peerId 连接失败：${toErrorMessage(error)}。`);
+            setStatus(`URL ${sourceParam} 连接失败：${toErrorMessage(error)}。`);
             return true;
         }
     }
@@ -1078,6 +1111,7 @@
             return;
         }
         try {
+            setScanVisualSuccess(false);
             setStatus("正在初始化 Peer 节点并生成二维码…");
             const peerId = await ensurePeerReady();
             const encoded = encodePeerSignal(peerId);
@@ -1098,6 +1132,7 @@
                 return;
             }
             try {
+                setScanVisualSuccess(false);
                 await ensurePeerReady();
                 appState.scanSessionId += 1;
                 const sessionId = appState.scanSessionId;
@@ -1469,6 +1504,7 @@
             return;
         }
 
+        setScanVisualSuccess(true);
         appState.handlingScan = true;
         try {
             await stopScanIfRunning();
@@ -1489,7 +1525,7 @@
                 setStatus("已连接到该节点，已打开对应会话。");
                 return;
             }
-            setStatus("已识别 peerId，正在发起连接…");
+            setStatus("扫码成功，正在发起连接…");
             setSessionPanelOpen(false);
         } catch (error) {
             setStatus(`发起连接失败：${toErrorMessage(error)}`);
@@ -1609,6 +1645,16 @@
             height: 900,
             correctLevel: QRCode.CorrectLevel.M
         });
+    }
+
+    function setScanVisualSuccess(success) {
+        appState.scanVisualSuccess = Boolean(success);
+        if (elements.scannerShell) {
+            elements.scannerShell.classList.toggle("scan-success", appState.scanVisualSuccess);
+        }
+        if (elements.qrContainer) {
+            elements.qrContainer.classList.toggle("scan-success", appState.scanVisualSuccess);
+        }
     }
 
     function updateScanButton() {
@@ -2467,6 +2513,7 @@
 
     async function resetToSetup() {
         clearAutoReconnectState();
+        setScanVisualSuccess(false);
         closeQrModal();
         closeEmojiPanel();
         closeFileOfferModal();

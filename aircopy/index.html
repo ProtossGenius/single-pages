@@ -12,13 +12,22 @@
         <div id="connection-setup" class="screen">
             <div class="header">
                 <h1>AirCopy</h1>
-                <p>第一阶段：点对点建链（连接后显示 hello 双方名字）</p>
+                <div class="usage-help">
+                    <p class="usage-title">使用帮助</p>
+                    <div class="usage-list" role="list">
+                        <p class="usage-item">
+                            打开 <span id="base-url-text" class="usage-url"></span>，另一端可用微信/系统相机扫描二维码连接。
+                        </p>
+                        <p class="usage-divider" aria-hidden="true">或者</p>
+                        <p class="usage-item">双方都打开网页后，一端展示二维码，另一端点击“开始扫码”用内置扫码连接。</p>
+                    </div>
+                </div>
             </div>
             
             <div class="content">
                 <div id="qr-container" class="toggle-content">
                     <div id="qrcode"></div>
-                    <p class="hint">扫描二维码进行连接（支持双击放大）</p>
+                    <p class="hint">支持双击放大，可用微信、系统相机或任意扫码工具扫描。</p>
                 </div>
                 
                 <div id="scanner-container" class="toggle-content hidden">
@@ -32,7 +41,7 @@
                             <div class="scan-line"></div>
                         </div>
                     </div>
-                    <p class="hint">点击下方按钮后，扫描对方二维码</p>
+                    <p class="hint">点击下方按钮后，用内置扫码读取对方页面的连接二维码。</p>
                 </div>
 
                 <div class="controls">

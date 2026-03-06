@@ -1285,7 +1285,9 @@ function encodePeerSignal(peerId) {
         throw new Error("peerId 为空，无法生成二维码。");
     }
     const url = new URL(window.location.href);
-    url.searchParams.set("peerId", id);
+    url.searchParams.delete("pairId");
+    url.searchParams.delete("peerId");
+    url.searchParams.set("pairId", id);
     return url.toString();
 }
 
@@ -1304,9 +1306,13 @@ function decodePeerSignal(rawText) {
     } catch (error) {
         throw new Error("二维码内容不是 AirCopy Peer 信令。");
     }
-    const peerId = String(parsedUrl.searchParams.get("peerId") || "").trim();
+    const peerId = String(
+        parsedUrl.searchParams.get("pairId")
+        || parsedUrl.searchParams.get("peerId")
+        || ""
+    ).trim();
     if (!peerId) {
-        throw new Error("二维码中的 peerId 为空。");
+        throw new Error("二维码中的 pairId 为空。");
     }
     return peerId;
 }

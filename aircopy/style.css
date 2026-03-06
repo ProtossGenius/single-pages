@@ -61,6 +61,69 @@ body {
     margin-bottom: 10px;
 }
 
+.usage-help {
+    text-align: left;
+    margin: 0 auto;
+    max-width: 600px;
+    padding: 10px 12px;
+    border-radius: 8px;
+    background: #f8fafc;
+    border: 1px solid #e2e8f0;
+}
+
+.usage-title {
+    font-size: 0.92rem;
+    font-weight: 600;
+    color: #334155;
+    margin-bottom: 6px;
+}
+
+.usage-list {
+    margin: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    color: #475569;
+    font-size: 0.9rem;
+    line-height: 1.45;
+}
+
+.usage-item {
+    margin: 0;
+}
+
+.usage-url {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+    color: #1d4ed8;
+    word-break: break-all;
+}
+
+.usage-divider {
+    position: relative;
+    margin: 2px 0;
+    text-align: center;
+    color: #64748b;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+}
+
+.usage-divider::before,
+.usage-divider::after {
+    content: "";
+    position: absolute;
+    top: 50%;
+    width: calc(50% - 1.8em);
+    border-top: 1px solid #cbd5e1;
+}
+
+.usage-divider::before {
+    left: 0;
+}
+
+.usage-divider::after {
+    right: 0;
+}
+
 .content {
     display: flex;
     flex-direction: column;
@@ -75,6 +138,7 @@ body {
     border: 1px solid #ddd;
     border-radius: 8px;
     cursor: zoom-in;
+    transition: border-color 160ms ease, box-shadow 160ms ease, background-color 160ms ease;
 }
 
 #reader {
@@ -102,6 +166,7 @@ body {
     border-radius: 10px;
     overflow: hidden;
     box-shadow: 0 6px 20px rgba(0, 0, 0, 0.2);
+    transition: box-shadow 160ms ease, transform 160ms ease;
 }
 
 .scanner-overlay {
@@ -109,6 +174,7 @@ body {
     inset: 0;
     pointer-events: none;
     z-index: 2;
+    transition: background-color 160ms ease;
 }
 
 .scanner-overlay .corner {
@@ -163,6 +229,34 @@ body {
 .scanner-shell.scanning .scan-line {
     opacity: 1;
     animation: scan-move 1.9s linear infinite;
+}
+
+.scanner-shell.scan-success {
+    box-shadow: 0 0 0 4px rgba(34, 197, 94, 0.6), 0 6px 22px rgba(22, 163, 74, 0.4);
+}
+
+.scanner-shell.scan-success #reader {
+    border-color: #22c55e;
+    background: #10371f;
+}
+
+.scanner-shell.scan-success .scanner-overlay {
+    background: rgba(34, 197, 94, 0.18);
+}
+
+.scanner-shell.scan-success .scanner-overlay .corner {
+    border-color: #86efac;
+}
+
+.scanner-shell.scan-success .scan-line {
+    opacity: 0;
+    animation: none;
+}
+
+#qr-container.scan-success #qrcode {
+    border-color: #22c55e;
+    box-shadow: 0 0 0 4px rgba(34, 197, 94, 0.2);
+    background-color: #f0fdf4;
 }
 
 @keyframes scan-move {
