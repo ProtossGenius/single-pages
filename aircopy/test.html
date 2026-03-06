@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AirCopy 测试页</title>
+    <style>
+        :root {
+            --bg: #f5f7fb;
+            --card: #ffffff;
+            --text: #1f2937;
+            --muted: #6b7280;
+            --border: #dbe2ee;
+            --pending: #f59f00;
+            --pass: #2f9e44;
+            --fail: #d6336c;
+        }
+
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+            margin: 0;
+            font-family: "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+            background: linear-gradient(135deg, #f5f7fb 0%, #edf2ff 100%);
+            color: var(--text);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 900px;
+            margin: 0 auto;
+            background: var(--card);
+            border: 1px solid var(--border);
+            border-radius: 14px;
+            padding: 20px;
+            box-shadow: 0 12px 24px rgba(15, 23, 42, 0.08);
+        }
+
+        h1 {
+            margin: 0;
+            font-size: 24px;
+        }
+
+        .desc {
+            margin: 8px 0 0;
+            color: var(--muted);
+        }
+
+        .summary {
+            margin-top: 12px;
+            padding: 10px 12px;
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            background: #fafcff;
+            color: #334155;
+            font-size: 14px;
+        }
+
+        #test-list {
+            list-style: none;
+            margin: 16px 0;
+            padding: 0;
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            overflow: hidden;
+        }
+
+        .test-item {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 10px;
+            padding: 11px 14px;
+            border-bottom: 1px solid var(--border);
+            background: #fff;
+        }
+
+        .test-item:last-child {
+            border-bottom: none;
+        }
+
+        .test-name {
+            font-size: 14px;
+        }
+
+        .test-status {
+            font-size: 13px;
+            font-weight: 700;
+            white-space: nowrap;
+        }
+
+        .status-pending,
+        .status-running {
+            color: var(--pending);
+        }
+
+        .status-pass {
+            color: var(--pass);
+        }
+
+        .status-fail {
+            color: var(--fail);
+        }
+
+        .copy-btn {
+            width: 100%;
+            border: none;
+            border-radius: 10px;
+            color: #fff;
+            font-size: 15px;
+            font-weight: 700;
+            padding: 12px;
+            cursor: pointer;
+        }
+
+        .copy-btn.state-running {
+            background: var(--pending);
+        }
+
+        .copy-btn.state-pass {
+            background: var(--pass);
+        }
+
+        .copy-btn.state-fail {
+            background: var(--fail);
+        }
+
+        .copy-btn:disabled {
+            opacity: 0.7;
+            cursor: not-allowed;
+        }
+
+        .logs {
+            margin-top: 14px;
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            background: #0f172a;
+            color: #e2e8f0;
+            padding: 10px;
+            min-height: 140px;
+            max-height: 280px;
+            overflow: auto;
+            font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+            font-size: 12px;
+            line-height: 1.5;
+        }
+
+        @media (max-width: 760px) {
+            body {
+                padding: 12px;
+            }
+
+            .container {
+                padding: 14px;
+            }
+
+            .test-item {
+                padding: 10px;
+            }
+        }
+    </style>
+</head>
+<body data-test-mode="single">
+    <main class="container">
+        <h1>AirCopy 功能测试</h1>
+        <p class="desc">自动执行当前代码中的核心功能测试，并显示每项结果。</p>
+        <div id="test-summary" class="summary">准备开始测试…</div>
+        <ul id="test-list" aria-live="polite"></ul>
+        <button id="copy-logs-btn" class="copy-btn state-running" type="button">复制测试结果日志</button>
+        <pre id="test-logs" class="logs" aria-live="polite"></pre>
+    </main>
+
+    <script src="peer-manager.js"></script>
+    <script src="webrtc-manager.js"></script>
+    <script src="test.js"></script>
+</body>
+</html>
