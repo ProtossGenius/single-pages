@@ -138,22 +138,43 @@ body {
     align-items: center;
     width: 100%;
     max-width: 400px;
+    --connector-box-size: 300px;
+    --connector-box-padding: 20px;
+}
+
+.toggle-content {
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
 }
 
 #qrcode {
-    padding: 20px;
+    width: var(--connector-box-size);
+    height: var(--connector-box-size);
+    padding: var(--connector-box-padding);
     background: white;
     border: 1px solid #ddd;
     border-radius: 8px;
     cursor: zoom-in;
+    display: flex;
+    align-items: center;
+    justify-content: center;
     transition: border-color 160ms ease, box-shadow 160ms ease, background-color 160ms ease;
+}
+
+#qrcode canvas,
+#qrcode img {
+    width: 100% !important;
+    height: 100% !important;
+    display: block;
 }
 
 #reader {
     width: 100%;
-    max-width: 300px;
+    max-width: 100%;
     border: 1px solid #ddd;
-    min-height: 300px;
+    min-height: 100%;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -169,8 +190,8 @@ body {
 
 .scanner-shell {
     position: relative;
-    width: 300px;
-    height: 300px;
+    width: var(--connector-box-size);
+    height: var(--connector-box-size);
     border-radius: 10px;
     overflow: hidden;
     box-shadow: 0 6px 20px rgba(0, 0, 0, 0.2);
@@ -871,13 +892,9 @@ button.danger:hover {
         padding: 22px;
     }
 
-    #reader {
-        min-height: 260px;
-    }
-
-    .scanner-shell {
-        width: 260px;
-        height: 260px;
+    .content {
+        --connector-box-size: 260px;
+        --connector-box-padding: 16px;
     }
 
     .sidebar {
