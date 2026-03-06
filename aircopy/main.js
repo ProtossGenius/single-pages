@@ -1208,6 +1208,10 @@
         appState.autoReconnectInProgress = true;
         try {
             const localPeerId = await ensurePeerReady();
+            const activeTargetPeerId = getReconnectTargetPeerId();
+            if (!activeTargetPeerId || activeTargetPeerId !== targetPeerId) {
+                return;
+            }
             if (targetPeerId === localPeerId) {
                 clearAutoReconnectState();
                 setStatus("最近 peerId 指向当前节点，已停止自动重连，请重新扫码连接。");
@@ -1553,6 +1557,8 @@
             if (appState.mode !== "scanner" || appState.scannerRunning) {
                 return;
             }
+            // 扫码由用户显式触发，应优先于 URL/历史自动重连，避免抢占连接目标。
+            clearAutoReconnectState();
             if (!hasScannerDependency()) {
                 setStatus("扫码依赖未加载，无法启动内置扫码。请检查网络后刷新页面。");
                 return;

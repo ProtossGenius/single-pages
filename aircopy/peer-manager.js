@@ -398,6 +398,9 @@ class PeerManager {
         this.remotePersistentId = isIncoming && conn.metadata && conn.metadata.pid ? String(conn.metadata.pid) : "";
 
         conn.on("open", () => {
+            if (this.connection !== conn) {
+                return;
+            }
             if (this.handlers.onConnected) {
                 this.handlers.onConnected({
                     peerId: conn.peer,
@@ -412,6 +415,9 @@ class PeerManager {
         });
 
         conn.on("data", (payload) => {
+            if (this.connection !== conn) {
+                return;
+            }
             this._onData(payload);
         });
 
@@ -423,6 +429,9 @@ class PeerManager {
         });
 
         conn.on("error", (error) => {
+            if (this.connection !== conn) {
+                return;
+            }
             if (this.handlers.onError) {
                 this.handlers.onError(error);
             }

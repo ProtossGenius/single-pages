@@ -469,6 +469,39 @@
             assertEqual(capturedOptions.metadata.pid, "pid-1", "metadata.pid 不正确");
         });
 
+        runner.addTest("PeerManager 忽略失活连接事件", () => {
+            const connectedPeerIds = [];
+            const received = [];
+            const pm = new PeerManager({
+                onConnected(info) {
+                    connectedPeerIds.push(String(info && info.peerId ? info.peerId : ""));
+                },
+                onMessage(message) {
+                    received.push(message);
+                }
+            });
+            pm.displayName = "Tester";
+            pm.persistentId = "pid-2";
+
+            const staleConn = createMockConn("url-peer", { open: false });
+            const activeConn = createMockConn("scan-peer", { open: false });
+            pm._attachConnection(staleConn, false);
+            pm._attachConnection(activeConn, false);
+
+            staleConn.open = true;
+            staleConn.emit("open");
+            staleConn.emit("data", { t: "text", b: "from-stale" });
+
+            activeConn.open = true;
+            activeConn.emit("open");
+            activeConn.emit("data", { t: "text", b: "from-active" });
+
+            assertEqual(connectedPeerIds.length, 1, "失活连接不应触发 connected");
+            assertEqual(connectedPeerIds[0], "scan-peer", "应只接收当前连接的 open 事件");
+            assertEqual(received.length, 1, "失活连接不应触发消息处理");
+            assertEqual(received[0].body, "from-active", "应只处理当前连接的数据");
+        });
+
         runner.addTest("PeerManager.sendText 封包正确", () => {
             const pm = new PeerManager();
             pm.displayName = "Tester";
