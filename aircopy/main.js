@@ -420,8 +420,14 @@
         updateVideoButton();
         loadPersistedChatState();
         const isMobile = /Android|webOS|iPhone|iPod|iPad|Mobile/i.test(navigator.userAgent);
-        setMode(getPreferredConnectorMode(isMobile ? "scanner" : "qr"), { force: true });
-        void tryAutoReconnectFromPersistedNode();
+        const initialMode = getPreferredConnectorMode(isMobile ? "scanner" : "qr");
+        void (async () => {
+            await setMode(initialMode, { force: true });
+            const hasUrlPeerTarget = await tryConnectToUrlPeerIdOnFirstLoad();
+            if (!hasUrlPeerTarget) {
+                await tryAutoReconnectFromPersistedNode();
+            }
+        })();
     }
 
     function setMode(mode, options = {}) {
@@ -705,6 +711,65 @@
             appState.autoReconnectTimer = null;
         }
         appState.autoReconnectInProgress = false;
+    }
+
+    function readUrlPeerIdTarget() {
+        try {
+            const parsed = new URL(window.location.href);
+            return {
+                hasPeerIdParam: parsed.searchParams.has("peerId"),
+                peerId: String(parsed.searchParams.get("peerId") || "").trim()
+            };
+        } catch (_error) {
+            return {
+                hasPeerIdParam: false,
+                peerId: ""
+            };
+        }
+    }
+
+    async function tryConnectToUrlPeerIdOnFirstLoad() {
+        const target = readUrlPeerIdTarget();
+        if (!target.hasPeerIdParam) {
+            return false;
+        }
+
+        appState.autoReconnectAttempted = true;
+        const urlPeerId = target.peerId;
+        if (!urlPeerId) {
+            setStatus("URL 中的 peerId 为空，已跳过历史自动重连，请重新扫码连接。");
+            return true;
+        }
+
+        try {
+            const localPeerId = await ensurePeerReady();
+            if (urlPeerId === localPeerId) {
+                setStatus("URL 中的 peerId 指向当前节点，已跳过连接。");
+                return true;
+            }
+            const connectResult = peerManager.connect(urlPeerId);
+            if (connectResult && connectResult.reused) {
+                const knownPersistentId = appState.remotePersistentId || connectResult.peerPersistentId || "";
+                const knownPeerName = connectResult.peerName || appState.peerName || "";
+                bindConversation(knownPersistentId, knownPeerName, urlPeerId);
+                rememberPeerNode({
+                    persistentId: knownPersistentId,
+                    peerName: knownPeerName,
+                    peerId: urlPeerId
+                });
+                setConnectionState(true);
+                clearUnread();
+                enterChatInterface();
+                setStatus("已连接到 URL 指定节点，已打开对应会话。");
+                return true;
+            }
+            setStatus("检测到 URL peerId，正在发起连接…");
+            setSessionPanelOpen(false);
+            return true;
+        } catch (error) {
+            setStatus(`URL peerId 连接失败：${toErrorMessage(error)}。`);
+            return true;
+        }
     }
 
     async function tryAutoReconnectFromPersistedNode() {
