@@ -50,10 +50,6 @@
         videoPrefByPeer: {},
         transferViews: {},
         objectUrls: [],
-        keepAliveAudioContext: null,
-        keepAliveAudioSource: null,
-        keepAliveWakeLock: null,
-        keepAliveSyncToken: 0,
         autoReconnectAttempted: false,
         autoReconnectInProgress: false,
         autoReconnectTimer: null,
@@ -372,7 +368,6 @@
             if (!document.hidden) {
                 clearUnread();
             }
-            void syncBackgroundKeepAlive();
         });
 
         elements.sendBtn.addEventListener("click", sendCurrentMessage);
@@ -574,7 +569,7 @@
         if (options.persist !== false) {
             persistHangModeSetting();
         }
-        void syncBackgroundKeepAlive();
+        syncHeartbeatKeepAlive();
     }
 
     function applySessionPanelState() {
@@ -2565,7 +2560,7 @@
             elements.peerSessionStatus.classList.toggle("online", appState.connected);
             elements.peerSessionStatus.classList.toggle("offline", !appState.connected);
         }
-        void syncBackgroundKeepAlive();
+        syncHeartbeatKeepAlive();
     }
 
     function playHeartbeatFloatBurst() {
@@ -2612,142 +2607,12 @@
         }, duration + 200);
     }
 
-    function shouldEnableBackgroundKeepAlive() {
+    function shouldEnableHeartbeatKeepAlive() {
         return appState.hangModeEnabled && appState.connected;
     }
 
-    async function syncBackgroundKeepAlive() {
-        const token = ++appState.keepAliveSyncToken;
-        if (!shouldEnableBackgroundKeepAlive()) {
-            await releaseWakeLock();
-            await stopSilentAudioLoop();
-            return;
-        }
-        await ensureSilentAudioLoop();
-        if (token !== appState.keepAliveSyncToken || !shouldEnableBackgroundKeepAlive()) {
-            await releaseWakeLock();
-            await stopSilentAudioLoop();
-            return;
-        }
-        await ensureWakeLock();
-        if (token !== appState.keepAliveSyncToken || !shouldEnableBackgroundKeepAlive()) {
-            await releaseWakeLock();
-            await stopSilentAudioLoop();
-        }
-    }
-
-    async function ensureSilentAudioLoop() {
-        if (appState.keepAliveAudioContext) {
-            if (appState.keepAliveAudioContext.state === "suspended") {
-                try {
-                    await appState.keepAliveAudioContext.resume();
-                } catch (_error) {
-                    // Ignore resume failures.
-                }
-            }
-            return;
-        }
-        const AudioContextCtor = window.AudioContext || window.webkitAudioContext;
-        if (!AudioContextCtor) {
-            return;
-        }
-        let context = null;
-        let source = null;
-        try {
-            context = new AudioContextCtor();
-            source = context.createBufferSource();
-            const silentBuffer = context.createBuffer(1, 2205, 22050);
-            const gainNode = context.createGain();
-            gainNode.gain.value = 0;
-            source.buffer = silentBuffer;
-            source.loop = true;
-            source.connect(gainNode);
-            gainNode.connect(context.destination);
-            source.start(0);
-            if (context.state === "suspended") {
-                await context.resume();
-            }
-            appState.keepAliveAudioContext = context;
-            appState.keepAliveAudioSource = source;
-        } catch (_error) {
-            // Ignore unsupported/autoplay errors.
-            if (source) {
-                try {
-                    source.stop(0);
-                } catch (_e) {
-                    // Ignore cleanup failures.
-                }
-            }
-            if (context) {
-                try {
-                    await context.close();
-                } catch (_e) {
-                    // Ignore cleanup failures.
-                }
-            }
-        }
-    }
-
-    async function stopSilentAudioLoop() {
-        const source = appState.keepAliveAudioSource;
-        appState.keepAliveAudioSource = null;
-        if (source) {
-            try {
-                source.stop(0);
-            } catch (_error) {
-                // Ignore if already stopped.
-            }
-            try {
-                source.disconnect();
-            } catch (_error) {
-                // Ignore disconnection failures.
-            }
-        }
-        const context = appState.keepAliveAudioContext;
-        appState.keepAliveAudioContext = null;
-        if (context) {
-            try {
-                await context.close();
-            } catch (_error) {
-                // Ignore close failures.
-            }
-        }
-    }
-
-    async function ensureWakeLock() {
-        if (!navigator.wakeLock || typeof navigator.wakeLock.request !== "function") {
-            return;
-        }
-        if (appState.keepAliveWakeLock) {
-            return;
-        }
-        try {
-            const sentinel = await navigator.wakeLock.request("screen");
-            appState.keepAliveWakeLock = sentinel;
-            sentinel.addEventListener("release", () => {
-                if (appState.keepAliveWakeLock === sentinel) {
-                    appState.keepAliveWakeLock = null;
-                }
-                if (shouldEnableBackgroundKeepAlive() && !document.hidden) {
-                    void syncBackgroundKeepAlive();
-                }
-            });
-        } catch (_error) {
-            // Ignore unsupported/permission failures.
-        }
-    }
-
-    async function releaseWakeLock() {
-        const sentinel = appState.keepAliveWakeLock;
-        appState.keepAliveWakeLock = null;
-        if (!sentinel) {
-            return;
-        }
-        try {
-            await sentinel.release();
-        } catch (_error) {
-            // Ignore release failures.
-        }
+    function syncHeartbeatKeepAlive() {
+        peerManager.setHeartbeatKeepAliveEnabled(shouldEnableHeartbeatKeepAlive());
     }
 
     function markUnreadIfNeeded(isPeerMessage) {
@@ -2956,8 +2821,6 @@
         closeQrModal();
         closeEmojiPanel();
         closeFileOfferModal();
-        void releaseWakeLock();
-        void stopSilentAudioLoop();
         releaseObjectUrls();
         stopScanIfRunning();
         peerManager.destroy();
