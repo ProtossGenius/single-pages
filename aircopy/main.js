@@ -6,9 +6,12 @@
     const CONNECTOR_MODE_STORAGE_KEY = "aircopy.connector.mode.v1";
     const VIDEO_PREF_STORAGE_KEY = "aircopy.video.pref.v1";
     const HANG_MODE_STORAGE_KEY = "aircopy.hang.mode.v1";
+    const STATUS_LOG_MAX_STORAGE_KEY = "aircopy.status.log.max.v1";
     const CHAT_HISTORY_MAX = 300;
-    const STATUS_LOG_MAX = 240;
-    const STATUS_LOG_EXPORT_MAX = 120;
+    const STATUS_LOG_DEFAULT_MAX = 240;
+    const STATUS_LOG_MIN = 20;
+    const STATUS_LOG_HARD_MAX = 5000;
+    const COPY_LOGS_FEEDBACK_MS = 1200;
     const AUTO_RECONNECT_INTERVAL_MS = 5000;
     const PEER_INIT_TIMEOUT_MS = 20000;
     const EMOJI_SET = ["😀", "😁", "😂", "🤣", "😊", "😍", "😘", "😎", "🤔", "😭", "😡", "👍", "👎", "🙏", "👏", "🎉"];
@@ -69,10 +72,12 @@
         chatHistory: [],
         conversations: {},
         statusLogs: [],
+        statusLogMax: STATUS_LOG_DEFAULT_MAX,
         isMobileLayout: false,
         sidebarCollapsedDesktop: false,
         sessionOpenMobile: false,
         settingsOpen: false,
+        copyLogsFeedbackTimer: null,
         hangModeEnabled: false,
         recordingVoice: false,
         voiceRecorder: null,
@@ -123,6 +128,7 @@
         settingsToggle: document.getElementById("settings-toggle"),
         sidebarSettings: document.getElementById("sidebar-settings"),
         copyLatestLogs: document.getElementById("copy-latest-logs"),
+        statusLogMaxInput: document.getElementById("status-log-max"),
         hangModeToggle: document.getElementById("hang-mode-toggle"),
         peerSessionName: document.getElementById("peer-session-name"),
         peerSessionStatus: document.getElementById("peer-session-status"),
@@ -343,6 +349,7 @@
         loadConnectorModePreference();
         loadVideoPrefs();
         loadHangModeSetting();
+        loadStatusLogMaxSetting();
         renderBaseUrlText();
         setInitStage("location", "success", "已读取当前页面链接");
         if (!peerManager) {
@@ -419,6 +426,18 @@
         if (elements.hangModeToggle) {
             elements.hangModeToggle.addEventListener("change", () => {
                 setHangModeEnabled(Boolean(elements.hangModeToggle.checked));
+            });
+        }
+        if (elements.statusLogMaxInput) {
+            elements.statusLogMaxInput.addEventListener("change", () => {
+                const previous = appState.statusLogMax;
+                setStatusLogMax(elements.statusLogMaxInput.value);
+                if (appState.statusLogMax !== previous) {
+                    setStatus(`日志保留上限已设置为 ${appState.statusLogMax} 条。`);
+                }
+            });
+            elements.statusLogMaxInput.addEventListener("blur", () => {
+                setStatusLogMax(elements.statusLogMaxInput.value);
             });
         }
         if (elements.copyLatestLogs) {
@@ -876,6 +895,55 @@
             appState.hangModeEnabled = localStorage.getItem(HANG_MODE_STORAGE_KEY) === "1";
         } catch (_error) {
             appState.hangModeEnabled = false;
+        }
+    }
+
+    function normalizeStatusLogMax(value, fallback = STATUS_LOG_DEFAULT_MAX) {
+        const parsed = Number.parseInt(String(value || ""), 10);
+        if (!Number.isFinite(parsed)) {
+            return normalizeStatusLogMax(fallback, STATUS_LOG_DEFAULT_MAX);
+        }
+        if (parsed < STATUS_LOG_MIN) {
+            return STATUS_LOG_MIN;
+        }
+        if (parsed > STATUS_LOG_HARD_MAX) {
+            return STATUS_LOG_HARD_MAX;
+        }
+        return parsed;
+    }
+
+    function loadStatusLogMaxSetting() {
+        let next = STATUS_LOG_DEFAULT_MAX;
+        try {
+            const raw = localStorage.getItem(STATUS_LOG_MAX_STORAGE_KEY);
+            if (raw !== null && raw !== "") {
+                next = normalizeStatusLogMax(raw);
+            }
+        } catch (_error) {
+            next = STATUS_LOG_DEFAULT_MAX;
+        }
+        setStatusLogMax(next, { persist: false });
+    }
+
+    function persistStatusLogMaxSetting() {
+        try {
+            localStorage.setItem(STATUS_LOG_MAX_STORAGE_KEY, String(appState.statusLogMax));
+        } catch (_error) {
+            // Ignore storage failures.
+        }
+    }
+
+    function setStatusLogMax(maxCount, options = {}) {
+        const normalized = normalizeStatusLogMax(maxCount, appState.statusLogMax);
+        appState.statusLogMax = normalized;
+        if (elements.statusLogMaxInput && elements.statusLogMaxInput.value !== String(normalized)) {
+            elements.statusLogMaxInput.value = String(normalized);
+        }
+        if (appState.statusLogs.length > normalized) {
+            appState.statusLogs.splice(0, appState.statusLogs.length - normalized);
+        }
+        if (options.persist !== false) {
+            persistStatusLogMaxSetting();
         }
     }
 
@@ -3120,8 +3188,8 @@
             source: String(source || "status"),
             text
         });
-        if (appState.statusLogs.length > STATUS_LOG_MAX) {
-            appState.statusLogs.splice(0, appState.statusLogs.length - STATUS_LOG_MAX);
+        if (appState.statusLogs.length > appState.statusLogMax) {
+            appState.statusLogs.splice(0, appState.statusLogs.length - appState.statusLogMax);
         }
     }
 
@@ -3136,12 +3204,14 @@
 
     function buildLatestLogsText() {
         const lines = [];
+        const exportLimit = appState.statusLogMax;
         lines.push("[AirCopy] 最新日志");
         lines.push(`导出时间: ${formatLogTimestamp(Date.now())}`);
         lines.push(`页面: ${window.location.href}`);
         lines.push(`UA: ${navigator.userAgent || "unknown"}`);
+        lines.push(`日志导出上限: ${exportLimit}`);
         lines.push("");
-        const records = appState.statusLogs.slice(-STATUS_LOG_EXPORT_MAX);
+        const records = appState.statusLogs.slice(-exportLimit);
         if (records.length === 0) {
             lines.push("(暂无日志)");
         } else {
@@ -3178,13 +3248,42 @@
         }
     }
 
+    function setCopyLatestLogsButtonFeedback(state = "idle") {
+        if (!elements.copyLatestLogs) {
+            return;
+        }
+        if (appState.copyLogsFeedbackTimer) {
+            window.clearTimeout(appState.copyLogsFeedbackTimer);
+            appState.copyLogsFeedbackTimer = null;
+        }
+        elements.copyLatestLogs.classList.remove("state-success");
+        if (state === "success") {
+            elements.copyLatestLogs.textContent = "已复制";
+            elements.copyLatestLogs.classList.add("state-success");
+            appState.copyLogsFeedbackTimer = window.setTimeout(() => {
+                setCopyLatestLogsButtonFeedback("idle");
+            }, COPY_LOGS_FEEDBACK_MS);
+            return;
+        }
+        if (state === "error") {
+            elements.copyLatestLogs.textContent = "复制失败";
+            appState.copyLogsFeedbackTimer = window.setTimeout(() => {
+                setCopyLatestLogsButtonFeedback("idle");
+            }, COPY_LOGS_FEEDBACK_MS);
+            return;
+        }
+        elements.copyLatestLogs.textContent = "复制最新日志";
+    }
+
     async function copyLatestLogs() {
         const logs = buildLatestLogsText();
         try {
             await copyTextToClipboard(logs);
-            const copiedCount = Math.min(appState.statusLogs.length, STATUS_LOG_EXPORT_MAX);
+            setCopyLatestLogsButtonFeedback("success");
+            const copiedCount = Math.min(appState.statusLogs.length, appState.statusLogMax);
             setStatus(`已复制最新日志（${copiedCount} 条）。`);
         } catch (error) {
+            setCopyLatestLogsButtonFeedback("error");
             setStatus(`复制日志失败：${toErrorMessage(error)}`);
         }
     }
@@ -3350,6 +3449,10 @@
     }
 
     window.addEventListener("beforeunload", () => {
+        if (appState.copyLogsFeedbackTimer) {
+            window.clearTimeout(appState.copyLogsFeedbackTimer);
+            appState.copyLogsFeedbackTimer = null;
+        }
         clearAutoReconnectState();
         closeQrModal();
         closeEmojiPanel();
