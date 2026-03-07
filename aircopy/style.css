@@ -821,6 +821,12 @@ button.danger:hover {
     font-size: 0.92rem;
 }
 
+.video-settings label {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+}
+
 .video-grid {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));

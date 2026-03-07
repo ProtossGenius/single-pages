@@ -1,6 +1,8 @@
 const AIRCOPY_PEER_PREFIX = "AIRCOPYP1:";
 const FILE_CHUNK_SIZE = 60 * 1024;
 const FILE_ACK_TIMEOUT_MS = 120000;
+const FILE_SEND_DRAIN_TIMEOUT_MS = 20000;
+const FILE_SEND_DRAIN_THRESHOLD_BYTES = 96 * 1024;
 const HEARTBEAT_INTERVAL_MS = 5000;
 const HEARTBEAT_FAST_INTERVAL_MS = 1000;
 const HEARTBEAT_FAST_THRESHOLD_MS = 15000;
@@ -199,6 +201,7 @@ class PeerManager {
             id: transferId,
             totalChunks
         });
+        await this._waitForDataChannelDrain(FILE_SEND_DRAIN_TIMEOUT_MS, FILE_SEND_DRAIN_THRESHOLD_BYTES);
 
         return {
             transferId,
@@ -1231,6 +1234,42 @@ class PeerManager {
     _pause(ms) {
         return new Promise((resolve) => {
             window.setTimeout(resolve, ms);
+        });
+    }
+
+    _waitForDataChannelDrain(timeoutMs, thresholdBytes) {
+        const activeConn = this.connection;
+        if (!activeConn || !activeConn.open) {
+            return Promise.resolve();
+        }
+        const channel = activeConn.dataChannel;
+        if (!channel || typeof channel.bufferedAmount !== "number") {
+            return this._pause(120);
+        }
+
+        const threshold = Math.max(0, Number(thresholdBytes) || 0);
+        if (channel.bufferedAmount <= threshold) {
+            return Promise.resolve();
+        }
+
+        const deadline = Date.now() + Math.max(300, Number(timeoutMs) || 0);
+        return new Promise((resolve) => {
+            const poll = () => {
+                if (this.connection !== activeConn || !activeConn.open) {
+                    resolve();
+                    return;
+                }
+                if (channel.bufferedAmount <= threshold) {
+                    resolve();
+                    return;
+                }
+                if (Date.now() >= deadline) {
+                    resolve();
+                    return;
+                }
+                window.setTimeout(poll, 60);
+            };
+            poll();
         });
     }
 }

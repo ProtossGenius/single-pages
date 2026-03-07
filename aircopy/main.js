@@ -4,7 +4,6 @@
     const SELF_ID_STORAGE_KEY = "aircopy.self.id.v1";
     const NODE_HINT_STORAGE_KEY = "aircopy.node.hint.v1";
     const CONNECTOR_MODE_STORAGE_KEY = "aircopy.connector.mode.v1";
-    const VIDEO_PREF_STORAGE_KEY = "aircopy.video.pref.v1";
     const STATUS_LOG_MAX_STORAGE_KEY = "aircopy.status.log.max.v1";
     const CHAT_HISTORY_MAX = 300;
     const STATUS_LOG_DEFAULT_MAX = 240;
@@ -86,7 +85,6 @@
         videoModalOpen: false,
         incomingCallInfo: null,
         incomingFileOffer: null,
-        videoPrefByPeer: {},
         transferViews: {},
         objectUrls: [],
         autoReconnectAttempted: false,
@@ -147,6 +145,7 @@
         videoModal: document.getElementById("video-modal"),
         videoStatus: document.getElementById("video-status"),
         videoShowToggle: document.getElementById("video-show-toggle"),
+        videoMuteToggle: document.getElementById("video-mute-toggle"),
         localVideo: document.getElementById("local-video"),
         remoteVideo: document.getElementById("remote-video"),
         incomingCallActions: document.getElementById("incoming-call-actions"),
@@ -270,6 +269,7 @@
                 const noVideo = !info || !info.hasVideoTrack;
                 elements.localVideo.parentElement.classList.toggle("video-off", noVideo);
             }
+            applyLocalMediaTrackToggles();
             ensureVideoPlayback(elements.localVideo, { muted: true });
         },
         onRemoteStream: (stream, info) => {
@@ -342,7 +342,6 @@
         ensureLocalPersistentId();
         loadPersistedNodeHint();
         loadConnectorModePreference();
-        loadVideoPrefs();
         loadStatusLogMaxSetting();
         renderBaseUrlText();
         setInitStage("location", "success", "已读取当前页面链接");
@@ -464,6 +463,7 @@
         elements.recordVoice.addEventListener("click", toggleVoiceRecording);
         elements.videoCall.addEventListener("click", toggleVideoCall);
         elements.videoShowToggle.addEventListener("change", onVideoShowToggleChanged);
+        elements.videoMuteToggle.addEventListener("change", onVideoMuteToggleChanged);
         elements.acceptVideoCall.addEventListener("click", acceptIncomingVideoCall);
         elements.rejectVideoCall.addEventListener("click", rejectIncomingVideoCall);
         elements.hangupVideo.addEventListener("click", () => {
@@ -2623,54 +2623,50 @@
         }
     }
 
-    function loadVideoPrefs() {
-        try {
-            const raw = localStorage.getItem(VIDEO_PREF_STORAGE_KEY);
-            const parsed = raw ? JSON.parse(raw) : {};
-            if (parsed && typeof parsed === "object") {
-                appState.videoPrefByPeer = parsed;
-            }
-        } catch (_error) {
-            appState.videoPrefByPeer = {};
-        }
-    }
-
-    function persistVideoPrefs() {
-        try {
-            localStorage.setItem(VIDEO_PREF_STORAGE_KEY, JSON.stringify(appState.videoPrefByPeer || {}));
-        } catch (_error) {
-            // Ignore storage failures.
-        }
-    }
-
-    function getRemoteVideoPrefKey() {
-        if (appState.remotePersistentId) {
-            return `pid:${appState.remotePersistentId}`;
-        }
-        if (appState.currentConversationId) {
-            return appState.currentConversationId;
-        }
-        return "default";
-    }
-
     function syncVideoPrefForCurrentPeer() {
-        const key = getRemoteVideoPrefKey();
-        const value = appState.videoPrefByPeer[key];
-        elements.videoShowToggle.checked = value !== false;
+        setVideoControlDefaults();
+        applyLocalMediaTrackToggles();
     }
 
     function onVideoShowToggleChanged() {
-        const key = getRemoteVideoPrefKey();
-        const enabled = Boolean(elements.videoShowToggle.checked);
-        appState.videoPrefByPeer[key] = enabled;
-        persistVideoPrefs();
-        const stream = elements.localVideo ? elements.localVideo.srcObject : null;
-        if (stream && stream.getVideoTracks) {
-            const tracks = stream.getVideoTracks();
-            for (let i = 0; i < tracks.length; i += 1) {
-                tracks[i].enabled = enabled;
-            }
+        applyLocalMediaTrackToggles();
+    }
+
+    function onVideoMuteToggleChanged() {
+        applyLocalMediaTrackToggles();
+    }
+
+    function setVideoControlDefaults() {
+        if (elements.videoShowToggle) {
+            elements.videoShowToggle.checked = true;
         }
+        if (elements.videoMuteToggle) {
+            elements.videoMuteToggle.checked = false;
+        }
+    }
+
+    function applyLocalMediaTrackToggles() {
+        const stream = elements.localVideo ? elements.localVideo.srcObject : null;
+        if (!stream || typeof stream.getTracks !== "function") {
+            return;
+        }
+        const showVideo = Boolean(elements.videoShowToggle && elements.videoShowToggle.checked);
+        const muteAudio = Boolean(elements.videoMuteToggle && elements.videoMuteToggle.checked);
+        const videoTracks = typeof stream.getVideoTracks === "function" ? stream.getVideoTracks() : [];
+        for (let i = 0; i < videoTracks.length; i += 1) {
+            videoTracks[i].enabled = showVideo;
+        }
+        const audioTracks = typeof stream.getAudioTracks === "function" ? stream.getAudioTracks() : [];
+        for (let i = 0; i < audioTracks.length; i += 1) {
+            audioTracks[i].enabled = !muteAudio;
+        }
+    }
+
+    function hasPendingTransfer() {
+        return Boolean(
+            appState.incomingFileOffer
+            || Object.keys(appState.transferViews).length > 0
+        );
     }
 
     function shouldShowOwnVideo() {
@@ -2701,6 +2697,10 @@
     }
 
     async function startVideoCall() {
+        if (hasPendingTransfer()) {
+            setStatus("文件传输进行中，请稍后再发起视频通话。");
+            return;
+        }
         try {
             await peerManager.startVideoCall({ showVideo: shouldShowOwnVideo(), requireAudio: true });
             appState.videoState = "calling";
@@ -2783,6 +2783,7 @@
 
     function resetVideoUI(statusText) {
         setVideoStatus(statusText || "未开始");
+        setVideoControlDefaults();
         if (elements.localVideo) {
             elements.localVideo.srcObject = null;
         }
