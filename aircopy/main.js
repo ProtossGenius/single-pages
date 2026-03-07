@@ -5,7 +5,6 @@
     const NODE_HINT_STORAGE_KEY = "aircopy.node.hint.v1";
     const CONNECTOR_MODE_STORAGE_KEY = "aircopy.connector.mode.v1";
     const VIDEO_PREF_STORAGE_KEY = "aircopy.video.pref.v1";
-    const HANG_MODE_STORAGE_KEY = "aircopy.hang.mode.v1";
     const STATUS_LOG_MAX_STORAGE_KEY = "aircopy.status.log.max.v1";
     const CHAT_HISTORY_MAX = 300;
     const STATUS_LOG_DEFAULT_MAX = 240;
@@ -77,7 +76,6 @@
         sessionOpenMobile: false,
         settingsOpen: false,
         copyLogsFeedbackTimer: null,
-        hangModeEnabled: false,
         recordingVoice: false,
         voiceRecorder: null,
         voiceChunks: [],
@@ -127,7 +125,6 @@
         sidebarSettings: document.getElementById("sidebar-settings"),
         copyLatestLogs: document.getElementById("copy-latest-logs"),
         statusLogMaxInput: document.getElementById("status-log-max"),
-        hangModeToggle: document.getElementById("hang-mode-toggle"),
         peerSessionName: document.getElementById("peer-session-name"),
         peerSessionStatus: document.getElementById("peer-session-status"),
         peerSessionUnread: document.getElementById("peer-session-unread"),
@@ -346,7 +343,6 @@
         loadPersistedNodeHint();
         loadConnectorModePreference();
         loadVideoPrefs();
-        loadHangModeSetting();
         loadStatusLogMaxSetting();
         renderBaseUrlText();
         setInitStage("location", "success", "已读取当前页面链接");
@@ -365,9 +361,6 @@
         elements.displayName.value = `用户_${seed}`;
         peerManager.setDisplayName(getDisplayName());
         peerManager.setPersistentId(appState.localPersistentId);
-        if (elements.hangModeToggle) {
-            elements.hangModeToggle.checked = appState.hangModeEnabled;
-        }
         if (elements.settingsToggle) {
             elements.settingsToggle.setAttribute("aria-expanded", "false");
         }
@@ -419,11 +412,6 @@
         if (elements.settingsToggle) {
             elements.settingsToggle.addEventListener("click", () => {
                 setSettingsPanelOpen(!appState.settingsOpen);
-            });
-        }
-        if (elements.hangModeToggle) {
-            elements.hangModeToggle.addEventListener("change", () => {
-                setHangModeEnabled(Boolean(elements.hangModeToggle.checked));
             });
         }
         if (elements.statusLogMaxInput) {
@@ -524,7 +512,6 @@
         initEmojiPanel();
         syncVideoPrefForCurrentPeer();
         setSettingsPanelOpen(false);
-        setHangModeEnabled(appState.hangModeEnabled, { persist: false });
         setConnectionState(false);
         updateVideoButton();
         loadPersistedChatState();
@@ -911,14 +898,6 @@
         }
     }
 
-    function loadHangModeSetting() {
-        try {
-            appState.hangModeEnabled = localStorage.getItem(HANG_MODE_STORAGE_KEY) === "1";
-        } catch (_error) {
-            appState.hangModeEnabled = false;
-        }
-    }
-
     function normalizeStatusLogMax(value, fallback = STATUS_LOG_DEFAULT_MAX) {
         const parsed = Number.parseInt(String(value || ""), 10);
         if (!Number.isFinite(parsed)) {
@@ -996,25 +975,6 @@
             return appState.preferredConnectorMode;
         }
         return normalizeConnectorMode(fallbackMode);
-    }
-
-    function persistHangModeSetting() {
-        try {
-            localStorage.setItem(HANG_MODE_STORAGE_KEY, appState.hangModeEnabled ? "1" : "0");
-        } catch (_error) {
-            // Ignore storage failures.
-        }
-    }
-
-    function setHangModeEnabled(enabled, options = {}) {
-        appState.hangModeEnabled = Boolean(enabled);
-        if (elements.hangModeToggle && elements.hangModeToggle.checked !== appState.hangModeEnabled) {
-            elements.hangModeToggle.checked = appState.hangModeEnabled;
-        }
-        if (options.persist !== false) {
-            persistHangModeSetting();
-        }
-        syncHeartbeatKeepAlive();
     }
 
     function applySessionPanelState() {
@@ -3183,7 +3143,7 @@
     }
 
     function shouldEnableHeartbeatKeepAlive() {
-        return appState.hangModeEnabled && appState.connected;
+        return appState.connected;
     }
 
     function syncHeartbeatKeepAlive() {

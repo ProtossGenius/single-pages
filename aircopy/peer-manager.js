@@ -5,7 +5,8 @@ const HEARTBEAT_INTERVAL_MS = 5000;
 const HEARTBEAT_FAST_INTERVAL_MS = 1000;
 const HEARTBEAT_FAST_THRESHOLD_MS = 15000;
 const HEARTBEAT_DISCONNECT_TIMEOUT_MS = 10 * 60 * 1000;
-const HEARTBEAT_KEEPALIVE_RETRY_MS = 3000;
+const HEARTBEAT_KEEPALIVE_AUDIO_RETRY_MS = 3000;
+const HEARTBEAT_KEEPALIVE_AUDIO_SRC = "./silent-loop.mp3";
 
 class PeerManager {
     constructor(handlers = {}) {
@@ -25,10 +26,7 @@ class PeerManager {
         this.pendingHeartbeatId = "";
         this.heartbeatDueAt = 0;
         this.heartbeatKeepAliveEnabled = false;
-        this.heartbeatKeepAliveCall = null;
-        this.heartbeatKeepAliveRole = "";
-        this.heartbeatKeepAliveLocalStream = null;
-        this.heartbeatKeepAliveRemoteStream = null;
+        this.heartbeatKeepAliveAudio = null;
         this.heartbeatKeepAliveRetryTimer = null;
 
         this.incomingTransfers = new Map();
@@ -265,7 +263,6 @@ class PeerManager {
         if (!targetPeerId) {
             throw new Error("未找到对端 peerId。");
         }
-        this._stopHeartbeatKeepAliveCall();
         try {
             const media = await this._createLocalMediaStream({
                 showVideo: options.showVideo !== false,
@@ -286,7 +283,6 @@ class PeerManager {
                 this.handlers.onCallState({ state: "calling", incoming: false, hasVideoTrack: media.hasVideoTrack });
             }
         } catch (error) {
-            this._syncHeartbeatKeepAliveCall();
             throw error;
         }
     }
@@ -297,7 +293,6 @@ class PeerManager {
         }
         const call = this.pendingIncomingCall;
         this.pendingIncomingCall = null;
-        this._stopHeartbeatKeepAliveCall();
         try {
             const media = await this._createLocalMediaStream({
                 showVideo: options.showVideo !== false,
@@ -311,7 +306,6 @@ class PeerManager {
                 this.handlers.onCallState({ state: "connecting", incoming: true, hasVideoTrack: media.hasVideoTrack });
             }
         } catch (error) {
-            this._syncHeartbeatKeepAliveCall();
             throw error;
         }
     }
@@ -326,7 +320,6 @@ class PeerManager {
         if (this.handlers.onCallState) {
             this.handlers.onCallState({ state: "rejected", incoming: true });
         }
-        this._syncHeartbeatKeepAliveCall();
     }
 
     hangupVideoCall(options = {}) {
@@ -351,12 +344,11 @@ class PeerManager {
         if (this.handlers.onCallState) {
             this.handlers.onCallState({ state: "idle", incoming: false });
         }
-        this._syncHeartbeatKeepAliveCall();
     }
 
     closeConnection() {
         this._stopHeartbeatLoop();
-        this._stopHeartbeatKeepAliveCall();
+        this._stopHeartbeatKeepAliveAudio();
         if (this.connection) {
             this.connection.close();
             this.connection = null;
@@ -397,7 +389,7 @@ class PeerManager {
 
     setHeartbeatKeepAliveEnabled(enabled) {
         this.heartbeatKeepAliveEnabled = Boolean(enabled);
-        this._syncHeartbeatKeepAliveCall();
+        this._syncHeartbeatKeepAliveAudio();
     }
 
     _assertConnectionReady() {
@@ -413,7 +405,7 @@ class PeerManager {
         if (this.connection && this.connection !== conn) {
             this.connection.close();
         }
-        this._stopHeartbeatKeepAliveCall();
+        this._stopHeartbeatKeepAliveAudio();
         this.connection = conn;
         this.helloSent = false;
         this.remoteDisplayName = (conn.metadata && conn.metadata.name) ? String(conn.metadata.name) : "";
@@ -433,7 +425,7 @@ class PeerManager {
             }
             this._sendHello();
             this._startHeartbeatLoop();
-            this._syncHeartbeatKeepAliveCall();
+            this._syncHeartbeatKeepAliveAudio();
         });
 
         conn.on("data", (payload) => {
@@ -853,6 +845,7 @@ class PeerManager {
         this.currentHeartbeatIntervalMs = HEARTBEAT_INTERVAL_MS;
         this._sendHeartbeat();
         this._scheduleHeartbeatTick();
+        this._syncHeartbeatKeepAliveAudio();
     }
 
     _stopHeartbeatLoop() {
@@ -864,6 +857,7 @@ class PeerManager {
         this.lastHeartbeatReplyAt = 0;
         this.pendingHeartbeatId = "";
         this.heartbeatDueAt = 0;
+        this._syncHeartbeatKeepAliveAudio();
     }
 
     _setHeartbeatInterval(intervalMs) {
@@ -915,6 +909,7 @@ class PeerManager {
         if (this.currentHeartbeatIntervalMs !== HEARTBEAT_INTERVAL_MS) {
             this._setHeartbeatInterval(HEARTBEAT_INTERVAL_MS);
         }
+        this._syncHeartbeatKeepAliveAudio();
     }
 
     _sendHeartbeat() {
@@ -924,6 +919,7 @@ class PeerManager {
         const now = Date.now();
         const noReplyDuration = this.lastHeartbeatReplyAt > 0 ? now - this.lastHeartbeatReplyAt : 0;
         if (noReplyDuration >= HEARTBEAT_DISCONNECT_TIMEOUT_MS) {
+            this._stopHeartbeatKeepAliveAudio();
             this._handleActiveConnectionClosed("心跳超时，连接已断开");
             return;
         }
@@ -943,6 +939,7 @@ class PeerManager {
         });
         this.pendingHeartbeatId = heartbeatId;
         this.heartbeatDueAt = now + this.currentHeartbeatIntervalMs;
+        this._syncHeartbeatKeepAliveAudio();
     }
 
     _handleIncomingHeartbeat(payload) {
@@ -982,7 +979,7 @@ class PeerManager {
         this.remoteDisplayName = "";
         this.remotePersistentId = "";
         this._stopHeartbeatLoop();
-        this._stopHeartbeatKeepAliveCall();
+        this._stopHeartbeatKeepAliveAudio();
         if (activeConnection) {
             try {
                 activeConnection.close();
@@ -1021,14 +1018,14 @@ class PeerManager {
         const metadata = call.metadata || {};
         const isHeartbeatKeepAlive = metadata.keepAlive === true || metadata.keepAlive === "true" || metadata.keepAlive === "1";
         if (isHeartbeatKeepAlive) {
-            this._handleIncomingHeartbeatKeepAliveCall(call);
+            // Backward compatibility: ignore legacy keepalive media calls.
+            call.close();
             return;
         }
         if (this.mediaCall || this.pendingIncomingCall) {
             call.close();
             return;
         }
-        this._stopHeartbeatKeepAliveCall();
         this.pendingIncomingCall = call;
 
         if (this.handlers.onIncomingCall) {
@@ -1048,7 +1045,6 @@ class PeerManager {
             if (this.handlers.onCallState) {
                 this.handlers.onCallState({ state: "idle", incoming: true });
             }
-            this._syncHeartbeatKeepAliveCall();
         });
     }
 
@@ -1076,7 +1072,6 @@ class PeerManager {
         call.on("close", () => {
             const isCurrentCall = this.mediaCall === call;
             if (!isCurrentCall) {
-                this._syncHeartbeatKeepAliveCall();
                 return;
             }
             this.mediaCall = null;
@@ -1085,7 +1080,6 @@ class PeerManager {
             if (this.handlers.onCallState) {
                 this.handlers.onCallState({ state: "idle", incoming: Boolean(options.incoming) });
             }
-            this._syncHeartbeatKeepAliveCall();
         });
 
         call.on("error", (error) => {
@@ -1098,170 +1092,74 @@ class PeerManager {
         });
     }
 
-    _syncHeartbeatKeepAliveCall() {
-        const canKeepAlive = Boolean(this.peer && this.connection && this.connection.open);
-        if (!canKeepAlive) {
-            this._stopHeartbeatKeepAliveCall();
-            return;
-        }
-        if (this.mediaCall || this.pendingIncomingCall) {
-            this._stopHeartbeatKeepAliveCall();
-            return;
-        }
-        if (!this.heartbeatKeepAliveEnabled) {
-            this._clearHeartbeatKeepAliveRetryTimer();
-            if (this.heartbeatKeepAliveRole === "outgoing") {
-                this._stopHeartbeatKeepAliveCall();
-            }
-            return;
-        }
-        if (this.heartbeatKeepAliveCall) {
-            this._clearHeartbeatKeepAliveRetryTimer();
-            return;
-        }
-        this._startHeartbeatKeepAliveCall();
-    }
-
-    _startHeartbeatKeepAliveCall() {
-        if (!this.peer || !this.connection || !this.connection.open || this.heartbeatKeepAliveCall) {
-            return;
-        }
-        const targetPeerId = this.connection.peer;
-        if (!targetPeerId) {
-            return;
-        }
-
-        this._clearHeartbeatKeepAliveRetryTimer();
-        const localStream = this._createHeartbeatKeepAliveStream();
-        let call = null;
-        try {
-            call = this.peer.call(targetPeerId, localStream, {
-                metadata: {
-                    keepAlive: true,
-                    name: this.displayName,
-                    pid: this.persistentId
-                }
-            });
-        } catch (_error) {
-            this._stopStreamTracks(localStream);
-            this._scheduleHeartbeatKeepAliveRetry();
-            return;
-        }
-
-        if (!call) {
-            this._stopStreamTracks(localStream);
-            this._scheduleHeartbeatKeepAliveRetry();
-            return;
-        }
-        this._bindHeartbeatKeepAliveCall(call, { incoming: false, localStream });
-    }
-
-    _handleIncomingHeartbeatKeepAliveCall(call) {
-        if (!call || !this.connection || !this.connection.open || this.mediaCall || this.pendingIncomingCall) {
-            if (call) {
-                call.close();
-            }
-            return;
-        }
-        if (this.heartbeatKeepAliveCall && this.heartbeatKeepAliveCall !== call) {
-            const preferOutgoing =
-                this.heartbeatKeepAliveRole === "outgoing" &&
-                this._shouldPreferOutgoingHeartbeatKeepAlive(call.peer);
-            if (preferOutgoing) {
-                call.close();
-                return;
-            }
-            this._stopHeartbeatKeepAliveCall();
-        }
-
-        this._clearHeartbeatKeepAliveRetryTimer();
-        const localStream = this._createHeartbeatKeepAliveStream();
-        try {
-            call.answer(localStream);
-        } catch (_error) {
-            this._stopStreamTracks(localStream);
-            call.close();
-            return;
-        }
-        this._bindHeartbeatKeepAliveCall(call, { incoming: true, localStream });
-    }
-
-    _bindHeartbeatKeepAliveCall(call, options = {}) {
-        if (!call) {
-            return;
-        }
-        if (this.heartbeatKeepAliveCall && this.heartbeatKeepAliveCall !== call) {
-            this._stopHeartbeatKeepAliveCall();
-        }
-
-        const localStream = options.localStream || null;
-        let remoteStream = null;
-        let ended = false;
-        const isIncoming = Boolean(options.incoming);
-        this.heartbeatKeepAliveCall = call;
-        this.heartbeatKeepAliveRole = isIncoming ? "incoming" : "outgoing";
-        this.heartbeatKeepAliveLocalStream = localStream;
-        this.heartbeatKeepAliveRemoteStream = null;
-
-        const shouldRetry = () => Boolean(
-            this.heartbeatKeepAliveEnabled &&
-            this.connection &&
-            this.connection.open &&
-            !this.mediaCall &&
-            !this.pendingIncomingCall &&
-            this.heartbeatKeepAliveCall === call &&
-            this.heartbeatKeepAliveRole === "outgoing"
+    _syncHeartbeatKeepAliveAudio() {
+        const canKeepAlive = Boolean(this.heartbeatKeepAliveEnabled && this.connection && this.connection.open);
+        const hasRecentHeartbeatReply = Boolean(
+            this.lastHeartbeatReplyAt > 0
+            && (Date.now() - this.lastHeartbeatReplyAt) < HEARTBEAT_DISCONNECT_TIMEOUT_MS
         );
+        if (!canKeepAlive || !hasRecentHeartbeatReply) {
+            this._stopHeartbeatKeepAliveAudio();
+            return;
+        }
+        this._startHeartbeatKeepAliveAudio();
+    }
 
-        const finalize = (allowRetry) => {
-            if (ended) {
-                return;
-            }
-            ended = true;
+    _startHeartbeatKeepAliveAudio() {
+        const audio = this._ensureHeartbeatKeepAliveAudioElement();
+        if (!audio) {
+            return;
+        }
+        this._clearHeartbeatKeepAliveRetryTimer();
+        if (!audio.paused) {
+            return;
+        }
 
-            if (this.heartbeatKeepAliveCall === call) {
-                this.heartbeatKeepAliveCall = null;
-                this.heartbeatKeepAliveRole = "";
-                this.heartbeatKeepAliveLocalStream = null;
-                this.heartbeatKeepAliveRemoteStream = null;
-            }
-
-            this._stopStreamTracks(localStream);
-            this._stopStreamTracks(remoteStream);
-
-            if (allowRetry) {
+        let playTask = null;
+        try {
+            playTask = audio.play();
+        } catch (_error) {
+            this._scheduleHeartbeatKeepAliveRetry();
+            return;
+        }
+        if (playTask && typeof playTask.then === "function") {
+            playTask.catch(() => {
                 this._scheduleHeartbeatKeepAliveRetry();
-            }
-        };
+            });
+        }
+    }
 
-        call.on("stream", (stream) => {
-            this._stopStreamTracks(remoteStream);
-            remoteStream = stream || null;
-            if (this.heartbeatKeepAliveCall === call) {
-                this.heartbeatKeepAliveRemoteStream = remoteStream;
-            }
-        });
-
-        call.on("close", () => {
-            finalize(shouldRetry());
-        });
-
-        call.on("error", () => {
-            finalize(shouldRetry());
-        });
+    _ensureHeartbeatKeepAliveAudioElement() {
+        if (this.heartbeatKeepAliveAudio) {
+            return this.heartbeatKeepAliveAudio;
+        }
+        if (typeof window === "undefined" || typeof window.Audio !== "function") {
+            return null;
+        }
+        const audio = new window.Audio(HEARTBEAT_KEEPALIVE_AUDIO_SRC);
+        audio.preload = "auto";
+        audio.loop = true;
+        audio.muted = false;
+        audio.volume = 1;
+        if (typeof audio.setAttribute === "function") {
+            audio.setAttribute("playsinline", "playsinline");
+            audio.setAttribute("webkit-playsinline", "webkit-playsinline");
+        }
+        this.heartbeatKeepAliveAudio = audio;
+        return audio;
     }
 
     _scheduleHeartbeatKeepAliveRetry() {
         if (this.heartbeatKeepAliveRetryTimer !== null) {
             return;
         }
-        if (!this.heartbeatKeepAliveEnabled || !this.connection || !this.connection.open || this.mediaCall || this.pendingIncomingCall) {
+        if (!this.heartbeatKeepAliveEnabled || !this.connection || !this.connection.open) {
             return;
         }
         this.heartbeatKeepAliveRetryTimer = window.setTimeout(() => {
             this.heartbeatKeepAliveRetryTimer = null;
-            this._syncHeartbeatKeepAliveCall();
-        }, HEARTBEAT_KEEPALIVE_RETRY_MS);
+            this._syncHeartbeatKeepAliveAudio();
+        }, HEARTBEAT_KEEPALIVE_AUDIO_RETRY_MS);
     }
 
     _clearHeartbeatKeepAliveRetryTimer() {
@@ -1272,40 +1170,17 @@ class PeerManager {
         this.heartbeatKeepAliveRetryTimer = null;
     }
 
-    _stopHeartbeatKeepAliveCall() {
+    _stopHeartbeatKeepAliveAudio() {
         this._clearHeartbeatKeepAliveRetryTimer();
-        const call = this.heartbeatKeepAliveCall;
-        this.heartbeatKeepAliveCall = null;
-        this.heartbeatKeepAliveRole = "";
-        this._stopStreamTracks(this.heartbeatKeepAliveLocalStream);
-        this.heartbeatKeepAliveLocalStream = null;
-        this._stopStreamTracks(this.heartbeatKeepAliveRemoteStream);
-        this.heartbeatKeepAliveRemoteStream = null;
-        if (call) {
-            try {
-                call.close();
-            } catch (_error) {
-                // Ignore close errors.
-            }
+        if (!this.heartbeatKeepAliveAudio) {
+            return;
         }
-    }
-
-    _shouldPreferOutgoingHeartbeatKeepAlive(remotePeerId) {
-        const localId = String(this.localPeerId || "");
-        const remoteId = String(remotePeerId || "");
-        if (!localId || !remoteId) {
-            return true;
+        try {
+            this.heartbeatKeepAliveAudio.pause();
+            this.heartbeatKeepAliveAudio.currentTime = 0;
+        } catch (_error) {
+            // Ignore pause/reset failures.
         }
-        return localId < remoteId;
-    }
-
-    _createHeartbeatKeepAliveStream() {
-        const stream = new MediaStream();
-        const blackTrack = this._createBlackVideoTrack();
-        if (blackTrack) {
-            stream.addTrack(blackTrack);
-        }
-        return stream;
     }
 
     _setLocalMediaStream(stream, info = {}) {
