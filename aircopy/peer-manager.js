@@ -82,6 +82,7 @@ class PeerManager {
             });
 
             peer.on("disconnected", () => {
+                this.localPeerId = "";
                 if (this.handlers.onStateChange) {
                     this.handlers.onStateChange("disconnected");
                 }
@@ -375,6 +376,15 @@ class PeerManager {
             this.peer = null;
         }
         this.localPeerId = "";
+    }
+
+    isSignalingConnected() {
+        return Boolean(
+            this.peer
+            && !this.peer.destroyed
+            && !this.peer.disconnected
+            && this.localPeerId
+        );
     }
 
     setDisplayName(name) {
