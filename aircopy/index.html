@@ -105,10 +105,6 @@
                             <span>最大日志条数</span>
                             <input id="status-log-max" class="setting-number" type="number" min="20" max="5000" step="1" inputmode="numeric" />
                         </label>
-                        <label class="setting-row" for="force-keepalive-audio">
-                            <span>强制后台 MP3 循环（排查）</span>
-                            <input id="force-keepalive-audio" type="checkbox" />
-                        </label>
                         <button id="copy-latest-logs" class="setting-action" type="button">复制最新日志</button>
                         <button id="clear-latest-logs" class="setting-action" type="button">清空日志/缓存日志</button>
                     </div>
@@ -117,6 +113,7 @@
                     <li class="session-item active" data-id="group-chat">
                         <span class="avatar">G</span>
                         <span id="peer-session-name" class="name">当前会话</span>
+                        <button id="peer-session-reconnect" class="peer-reconnect hidden" type="button" aria-label="重连" title="重连">↻</button>
                         <span id="peer-session-status" class="session-status offline">离线</span>
                         <span id="peer-session-unread" class="session-unread hidden">0</span>
                     </li>
@@ -125,11 +122,14 @@
             
             <div class="main-chat">
                 <div class="chat-header">
-                    <button id="session-toggle" class="session-toggle" type="button">
-                        <span id="chat-title" class="chat-title-text">当前会话</span>
-                        <span id="chat-status" class="chat-status offline">离线</span>
-                        <span id="chat-unread" class="unread-badge hidden">0</span>
-                    </button>
+                    <div class="chat-header-main">
+                        <button id="session-toggle" class="session-toggle" type="button">
+                            <span id="chat-title" class="chat-title-text">当前会话</span>
+                            <span id="chat-status" class="chat-status offline">离线</span>
+                            <span id="chat-unread" class="unread-badge hidden">0</span>
+                        </button>
+                        <button id="chat-reconnect" class="peer-reconnect hidden" type="button" aria-label="重连" title="重连">↻</button>
+                    </div>
                     <div class="header-actions">
                         <button id="open-connector">连接更多</button>
                         <button id="exit-chat">退出</button>
