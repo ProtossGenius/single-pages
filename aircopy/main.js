@@ -70,6 +70,7 @@
         sidebarCollapsedDesktop: false,
         sessionOpenMobile: false,
         settingsOpen: false,
+        headerMenuOpen: false,
         copyLogsFeedbackTimer: null,
         clearLogsFeedbackTimer: null,
         recordingVoice: false,
@@ -126,6 +127,8 @@
         sessionToggle: document.getElementById("session-toggle"),
         chatReconnect: document.getElementById("chat-reconnect"),
         sessionBackdrop: document.getElementById("session-backdrop"),
+        chatMenuToggle: document.getElementById("chat-menu-toggle"),
+        chatMenu: document.getElementById("chat-menu"),
         openConnector: document.getElementById("open-connector"),
         chatInterfaceRoot: document.getElementById("chat-interface"),
         displayName: document.getElementById("display-name"),
@@ -413,7 +416,14 @@
         elements.sessionBackdrop.addEventListener("click", () => {
             setSessionPanelOpen(false);
         });
+        if (elements.chatMenuToggle) {
+            elements.chatMenuToggle.addEventListener("click", (event) => {
+                event.stopPropagation();
+                setHeaderMenuOpen(!appState.headerMenuOpen);
+            });
+        }
         elements.openConnector.addEventListener("click", () => {
+            setHeaderMenuOpen(false);
             showConnectorScreen();
         });
         elements.sessionList.addEventListener("click", () => {
@@ -463,6 +473,7 @@
                 closeQrModal();
                 setSessionPanelOpen(false);
                 setSettingsPanelOpen(false);
+                setHeaderMenuOpen(false);
                 closeEmojiPanel();
                 closeVideoModal({ keepCall: true });
                 if (appState.incomingFileOffer) {
@@ -478,7 +489,10 @@
         });
 
         elements.sendBtn.addEventListener("click", sendCurrentMessage);
-        elements.exitChat.addEventListener("click", resetToSetup);
+        elements.exitChat.addEventListener("click", () => {
+            setHeaderMenuOpen(false);
+            void resetToSetup();
+        });
         elements.sendFile.addEventListener("click", () => {
             if (!appState.connected) {
                 setStatus("尚未连接，当前无法发送文件。");
@@ -523,6 +537,13 @@
             if (appState.settingsOpen && !insideSettings) {
                 setSettingsPanelOpen(false);
             }
+            const insideHeaderMenu =
+                target instanceof HTMLElement &&
+                target.closest &&
+                (target.closest("#chat-menu") || target.closest("#chat-menu-toggle"));
+            if (appState.headerMenuOpen && !insideHeaderMenu) {
+                setHeaderMenuOpen(false);
+            }
             if (!elements.emojiPanel || elements.emojiPanel.classList.contains("hidden")) {
                 return;
             }
@@ -540,6 +561,7 @@
         initEmojiPanel();
         syncVideoPrefForCurrentPeer();
         setSettingsPanelOpen(false);
+        setHeaderMenuOpen(false);
         setConnectionState(false);
         updateVideoButton();
         loadPersistedChatState();
@@ -926,6 +948,16 @@
         }
     }
 
+    function setHeaderMenuOpen(open) {
+        appState.headerMenuOpen = Boolean(open);
+        if (elements.chatMenu) {
+            elements.chatMenu.classList.toggle("hidden", !appState.headerMenuOpen);
+        }
+        if (elements.chatMenuToggle) {
+            elements.chatMenuToggle.setAttribute("aria-expanded", appState.headerMenuOpen ? "true" : "false");
+        }
+    }
+
     function normalizeStatusLogMax(value, fallback = STATUS_LOG_DEFAULT_MAX) {
         const parsed = Number.parseInt(String(value || ""), 10);
         if (!Number.isFinite(parsed)) {
@@ -1071,6 +1103,7 @@
 
     function showConnectorScreen() {
         setScanVisualSuccess(false);
+        setHeaderMenuOpen(false);
         elements.chatInterface.classList.add("hidden");
         elements.connectionSetup.classList.remove("hidden");
         elements.backToChat.classList.toggle("hidden", !appState.connected);
@@ -1079,6 +1112,7 @@
     }
 
     function showChatScreen() {
+        setHeaderMenuOpen(false);
         elements.connectionSetup.classList.add("hidden");
         elements.chatInterface.classList.remove("hidden");
         elements.backToChat.classList.add("hidden");
@@ -3117,6 +3151,7 @@
         closeEmojiPanel();
         closeFileOfferModal();
         setSessionPanelOpen(false);
+        setHeaderMenuOpen(false);
         appState.videoState = "idle";
         if (appState.recordingVoice) {
             await stopVoiceRecording(false);

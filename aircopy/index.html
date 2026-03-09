@@ -129,10 +129,21 @@
                             <span id="chat-unread" class="unread-badge hidden">0</span>
                         </button>
                         <button id="chat-reconnect" class="peer-reconnect hidden" type="button" aria-label="重连" title="重连">↻</button>
-                    </div>
-                    <div class="header-actions">
-                        <button id="open-connector">连接更多</button>
-                        <button id="exit-chat">退出</button>
+                        <div class="chat-menu-wrap">
+                            <button
+                                id="chat-menu-toggle"
+                                class="chat-menu-toggle"
+                                type="button"
+                                aria-label="更多操作"
+                                aria-haspopup="true"
+                                aria-expanded="false"
+                                title="更多操作"
+                            >...</button>
+                            <div id="chat-menu" class="chat-menu hidden" role="menu" aria-label="会话操作">
+                                <button id="open-connector" class="chat-menu-item" type="button" role="menuitem">连接更多</button>
+                                <button id="exit-chat" class="chat-menu-item chat-menu-item-danger" type="button" role="menuitem">退出</button>
+                            </div>
+                        </div>
                     </div>
                 </div>
                 

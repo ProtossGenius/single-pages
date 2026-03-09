@@ -464,17 +464,18 @@ body {
     padding: 15px 20px;
     border-bottom: 1px solid #eee;
     display: flex;
-    justify-content: space-between;
+    justify-content: flex-start;
     align-items: center;
     gap: 10px;
 }
 
 .chat-header-main {
     min-width: 0;
-    display: inline-flex;
+    display: flex;
     align-items: center;
-    gap: 8px;
-    max-width: 72%;
+    gap: 4px;
+    flex: 1 1 auto;
+    max-width: 100%;
 }
 
 .session-toggle {
@@ -484,8 +485,9 @@ body {
     display: inline-flex;
     align-items: center;
     gap: 8px;
-    min-width: 180px;
-    max-width: 70%;
+    min-width: 0;
+    max-width: 100%;
+    flex: 0 1 auto;
     text-align: left;
     padding: 4px 6px;
     border-radius: 6px;
@@ -555,6 +557,75 @@ body {
     cursor: not-allowed;
 }
 
+.chat-menu-wrap {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    margin-left: auto;
+    flex: 0 0 auto;
+}
+
+.chat-menu-toggle {
+    width: 30px;
+    height: 30px;
+    padding: 0;
+    border: 1px solid #d1d5db;
+    border-radius: 8px;
+    background: #fff;
+    color: #374151;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1rem;
+    line-height: 1;
+}
+
+.chat-menu-toggle:hover {
+    background: #f3f4f6;
+    border-color: #9ca3af;
+}
+
+.chat-menu {
+    position: absolute;
+    top: calc(100% + 8px);
+    right: 0;
+    min-width: 116px;
+    padding: 6px;
+    border: 1px solid #e5e7eb;
+    border-radius: 10px;
+    background: #fff;
+    box-shadow: 0 10px 24px rgba(0, 0, 0, 0.14);
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    z-index: 90;
+}
+
+.chat-menu-item {
+    width: 100%;
+    padding: 8px 10px;
+    border: none;
+    border-radius: 6px;
+    background: #fff;
+    color: #111827;
+    text-align: left;
+}
+
+.chat-menu-item:hover {
+    background: #f3f4f6;
+    color: #111827;
+}
+
+.chat-menu-item.chat-menu-item-danger {
+    background: #fff;
+    color: #b91c1c;
+}
+
+.chat-menu-item.chat-menu-item-danger:hover {
+    background: #fee2e2;
+    color: #991b1b;
+}
+
 .status-heart-float {
     position: absolute;
     left: 50%;
@@ -614,7 +685,7 @@ body {
 }
 
 .session-item .session-status {
-    margin-left: 6px;
+    margin-left: 2px;
 }
 
 .session-unread {
@@ -687,14 +758,6 @@ button.danger {
 }
 
 button.danger:hover {
-    background: #bd2130;
-}
-
-#exit-chat {
-    background: #dc3545;
-}
-
-#exit-chat:hover {
     background: #bd2130;
 }
 
@@ -983,12 +1046,12 @@ button.danger:hover {
     }
 
     .chat-header-main {
-        max-width: 78%;
+        max-width: 100%;
     }
 
     .session-toggle {
-        min-width: 200px;
-        max-width: 72%;
+        min-width: 0;
+        max-width: 100%;
         padding: 8px 6px;
     }
 
