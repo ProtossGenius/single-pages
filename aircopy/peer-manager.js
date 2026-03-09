@@ -21,6 +21,7 @@ class PeerManager {
         this.helloSent = false;
         this.remoteDisplayName = "";
         this.remotePersistentId = "";
+        this.remoteNodeInfo = null;
         this.heartbeatTimer = null;
         this.currentHeartbeatIntervalMs = HEARTBEAT_INTERVAL_MS;
         this.lastHeartbeatReplyAt = 0;
@@ -115,7 +116,8 @@ class PeerManager {
             reliable: true,
             metadata: {
                 name: this.displayName,
-                pid: this.persistentId
+                pid: this.persistentId,
+                node: this._getLocalNodeInfo()
             }
         });
         this._attachConnection(conn, false);
@@ -131,7 +133,8 @@ class PeerManager {
             t: "text",
             b: text,
             name: this.displayName,
-            pid: this.persistentId
+            pid: this.persistentId,
+            node: this._getLocalNodeInfo()
         });
     }
 
@@ -362,6 +365,7 @@ class PeerManager {
         this.helloSent = false;
         this.remoteDisplayName = "";
         this.remotePersistentId = "";
+        this.remoteNodeInfo = null;
     }
 
     destroy() {
@@ -413,6 +417,7 @@ class PeerManager {
         this.helloSent = false;
         this.remoteDisplayName = (conn.metadata && conn.metadata.name) ? String(conn.metadata.name) : "";
         this.remotePersistentId = isIncoming && conn.metadata && conn.metadata.pid ? String(conn.metadata.pid) : "";
+        this.remoteNodeInfo = this._normalizeNodeInfo(conn && conn.metadata ? conn.metadata.node : null);
 
         conn.on("open", () => {
             if (this.connection !== conn) {
@@ -423,7 +428,8 @@ class PeerManager {
                     peerId: conn.peer,
                     isIncoming,
                     peerName: this.remoteDisplayName,
-                    peerPersistentId: this.remotePersistentId
+                    peerPersistentId: this.remotePersistentId,
+                    peerNodeInfo: this.remoteNodeInfo
                 });
             }
             this._sendHello();
@@ -464,7 +470,8 @@ class PeerManager {
             t: "hello",
             b: "hello",
             name: this.displayName,
-            pid: this.persistentId
+            pid: this.persistentId,
+            node: this._getLocalNodeInfo()
         });
     }
 
@@ -503,11 +510,15 @@ class PeerManager {
         const body = payload && payload.b ? String(payload.b) : "";
         const name = payload && payload.name ? String(payload.name) : "";
         const persistentId = payload && payload.pid ? String(payload.pid) : "";
+        const nodeInfo = this._normalizeNodeInfo(payload && payload.node ? payload.node : null);
         if (name) {
             this.remoteDisplayName = name;
         }
         if (persistentId) {
             this.remotePersistentId = persistentId;
+        }
+        if (nodeInfo) {
+            this.remoteNodeInfo = nodeInfo;
         }
 
         if (this.handlers.onMessage) {
@@ -517,7 +528,8 @@ class PeerManager {
                 body,
                 name,
                 persistentId,
-                peerId: this.connection ? this.connection.peer : ""
+                peerId: this.connection ? this.connection.peer : "",
+                nodeInfo: this.remoteNodeInfo
             });
         }
     }
@@ -839,6 +851,37 @@ class PeerManager {
             return;
         }
         this.connection.send(payload);
+    }
+
+    _getLocalNodeInfo() {
+        if (!this.handlers || typeof this.handlers.getLocalNodeInfo !== "function") {
+            return null;
+        }
+        try {
+            return this._normalizeNodeInfo(this.handlers.getLocalNodeInfo());
+        } catch (_error) {
+            return null;
+        }
+    }
+
+    _normalizeNodeInfo(nodeInfo) {
+        if (!nodeInfo || typeof nodeInfo !== "object") {
+            return null;
+        }
+        const baseUrl = nodeInfo.baseUrl ? String(nodeInfo.baseUrl).trim() : "";
+        const lanIps = Array.isArray(nodeInfo.lanIps)
+            ? nodeInfo.lanIps
+                .map((item) => String(item || "").trim())
+                .filter((item, index, list) => item && list.indexOf(item) === index)
+                .slice(0, 8)
+            : [];
+        if (!baseUrl && lanIps.length === 0) {
+            return null;
+        }
+        return {
+            baseUrl,
+            lanIps
+        };
     }
 
     _startHeartbeatLoop() {
@@ -1274,12 +1317,13 @@ class PeerManager {
     }
 }
 
-function encodePeerSignal(peerId) {
+function encodePeerSignal(peerId, baseUrl) {
     const id = String(peerId || "").trim();
     if (!id) {
         throw new Error("peerId 为空，无法生成二维码。");
     }
-    const url = new URL(window.location.href);
+    const sourceUrl = String(baseUrl || window.location.href || document.URL || "").trim();
+    const url = new URL(sourceUrl);
     url.searchParams.delete("pairId");
     url.searchParams.delete("peerId");
     url.searchParams.set("pairId", id);
