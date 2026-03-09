@@ -105,7 +105,12 @@
                             <span>最大日志条数</span>
                             <input id="status-log-max" class="setting-number" type="number" min="20" max="5000" step="1" inputmode="numeric" />
                         </label>
+                        <label class="setting-row" for="force-keepalive-audio">
+                            <span>强制后台 MP3 循环（排查）</span>
+                            <input id="force-keepalive-audio" type="checkbox" />
+                        </label>
                         <button id="copy-latest-logs" class="setting-action" type="button">复制最新日志</button>
+                        <button id="clear-latest-logs" class="setting-action" type="button">清空日志/缓存日志</button>
                     </div>
                 </div>
                 <ul id="session-list">

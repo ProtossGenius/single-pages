@@ -420,6 +420,22 @@
         };
     }
 
+    function setDocumentHiddenForTest(hidden) {
+        const hadOwnDescriptor = Object.prototype.hasOwnProperty.call(document, "hidden");
+        const ownDescriptor = hadOwnDescriptor ? Object.getOwnPropertyDescriptor(document, "hidden") : null;
+        Object.defineProperty(document, "hidden", {
+            configurable: true,
+            value: Boolean(hidden)
+        });
+        return () => {
+            if (hadOwnDescriptor && ownDescriptor) {
+                Object.defineProperty(document, "hidden", ownDescriptor);
+                return;
+            }
+            delete document.hidden;
+        };
+    }
+
     function createMockPeer(connectImpl) {
         return {
             connectCalls: [],
@@ -568,7 +584,7 @@
                 }
             });
             pm.connection = createMockConn("remote-timeout", { open: true });
-            pm.lastHeartbeatReplyAt = Date.now() - 25000;
+            pm.lastHeartbeatReplyAt = Date.now() - (11 * 60 * 1000);
 
             pm._sendHeartbeat();
 
@@ -577,7 +593,79 @@
             assert(String(closed[0].reason || "").includes("心跳超时"), "关闭原因应包含心跳超时");
         });
 
-        runner.addTest("PeerManager 检测到底层 RTC failed 会关闭连接", () => {
+        runner.addTest("PeerManager 页面恢复时不会因 RTC disconnected 立即断开", () => {
+            const restoreHidden = setDocumentHiddenForTest(true);
+            const closed = [];
+            try {
+                const peerConnection = createMockEventTarget({
+                    connectionState: "connected",
+                    iceConnectionState: "disconnected"
+                });
+                const dataChannel = createMockEventTarget({
+                    readyState: "open"
+                });
+                const pm = new PeerManager({
+                    onConnectionClosed(info) {
+                        closed.push(info);
+                    }
+                });
+                const conn = createMockConn("remote-visibility", {
+                    open: false,
+                    peerConnection,
+                    dataChannel
+                });
+
+                pm._attachConnection(conn, false);
+                conn.open = true;
+                conn.emit("open");
+
+                restoreHidden();
+                document.dispatchEvent(new Event("visibilitychange"));
+
+                assertEqual(pm.connection, conn, "切回前台时不应立即清空连接");
+                assertEqual(closed.length, 0, "切回前台时不应立即触发关闭回调");
+            } finally {
+                restoreHidden();
+            }
+        });
+
+        runner.addTest("PeerManager 检测到底层 RTC failed 不会立刻关闭连接", () => {
+            const errors = [];
+            const closed = [];
+            const peerConnection = createMockEventTarget({
+                connectionState: "connected",
+                iceConnectionState: "connected"
+            });
+            const dataChannel = createMockEventTarget({
+                readyState: "open"
+            });
+            const pm = new PeerManager({
+                onError(error) {
+                    errors.push(error);
+                },
+                onConnectionClosed(info) {
+                    closed.push(info);
+                }
+            });
+            pm.lastHeartbeatReplyAt = Date.now();
+            const conn = createMockConn("remote-rtc", {
+                open: false,
+                peerConnection,
+                dataChannel
+            });
+
+            pm._attachConnection(conn, false);
+            conn.open = true;
+            conn.emit("open");
+            peerConnection.connectionState = "failed";
+            peerConnection.emit("connectionstatechange");
+
+            assertEqual(pm.connection, conn, "RTC failed 后不应立即清空当前连接");
+            assertEqual(closed.length, 0, "RTC failed 后不应立即触发关闭回调");
+            assertEqual(errors.length, 0, "RTC failed 后不应立即触发错误回调");
+        });
+
+        runner.addTest("PeerManager 检测到底层 data closed 会关闭连接", () => {
             const closed = [];
             const peerConnection = createMockEventTarget({
                 connectionState: "connected",
@@ -600,12 +688,12 @@
             pm._attachConnection(conn, false);
             conn.open = true;
             conn.emit("open");
-            peerConnection.connectionState = "failed";
-            peerConnection.emit("connectionstatechange");
+            dataChannel.readyState = "closed";
+            dataChannel.emit("close");
 
-            assertEqual(pm.connection, null, "RTC failed 后应清空当前连接");
-            assertEqual(closed.length, 1, "RTC failed 后应触发关闭回调");
-            assert(String(closed[0].reason || "").includes("rtc:failed"), "关闭原因应包含 rtc:failed");
+            assertEqual(pm.connection, null, "data closed 后应清空当前连接");
+            assertEqual(closed.length, 1, "data closed 后应触发关闭回调");
+            assert(String(closed[0].reason || "").includes("data:closed"), "关闭原因应包含 data:closed");
         });
 
         runner.addTest("PeerManager.sendText 封包正确", () => {
@@ -620,6 +708,33 @@
             assertEqual(payload.b, "hello", "消息内容错误");
             assertEqual(payload.name, "Tester", "name 未写入");
             assertEqual(payload.pid, "pid-t", "pid 未写入");
+        });
+
+        runner.addTest("PeerManager 发送失败会统一错误并关闭连接", () => {
+            const errors = [];
+            const closed = [];
+            const pm = new PeerManager({
+                onError(error) {
+                    errors.push(error);
+                },
+                onConnectionClosed(info) {
+                    closed.push(info);
+                }
+            });
+            const conn = createMockConn("remote-send-fail", { open: true });
+            conn.send = () => {
+                throw new Error("send failed");
+            };
+            pm.connection = conn;
+
+            pm._sendIfConnected({ t: "text", b: "hello" });
+
+            assertEqual(errors.length, 1, "发送失败应上报一次错误");
+            assertEqual(Boolean(errors[0].handledByConnectionClose), true, "错误应标记为由断链回调接管");
+            assertEqual(errors[0].source, "data", "错误来源应标记为 data");
+            assertEqual(closed.length, 1, "发送失败后应触发关闭回调");
+            assertEqual(closed[0].error, errors[0], "关闭回调应复用同一个错误对象");
+            assert(String(closed[0].reason || "").includes("发送失败"), "关闭原因应包含发送失败");
         });
 
         runner.addTest("PeerManager 收到 call-hangup 会同步结束通话", () => {

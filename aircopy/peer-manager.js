@@ -6,11 +6,16 @@ const FILE_SEND_DRAIN_THRESHOLD_BYTES = 96 * 1024;
 const HEARTBEAT_INTERVAL_MS = 5000;
 const HEARTBEAT_FAST_INTERVAL_MS = 1000;
 const HEARTBEAT_FAST_THRESHOLD_MS = 15000;
-const HEARTBEAT_DISCONNECT_TIMEOUT_MS = 20000;
 const HEARTBEAT_KEEPALIVE_STALE_TIMEOUT_MS = 10 * 60 * 1000;
+const HEARTBEAT_DISCONNECT_TIMEOUT_MS = HEARTBEAT_KEEPALIVE_STALE_TIMEOUT_MS;
+const HEARTBEAT_DISCONNECT_TIMEOUT_HIDDEN_MS = HEARTBEAT_DISCONNECT_TIMEOUT_MS;
 const HEARTBEAT_KEEPALIVE_AUDIO_RETRY_MS = 3000;
 const HEARTBEAT_KEEPALIVE_AUDIO_SRC = "./silent-loop.mp3";
 const CONNECTION_HEALTH_RECHECK_DELAY_MS = 3000;
+const CONNECTION_HEALTH_RECHECK_RTC_DELAY_MS = 30 * 1000;
+const CONNECTION_HEALTH_RECHECK_HIDDEN_DELAY_MS = 90 * 1000;
+const CONNECTION_HEALTH_RTC_FAILURE_GRACE_MS = 90 * 1000;
+const SIGNALING_RECONNECT_DELAY_MS = 3000;
 
 class PeerManager {
     constructor(handlers = {}) {
@@ -30,10 +35,12 @@ class PeerManager {
         this.pendingHeartbeatId = "";
         this.heartbeatDueAt = 0;
         this.heartbeatKeepAliveEnabled = false;
+        this.heartbeatKeepAliveForceAlways = false;
         this.heartbeatKeepAliveAudio = null;
         this.heartbeatKeepAliveRetryTimer = null;
         this.connectionHealthCleanup = null;
         this.connectionHealthCheckTimer = null;
+        this.signalingReconnectTimer = null;
 
         this.incomingTransfers = new Map();
         this.outgoingTransferAcks = new Map();
@@ -62,6 +69,7 @@ class PeerManager {
             peer.on("open", (id) => {
                 ready = true;
                 this.localPeerId = id;
+                this._clearSignalingReconnectTimer();
                 if (this.handlers.onLocalId) {
                     this.handlers.onLocalId(id);
                 }
@@ -80,13 +88,15 @@ class PeerManager {
                 if (!ready) {
                     reject(error);
                 }
-                if (this.handlers.onError) {
-                    this.handlers.onError(error);
-                }
+                this._emitError(error, {
+                    source: "peer",
+                    code: "peer-error",
+                    phase: ready ? "runtime" : "init"
+                });
             });
 
             peer.on("disconnected", () => {
-                this.localPeerId = "";
+                this._scheduleSignalingReconnect();
                 if (this.handlers.onStateChange) {
                     this.handlers.onStateChange("disconnected");
                 }
@@ -371,6 +381,7 @@ class PeerManager {
 
     destroy() {
         this.closeConnection();
+        this._clearSignalingReconnectTimer();
         if (this.peer) {
             this.peer.destroy();
             this.peer = null;
@@ -397,6 +408,11 @@ class PeerManager {
 
     setHeartbeatKeepAliveEnabled(enabled) {
         this.heartbeatKeepAliveEnabled = Boolean(enabled);
+        this._syncHeartbeatKeepAliveAudio();
+    }
+
+    setHeartbeatKeepAliveForceAlways(enabled) {
+        this.heartbeatKeepAliveForceAlways = Boolean(enabled);
         this._syncHeartbeatKeepAliveAudio();
     }
 
@@ -450,16 +466,23 @@ class PeerManager {
             if (this.connection !== conn) {
                 return;
             }
-            this._handleActiveConnectionClosed("连接已断开");
+            this._handleActiveConnectionClosed("连接已断开", {
+                source: "data",
+                code: "closed",
+                peerId: conn.peer
+            });
         });
 
         conn.on("error", (error) => {
             if (this.connection !== conn) {
                 return;
             }
-            if (this.handlers.onError) {
-                this.handlers.onError(error);
-            }
+            this._emitError(error, {
+                source: "data",
+                code: "connection-error",
+                peerId: conn.peer,
+                phase: "runtime"
+            });
         });
     }
 
@@ -662,9 +685,12 @@ class PeerManager {
                     });
                 })
                 .catch((error) => {
-                    if (this.handlers.onError) {
-                        this.handlers.onError(error);
-                    }
+                    this._emitError(error, {
+                        source: "file",
+                        code: "receive-error",
+                        peerId: this.connection && this.connection.peer ? this.connection.peer : "",
+                        phase: "runtime"
+                    });
                 })
                 .finally(() => {
                     this.incomingTransfers.delete(transferId);
@@ -849,10 +875,16 @@ class PeerManager {
         try {
             this.connection.send(payload);
         } catch (error) {
-            if (this.handlers.onError) {
-                this.handlers.onError(error);
-            }
-            this._handleActiveConnectionClosed("连接发送失败，连接已断开");
+            const managedError = this._emitError(error, {
+                source: "data",
+                code: "send-failed",
+                phase: "runtime",
+                reason: "连接发送失败，连接已断开",
+                handledByConnectionClose: true
+            });
+            this._handleActiveConnectionClosed("连接发送失败，连接已断开", {
+                error: managedError
+            });
         }
     }
 
@@ -936,9 +968,13 @@ class PeerManager {
         }
         const now = Date.now();
         const noReplyDuration = this.lastHeartbeatReplyAt > 0 ? now - this.lastHeartbeatReplyAt : 0;
-        if (noReplyDuration >= HEARTBEAT_DISCONNECT_TIMEOUT_MS) {
+        const disconnectTimeoutMs = this._resolveHeartbeatDisconnectTimeoutMs();
+        if (noReplyDuration >= disconnectTimeoutMs) {
             this._stopHeartbeatKeepAliveAudio();
-            this._handleActiveConnectionClosed("心跳超时，连接已断开");
+            this._handleActiveConnectionClosed("心跳超时，连接已断开", {
+                source: "heartbeat",
+                code: "timeout"
+            });
             return;
         }
         if (noReplyDuration >= HEARTBEAT_FAST_THRESHOLD_MS) {
@@ -957,10 +993,16 @@ class PeerManager {
                 pid: this.persistentId
             });
         } catch (error) {
-            if (this.handlers.onError) {
-                this.handlers.onError(error);
-            }
-            this._handleActiveConnectionClosed("心跳发送失败，连接已断开");
+            const managedError = this._emitError(error, {
+                source: "heartbeat",
+                code: "send-failed",
+                phase: "runtime",
+                reason: "心跳发送失败，连接已断开",
+                handledByConnectionClose: true
+            });
+            this._handleActiveConnectionClosed("心跳发送失败，连接已断开", {
+                error: managedError
+            });
             return;
         }
         this.pendingHeartbeatId = heartbeatId;
@@ -997,9 +1039,17 @@ class PeerManager {
         this.pendingHeartbeatId = "";
     }
 
-    _handleActiveConnectionClosed(reasonText) {
+    _handleActiveConnectionClosed(reasonText, options = {}) {
         const activeConnection = this.connection;
         const closedPeerId = activeConnection && activeConnection.peer ? String(activeConnection.peer) : "";
+        const finalReason = reasonText || "连接已断开";
+        const closeError = options.error || this._createManagedError(null, {
+            source: options.source || "connection",
+            code: options.code || "closed",
+            phase: options.phase || "runtime",
+            peerId: closedPeerId,
+            reason: finalReason
+        });
         this.connection = null;
         this.helloSent = false;
         this.remoteDisplayName = "";
@@ -1016,11 +1066,12 @@ class PeerManager {
         }
         this.hangupVideoCall();
         this._resetIncomingTransfers();
-        this._resetOutgoingTransferAcks(reasonText || "连接已断开");
+        this._resetOutgoingTransferAcks(finalReason);
         if (this.handlers.onConnectionClosed) {
             this.handlers.onConnectionClosed({
-                reason: reasonText || "连接已断开",
-                peerId: closedPeerId
+                reason: finalReason,
+                peerId: closedPeerId,
+                error: closeError
             });
         }
     }
@@ -1087,6 +1138,22 @@ class PeerManager {
             onDataChannelStateChange();
         }
 
+        const onVisibilityChange = () => {
+            if (typeof document === "undefined" || document.hidden) {
+                return;
+            }
+            if (this.connection !== conn) {
+                return;
+            }
+            const issue = this._getTransportIssue(conn);
+            if (issue) {
+                this._scheduleConnectionHealthRecheck(conn, issue.source, issue.state);
+            }
+        };
+        if (typeof document !== "undefined") {
+            bindEvent(document, "visibilitychange", onVisibilityChange);
+        }
+
         this.connectionHealthCleanup = () => {
             for (let i = 0; i < cleanups.length; i += 1) {
                 cleanups[i]();
@@ -1113,53 +1180,187 @@ class PeerManager {
             }
             return;
         }
-        if (normalizedState === "failed" || normalizedState === "closed") {
-            this._handleActiveConnectionClosed(`连接已断开（${source}:${normalizedState}）`);
+        const isHardFailure = normalizedState === "failed" || normalizedState === "closed";
+        if (isHardFailure && source === "data") {
+            this._handleActiveConnectionClosed(`连接已断开（${source}:${normalizedState}）`, {
+                source,
+                code: normalizedState
+            });
             return;
         }
-        if (normalizedState !== "disconnected" && normalizedState !== "closing") {
+        if (
+            !isHardFailure
+            && normalizedState !== "disconnected"
+            && normalizedState !== "closing"
+        ) {
             return;
         }
         if (this.connectionHealthCheckTimer !== null) {
             window.clearTimeout(this.connectionHealthCheckTimer);
         }
+        this._scheduleConnectionHealthRecheck(conn, source, normalizedState);
+    }
+
+    _resolveConnectionHealthRecheckDelay(source, normalizedState) {
+        const isRtcSide = source === "ice" || source === "rtc";
+        if (!isRtcSide) {
+            return CONNECTION_HEALTH_RECHECK_DELAY_MS;
+        }
+        if (normalizedState === "failed" || normalizedState === "closed") {
+            return CONNECTION_HEALTH_RTC_FAILURE_GRACE_MS;
+        }
+        const isHidden = typeof document !== "undefined" && Boolean(document.hidden);
+        if (isHidden) {
+            return CONNECTION_HEALTH_RECHECK_HIDDEN_DELAY_MS;
+        }
+        if (normalizedState === "disconnected" || normalizedState === "closing") {
+            return CONNECTION_HEALTH_RECHECK_RTC_DELAY_MS;
+        }
+        return CONNECTION_HEALTH_RECHECK_DELAY_MS;
+    }
+
+    _scheduleConnectionHealthRecheck(conn, source, normalizedState, delayMs) {
+        if (!conn || this.connection !== conn) {
+            return;
+        }
+        if (this.connectionHealthCheckTimer !== null) {
+            window.clearTimeout(this.connectionHealthCheckTimer);
+        }
+        const recheckDelayMs = Math.max(
+            0,
+            Number.isFinite(Number(delayMs))
+                ? Number(delayMs)
+                : this._resolveConnectionHealthRecheckDelay(source, normalizedState)
+        );
         this.connectionHealthCheckTimer = window.setTimeout(() => {
             this.connectionHealthCheckTimer = null;
             if (this.connection !== conn) {
                 return;
             }
-            if (!this._isTransportUnhealthy(conn)) {
+            const issue = this._getTransportIssue(conn);
+            if (!issue) {
                 return;
             }
-            this._handleActiveConnectionClosed(`连接已断开（${source}:${normalizedState}）`);
-        }, CONNECTION_HEALTH_RECHECK_DELAY_MS);
+            if (!this._shouldCloseForTransportIssue(conn, issue)) {
+                this._scheduleConnectionHealthRecheck(conn, issue.source, issue.state);
+                return;
+            }
+            this._handleActiveConnectionClosed(`连接已断开（${source}:${normalizedState}）`, {
+                source,
+                code: normalizedState
+            });
+        }, recheckDelayMs);
+    }
+
+    _scheduleSignalingReconnect() {
+        if (!this.peer || this.peer.destroyed || !this.peer.disconnected) {
+            return;
+        }
+        if (this.signalingReconnectTimer !== null) {
+            return;
+        }
+        this.signalingReconnectTimer = window.setTimeout(() => {
+            this.signalingReconnectTimer = null;
+            if (!this.peer || this.peer.destroyed || !this.peer.disconnected) {
+                return;
+            }
+            try {
+                this.peer.reconnect();
+            } catch (error) {
+                this._emitError(error, {
+                    source: "peer",
+                    code: "signaling-reconnect-failed",
+                    phase: "reconnect"
+                });
+            }
+            this._scheduleSignalingReconnect();
+        }, SIGNALING_RECONNECT_DELAY_MS);
+    }
+
+    _clearSignalingReconnectTimer() {
+        if (this.signalingReconnectTimer === null) {
+            return;
+        }
+        window.clearTimeout(this.signalingReconnectTimer);
+        this.signalingReconnectTimer = null;
     }
 
     _isTransportUnhealthy(conn) {
-        if (!conn) {
+        return Boolean(this._getTransportIssue(conn));
+    }
+
+    _shouldCloseForTransportIssue(conn, issue) {
+        if (!issue) {
             return false;
         }
-        const peerConnection = conn.peerConnection;
-        if (peerConnection) {
-            const connectionState = String(peerConnection.connectionState || "").trim().toLowerCase();
-            const iceConnectionState = String(peerConnection.iceConnectionState || "").trim().toLowerCase();
-            if (
-                connectionState === "failed"
-                || connectionState === "closed"
-                || connectionState === "disconnected"
-                || iceConnectionState === "failed"
-                || iceConnectionState === "closed"
-                || iceConnectionState === "disconnected"
-            ) {
-                return true;
-            }
+        if (issue.source === "data") {
+            return true;
+        }
+        if (issue.source !== "rtc" && issue.source !== "ice") {
+            return true;
+        }
+        if (this._isDataChannelOpen(conn) && this._hasRecentHeartbeatReply(CONNECTION_HEALTH_RTC_FAILURE_GRACE_MS)) {
+            return false;
+        }
+        return !this._hasRecentHeartbeatReply(CONNECTION_HEALTH_RTC_FAILURE_GRACE_MS);
+    }
+
+    _isDataChannelOpen(conn) {
+        if (!conn || !conn.dataChannel) {
+            return false;
+        }
+        const readyState = String(conn.dataChannel.readyState || "").trim().toLowerCase();
+        return readyState === "open";
+    }
+
+    _hasRecentHeartbeatReply(maxAgeMs) {
+        if (!(this.lastHeartbeatReplyAt > 0)) {
+            return false;
+        }
+        return (Date.now() - this.lastHeartbeatReplyAt) < Math.max(0, Number(maxAgeMs) || 0);
+    }
+
+    _getTransportIssue(conn) {
+        if (!conn) {
+            return null;
         }
         const dataChannel = conn.dataChannel;
-        if (!dataChannel) {
-            return false;
+        if (dataChannel) {
+            const readyState = String(dataChannel.readyState || "").trim().toLowerCase();
+            if (readyState === "closing" || readyState === "closed") {
+                return {
+                    source: "data",
+                    state: readyState
+                };
+            }
         }
-        const readyState = String(dataChannel.readyState || "").trim().toLowerCase();
-        return readyState === "closing" || readyState === "closed";
+        const peerConnection = conn.peerConnection;
+        if (!peerConnection) {
+            return null;
+        }
+        const connectionState = String(peerConnection.connectionState || "").trim().toLowerCase();
+        if (
+            connectionState === "failed"
+            || connectionState === "closed"
+            || connectionState === "disconnected"
+        ) {
+            return {
+                source: "rtc",
+                state: connectionState
+            };
+        }
+        const iceConnectionState = String(peerConnection.iceConnectionState || "").trim().toLowerCase();
+        if (
+            iceConnectionState === "failed"
+            || iceConnectionState === "closed"
+            || iceConnectionState === "disconnected"
+        ) {
+            return {
+                source: "ice",
+                state: iceConnectionState
+            };
+        }
+        return null;
     }
 
     _toArrayBuffer(value) {
@@ -1247,9 +1448,12 @@ class PeerManager {
         });
 
         call.on("error", (error) => {
-            if (this.handlers.onError) {
-                this.handlers.onError(error);
-            }
+            this._emitError(error, {
+                source: "call",
+                code: "media-call-error",
+                peerId: call.peer,
+                phase: "runtime"
+            });
             if (this.handlers.onCallState) {
                 this.handlers.onCallState({ state: "error", incoming: Boolean(options.incoming) });
             }
@@ -1262,7 +1466,8 @@ class PeerManager {
             this.lastHeartbeatReplyAt > 0
             && (Date.now() - this.lastHeartbeatReplyAt) < HEARTBEAT_KEEPALIVE_STALE_TIMEOUT_MS
         );
-        if (!canKeepAlive || !hasRecentHeartbeatReply) {
+        const shouldRun = canKeepAlive && (this.heartbeatKeepAliveForceAlways || hasRecentHeartbeatReply);
+        if (!shouldRun) {
             this._stopHeartbeatKeepAliveAudio();
             return;
         }
@@ -1432,6 +1637,60 @@ class PeerManager {
             };
             poll();
         });
+    }
+
+    _resolveHeartbeatDisconnectTimeoutMs() {
+        const isHidden = typeof document !== "undefined" && Boolean(document.hidden);
+        if (isHidden) {
+            return HEARTBEAT_DISCONNECT_TIMEOUT_HIDDEN_MS;
+        }
+        return HEARTBEAT_DISCONNECT_TIMEOUT_MS;
+    }
+
+    _emitError(error, context = {}) {
+        const managedError = this._createManagedError(error, context);
+        if (this.handlers.onError) {
+            this.handlers.onError(managedError);
+        }
+        return managedError;
+    }
+
+    _createManagedError(error, context = {}) {
+        const fallbackMessage = context.reason || context.message || "未知错误";
+        const message = this._getErrorMessage(error, fallbackMessage);
+        const managedError = new Error(message);
+        managedError.name = error && error.name ? String(error.name) : "Error";
+        managedError.source = context.source ? String(context.source) : "peer";
+        managedError.code = context.code ? String(context.code) : "";
+        managedError.phase = context.phase ? String(context.phase) : "";
+        managedError.peerId = context.peerId
+            ? String(context.peerId)
+            : (this.connection && this.connection.peer ? String(this.connection.peer) : "");
+        managedError.reason = context.reason ? String(context.reason) : message;
+        managedError.recoverable = context.recoverable !== false;
+        managedError.handledByConnectionClose = Boolean(context.handledByConnectionClose);
+        managedError.raw = error || null;
+        return managedError;
+    }
+
+    _getErrorMessage(error, fallbackMessage) {
+        if (!error) {
+            return String(fallbackMessage || "未知错误");
+        }
+        if (typeof error === "string") {
+            return error;
+        }
+        if (error.message) {
+            return String(error.message);
+        }
+        if (error.name) {
+            return String(error.name);
+        }
+        try {
+            return JSON.stringify(error);
+        } catch (_error) {
+            return String(fallbackMessage || error);
+        }
     }
 }
 
