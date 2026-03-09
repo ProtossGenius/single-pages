@@ -1556,7 +1556,7 @@
         const delay = Math.max(0, Number(delayMs) || 0);
         appState.autoReconnectTimer = window.setTimeout(() => {
             appState.autoReconnectTimer = null;
-            void tryAutoReconnect({ announce: false, allowDirectUrlJump: false });
+            void tryAutoReconnect({ announce: false, allowDirectUrlJump: !document.hidden });
         }, delay);
         return true;
     }
