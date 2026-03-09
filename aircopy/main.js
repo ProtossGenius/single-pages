@@ -36,7 +36,6 @@
             "./vendor/jsQR.min.js"
         ]
     };
-    const LAN_DISCOVERY_TIMEOUT_MS = 1800;
     const AUTO_RECONNECT_INTERVAL_MS = 5000;
     const AUTO_RECONNECT_MAX_ATTEMPTS = 6;
 
@@ -52,10 +51,6 @@
         smartRegionTimer: null,
         smartCanvas: null,
         smartCtx: null,
-        shareBaseUrl: "",
-        shareBaseUrlResolved: false,
-        shareBaseUrlTask: null,
-        localLanIps: [],
         localPeerId: "",
         localPersistentId: "",
         preferredConnectorMode: "",
@@ -162,7 +157,6 @@
     };
 
     const peerManager = (typeof PeerManager === "function") ? new PeerManager({
-        getLocalNodeInfo: () => getLocalNodeInfo(),
         onLocalId: (id) => {
             appState.localPeerId = id;
         },
@@ -176,8 +170,7 @@
                 rememberPeerNode({
                     persistentId: info.peerPersistentId || "",
                     peerName: info.peerName || appState.peerName || "",
-                    peerId: info.peerId || "",
-                    nodeInfo: info.peerNodeInfo || null
+                    peerId: info.peerId || ""
                 });
             }
             setConnectionState(true);
@@ -229,8 +222,7 @@
                 rememberPeerNode({
                     persistentId: remotePersistentId,
                     peerName: message.name || appState.peerName || "",
-                    peerId: message.peerId || "",
-                    nodeInfo: message.nodeInfo || null
+                    peerId: message.peerId || ""
                 });
             }
             if (message.type === "hello") {
@@ -354,7 +346,6 @@
         loadConnectorModePreference();
         loadStatusLogMaxSetting();
         renderBaseUrlText();
-        void ensureShareBaseUrl();
         setInitStage("location", "success", "已读取当前页面链接");
         if (!peerManager) {
             const detail = "PeerManager 脚本未加载，请确认 peer-manager.js 可访问";
@@ -800,314 +791,6 @@
         }
     }
 
-    function normalizeHostname(hostname) {
-        const value = String(hostname || "").trim().toLowerCase();
-        if (!value) {
-            return "";
-        }
-        if (value.startsWith("[") && value.endsWith("]")) {
-            return value.slice(1, -1);
-        }
-        return value;
-    }
-
-    function isLoopbackHostname(hostname) {
-        const value = normalizeHostname(hostname);
-        return value === "localhost" || value === "127.0.0.1" || value === "::1";
-    }
-
-    function isPrivateIpv4(hostname) {
-        const value = normalizeHostname(hostname);
-        const match = value.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
-        if (!match) {
-            return false;
-        }
-        const octets = match.slice(1).map((part) => Number(part));
-        if (octets.some((item) => item < 0 || item > 255)) {
-            return false;
-        }
-        if (octets[0] === 10) {
-            return true;
-        }
-        if (octets[0] === 172 && octets[1] >= 16 && octets[1] <= 31) {
-            return true;
-        }
-        return octets[0] === 192 && octets[1] === 168;
-    }
-
-    function extractHostCandidateIp(candidateText) {
-        const raw = String(candidateText || "").trim();
-        if (!raw || !raw.startsWith("candidate:")) {
-            return "";
-        }
-        const parts = raw.split(/\s+/);
-        if (parts.length < 6) {
-            return "";
-        }
-        const protocol = String(parts[2] || "").toLowerCase();
-        const address = normalizeHostname(parts[4] || "");
-        const candidateTypeIndex = parts.indexOf("typ");
-        const candidateType = candidateTypeIndex >= 0 ? String(parts[candidateTypeIndex + 1] || "").toLowerCase() : "";
-        if (protocol !== "udp" || candidateType !== "host" || !isPrivateIpv4(address)) {
-            return "";
-        }
-        return address;
-    }
-
-    function replaceUrlHostname(urlText, hostname) {
-        const nextHostname = normalizeHostname(hostname);
-        if (!nextHostname) {
-            return String(urlText || "").trim();
-        }
-        try {
-            const parsed = new URL(String(urlText || "").trim());
-            parsed.hostname = nextHostname;
-            return parsed.toString();
-        } catch (_error) {
-            return String(urlText || "").trim();
-        }
-    }
-
-    function detectLocalLanIps(timeoutMs = LAN_DISCOVERY_TIMEOUT_MS) {
-        const RTCPeer = window.RTCPeerConnection || window.webkitRTCPeerConnection || window.mozRTCPeerConnection;
-        if (typeof RTCPeer !== "function") {
-            return Promise.resolve([]);
-        }
-
-        return new Promise((resolve) => {
-            const discovered = new Set();
-            let settled = false;
-            let pc = null;
-            let timer = 0;
-
-            const finish = () => {
-                if (settled) {
-                    return;
-                }
-                settled = true;
-                if (timer) {
-                    window.clearTimeout(timer);
-                }
-                if (pc) {
-                    try {
-                        pc.onicecandidate = null;
-                        pc.close();
-                    } catch (_closeError) {
-                        // Ignore close failures.
-                    }
-                }
-                resolve(Array.from(discovered));
-            };
-
-            try {
-                pc = new RTCPeer({ iceServers: [] });
-                pc.createDataChannel("aircopy-lan-probe");
-                pc.onicecandidate = (event) => {
-                    if (!event || !event.candidate) {
-                        finish();
-                        return;
-                    }
-                    const candidateText = event.candidate && event.candidate.candidate
-                        ? event.candidate.candidate
-                        : "";
-                    const ip = extractHostCandidateIp(candidateText);
-                    if (ip) {
-                        discovered.add(ip);
-                    }
-                };
-                timer = window.setTimeout(finish, Math.max(200, Number(timeoutMs) || LAN_DISCOVERY_TIMEOUT_MS));
-                pc.createOffer()
-                    .then((offer) => pc.setLocalDescription(offer))
-                    .catch(() => {
-                        finish();
-                    });
-            } catch (_error) {
-                finish();
-            }
-        });
-    }
-
-    function getDisplayedBaseUrl() {
-        return String(appState.shareBaseUrl || getCurrentBaseUrl() || "").trim();
-    }
-
-    function normalizeLanIpList(values) {
-        if (!Array.isArray(values)) {
-            return [];
-        }
-        return values
-            .map((item) => normalizeHostname(item))
-            .filter((item, index, list) => item && isPrivateIpv4(item) && list.indexOf(item) === index)
-            .slice(0, 8);
-    }
-
-    function getUrlHostname(urlText) {
-        try {
-            return normalizeHostname(new URL(String(urlText || "").trim()).hostname || "");
-        } catch (_error) {
-            return "";
-        }
-    }
-
-    function getIpv4SubnetKey(ip) {
-        const value = normalizeHostname(ip);
-        if (!isPrivateIpv4(value)) {
-            return "";
-        }
-        const parts = value.split(".");
-        if (parts.length !== 4) {
-            return "";
-        }
-        return `${parts[0]}.${parts[1]}.${parts[2]}`;
-    }
-
-    function collectNodeLanIps(nodeInfo = null) {
-        const normalized = nodeInfo && typeof nodeInfo === "object" ? nodeInfo : {};
-        const hostFromBaseUrl = getUrlHostname(normalized.shareBaseUrl || "");
-        const baseList = normalizeLanIpList(normalized.lanIps || []);
-        if (hostFromBaseUrl && isPrivateIpv4(hostFromBaseUrl) && baseList.indexOf(hostFromBaseUrl) === -1) {
-            baseList.unshift(hostFromBaseUrl);
-        }
-        return baseList;
-    }
-
-    function getLocalNodeInfo() {
-        return {
-            baseUrl: getDisplayedBaseUrl(),
-            lanIps: collectNodeLanIps({
-                shareBaseUrl: getDisplayedBaseUrl(),
-                lanIps: appState.localLanIps
-            })
-        };
-    }
-
-    function isSameLanNode(nodeInfo = null) {
-        const localIps = collectNodeLanIps(getLocalNodeInfo());
-        const remoteIps = collectNodeLanIps(nodeInfo);
-        if (localIps.length === 0 || remoteIps.length === 0) {
-            return false;
-        }
-        for (let i = 0; i < localIps.length; i += 1) {
-            const localKey = getIpv4SubnetKey(localIps[i]);
-            if (!localKey) {
-                continue;
-            }
-            for (let j = 0; j < remoteIps.length; j += 1) {
-                if (localKey === getIpv4SubnetKey(remoteIps[j])) {
-                    return true;
-                }
-            }
-        }
-        return false;
-    }
-
-    function pickSameLanIp(nodeInfo = null) {
-        const localIps = collectNodeLanIps(getLocalNodeInfo());
-        const remoteIps = collectNodeLanIps(nodeInfo);
-        for (let i = 0; i < localIps.length; i += 1) {
-            const localKey = getIpv4SubnetKey(localIps[i]);
-            if (!localKey) {
-                continue;
-            }
-            for (let j = 0; j < remoteIps.length; j += 1) {
-                if (localKey === getIpv4SubnetKey(remoteIps[j])) {
-                    return remoteIps[j];
-                }
-            }
-        }
-        return remoteIps[0] || "";
-    }
-
-    function getNodeDirectBaseUrl(nodeInfo = null) {
-        const shareBaseUrl = nodeInfo && nodeInfo.shareBaseUrl ? String(nodeInfo.shareBaseUrl).trim() : "";
-        if (!shareBaseUrl) {
-            return "";
-        }
-        const shareHost = getUrlHostname(shareBaseUrl);
-        if (shareHost && isPrivateIpv4(shareHost)) {
-            return shareBaseUrl;
-        }
-        if (shareHost && !isLoopbackHostname(shareHost)) {
-            return "";
-        }
-        const sameLanIp = pickSameLanIp(nodeInfo);
-        if (!sameLanIp) {
-            return "";
-        }
-        return replaceUrlHostname(shareBaseUrl, sameLanIp);
-    }
-
-    function buildPeerDirectUrl(baseUrl, peerId) {
-        const targetPeerId = String(peerId || "").trim();
-        const targetBaseUrl = String(baseUrl || "").trim();
-        if (!targetPeerId || !targetBaseUrl) {
-            return "";
-        }
-        try {
-            return encodePeerSignal(targetPeerId, targetBaseUrl);
-        } catch (_error) {
-            return "";
-        }
-    }
-
-    function getRecentNodeDirectUrl(targetPeerId = "") {
-        const hint = appState.recentNodeHint;
-        if (!hint || !hint.shareBaseUrl) {
-            return "";
-        }
-        if (!isSameLanNode(hint)) {
-            return "";
-        }
-        return buildPeerDirectUrl(getNodeDirectBaseUrl(hint), targetPeerId || hint.lastPeerId || "");
-    }
-
-    async function ensureShareBaseUrl() {
-        if (appState.shareBaseUrlTask) {
-            return appState.shareBaseUrlTask;
-        }
-
-        const currentBaseUrl = String(getCurrentBaseUrl() || "").trim();
-        const hostname = normalizeHostname(window.location.hostname || "");
-        if (
-            appState.shareBaseUrl
-            && appState.shareBaseUrlResolved
-        ) {
-            return appState.shareBaseUrl;
-        }
-        appState.shareBaseUrl = currentBaseUrl;
-        if (!isLoopbackHostname(hostname)) {
-            appState.shareBaseUrlResolved = true;
-            renderBaseUrlText();
-            return currentBaseUrl;
-        }
-
-        appState.shareBaseUrlTask = detectLocalLanIps()
-            .then((ips) => {
-                appState.localLanIps = Array.isArray(ips) ? ips.slice() : [];
-                const preferredIp = appState.localLanIps[0] || "";
-                if (preferredIp) {
-                    appState.shareBaseUrl = replaceUrlHostname(currentBaseUrl, preferredIp);
-                } else {
-                    appState.shareBaseUrl = currentBaseUrl;
-                }
-                appState.shareBaseUrlResolved = true;
-                return appState.shareBaseUrl;
-            })
-            .catch(() => {
-                appState.localLanIps = [];
-                appState.shareBaseUrl = currentBaseUrl;
-                appState.shareBaseUrlResolved = true;
-                return currentBaseUrl;
-            })
-            .finally(() => {
-                renderBaseUrlText();
-                appState.shareBaseUrlTask = null;
-            });
-
-        renderBaseUrlText();
-        return appState.shareBaseUrlTask;
-    }
-
     function removePeerIdParamFromCurrentUrl(expectedPeerId = "") {
         try {
             const parsed = new URL(String(window.location.href || document.URL || ""));
@@ -1134,7 +817,7 @@
         if (!elements.baseUrlText) {
             return;
         }
-        const baseUrl = getDisplayedBaseUrl();
+        const baseUrl = String(getCurrentBaseUrl() || "").trim();
         elements.baseUrlText.textContent = baseUrl || "(无法解析当前地址)";
         console.info(`[AirCopy][URL] base=${elements.baseUrlText.textContent} href=${window.location.href}`);
     }
@@ -1371,8 +1054,6 @@
                 persistentId,
                 peerName: node && node.peerName ? String(node.peerName).trim() : "",
                 lastPeerId: node && node.lastPeerId ? String(node.lastPeerId).trim() : "",
-                shareBaseUrl: node && node.shareBaseUrl ? String(node.shareBaseUrl).trim() : "",
-                lanIps: collectNodeLanIps(node),
                 updatedAt: Math.max(0, Number((node && node.updatedAt) || 0))
             };
         } catch (_error) {
@@ -1389,13 +1070,11 @@
             localStorage.setItem(
                 NODE_HINT_STORAGE_KEY,
                 JSON.stringify({
-                    version: 2,
+                    version: 1,
                     node: {
                         persistentId: appState.recentNodeHint.persistentId,
                         peerName: appState.recentNodeHint.peerName || "",
                         lastPeerId: appState.recentNodeHint.lastPeerId || "",
-                        shareBaseUrl: appState.recentNodeHint.shareBaseUrl || "",
-                        lanIps: collectNodeLanIps(appState.recentNodeHint),
                         updatedAt: Math.max(0, Number(appState.recentNodeHint.updatedAt || 0))
                     }
                 })
@@ -1417,26 +1096,6 @@
             persistentId,
             peerName: String(meta.peerName || (prev && prev.peerName) || "").trim(),
             lastPeerId: String(meta.peerId || (prev && prev.lastPeerId) || "").trim(),
-            shareBaseUrl: String(
-                (meta.nodeInfo && meta.nodeInfo.baseUrl)
-                || meta.shareBaseUrl
-                || (prev && prev.shareBaseUrl)
-                || ""
-            ).trim(),
-            lanIps: collectNodeLanIps({
-                shareBaseUrl: (
-                    (meta.nodeInfo && meta.nodeInfo.baseUrl)
-                    || meta.shareBaseUrl
-                    || (prev && prev.shareBaseUrl)
-                    || ""
-                ),
-                lanIps: (
-                    (meta.nodeInfo && meta.nodeInfo.lanIps)
-                    || meta.lanIps
-                    || (prev && prev.lanIps)
-                    || []
-                )
-            }),
             updatedAt: Date.now()
         };
         persistNodeHint();
@@ -1556,7 +1215,7 @@
         const delay = Math.max(0, Number(delayMs) || 0);
         appState.autoReconnectTimer = window.setTimeout(() => {
             appState.autoReconnectTimer = null;
-            void tryAutoReconnect({ announce: false, allowDirectUrlJump: !document.hidden });
+            void tryAutoReconnect({ announce: false });
         }, delay);
         return true;
     }
@@ -1598,10 +1257,8 @@
         }
         if (options.announce !== false) {
             const peerIdHint = formatPeerIdHint(targetPeerId);
-            const directUrl = getRecentNodeDirectUrl(targetPeerId);
             const suffix = peerIdHint ? `（目标 peerId: ${peerIdHint}）` : "";
-            const routeText = directUrl ? "，前台时优先走局域网直连地址" : "";
-            setStatus(`连接已断开，将每 ${Math.round(AUTO_RECONNECT_INTERVAL_MS / 1000)} 秒自动重连${suffix}${routeText}，最多 ${AUTO_RECONNECT_MAX_ATTEMPTS} 次。`);
+            setStatus(`连接已断开，将每 ${Math.round(AUTO_RECONNECT_INTERVAL_MS / 1000)} 秒自动重连${suffix}，最多 ${AUTO_RECONNECT_MAX_ATTEMPTS} 次。`);
         }
         scheduleAutoReconnect(options.delayMs);
         return true;
@@ -1611,7 +1268,7 @@
         if (document.hidden) {
             return false;
         }
-        return tryAutoReconnect({ announce: true, allowDirectUrlJump: true });
+        return tryAutoReconnect({ announce: true });
     }
 
     async function tryAutoReconnect(options = {}) {
@@ -1644,13 +1301,6 @@
             }
             const peerIdHint = formatPeerIdHint(targetPeerId);
             const suffix = peerIdHint ? `（目标 peerId: ${peerIdHint}）` : "";
-            const directUrl = options.allowDirectUrlJump === false ? "" : getRecentNodeDirectUrl(targetPeerId);
-            if (directUrl) {
-                clearAutoReconnectState();
-                setStatus(`正在通过局域网地址重新发起连接${suffix}${attemptText}…`);
-                window.location.assign(directUrl);
-                return true;
-            }
             if (options.announce !== false) {
                 setStatus(`正在尝试重连${suffix}${attemptText}…`);
             }
@@ -1969,8 +1619,7 @@
             setInitStage("qrcode", "running", "开始生成二维码链接");
             setStatus("正在初始化 Peer 节点并生成二维码…");
             const peerId = await ensurePeerReady();
-            const shareBaseUrl = await ensureShareBaseUrl();
-            const encoded = encodePeerSignal(peerId, shareBaseUrl);
+            const encoded = encodePeerSignal(peerId);
             renderQr(encoded);
             setInitStage("qrcode", "success", `链接长度=${encoded.length}`);
             setStatus(`请让对方扫码该二维码（长度 ${encoded.length}）。扫码后将直接发起连接。`);

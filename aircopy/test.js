@@ -480,13 +480,6 @@
             assert(encoded.includes("pairId="), "编码结果缺少 pairId 参数");
         });
 
-        runner.addTest("encodePeerSignal 支持指定 baseUrl", () => {
-            const encoded = encodePeerSignal("peer-lan", "https://192.168.1.23:8443/aircopy/index.html?foo=1");
-            assert(encoded.startsWith("https://192.168.1.23:8443/aircopy/index.html"), "应使用传入的 baseUrl");
-            assert(encoded.includes("foo=1"), "应保留原有查询参数");
-            assert(encoded.includes("pairId=peer-lan"), "应写入新的 pairId");
-        });
-
         runner.addTest("decodePeerSignal 兼容前缀格式", () => {
             const decoded = decodePeerSignal("AIRCOPYP1:abc-123");
             assertEqual(decoded, "abc-123", "前缀格式解析失败");
@@ -627,41 +620,6 @@
             assertEqual(payload.b, "hello", "消息内容错误");
             assertEqual(payload.name, "Tester", "name 未写入");
             assertEqual(payload.pid, "pid-t", "pid 未写入");
-        });
-
-        runner.addTest("PeerManager 会透传节点信息", () => {
-            let received = null;
-            const pm = new PeerManager({
-                getLocalNodeInfo() {
-                    return {
-                        baseUrl: "https://192.168.1.23:8443/aircopy/index.html",
-                        lanIps: ["192.168.1.23"]
-                    };
-                },
-                onMessage(message) {
-                    received = message;
-                }
-            });
-            pm.displayName = "Tester";
-            pm.persistentId = "pid-node";
-            pm.connection = createMockConn("remote-node", { open: true });
-
-            pm.sendText("hello-node");
-            assert(pm.connection.sent[0].node, "sendText 应附带 node 信息");
-            assertEqual(pm.connection.sent[0].node.baseUrl, "https://192.168.1.23:8443/aircopy/index.html", "node.baseUrl 错误");
-
-            pm._onData({
-                t: "hello",
-                b: "hello",
-                name: "Remote",
-                pid: "pid-remote",
-                node: {
-                    baseUrl: "https://192.168.1.88:8443/aircopy/index.html",
-                    lanIps: ["192.168.1.88"]
-                }
-            });
-            assert(received && received.nodeInfo, "onMessage 应收到 nodeInfo");
-            assertEqual(received.nodeInfo.baseUrl, "https://192.168.1.88:8443/aircopy/index.html", "收到的 nodeInfo.baseUrl 错误");
         });
 
         runner.addTest("PeerManager 收到 call-hangup 会同步结束通话", () => {
