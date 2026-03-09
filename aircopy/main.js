@@ -24,23 +24,15 @@
     const SCRIPT_LOAD_TIMEOUT_MS = 4500;
     const DEPENDENCY_CDN_URLS = {
         peerjs: [
-            "https://cdn.jsdelivr.net/npm/peerjs@1.5.4/dist/peerjs.min.js",
-            "https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js",
             "./vendor/peerjs.min.js"
         ],
         qrcode: [
-            "https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js",
-            "https://unpkg.com/qrcodejs@1.0.0/qrcode.min.js",
             "./vendor/qrcode.min.js"
         ],
         zxing: [
-            "https://cdn.jsdelivr.net/npm/@zxing/browser@0.1.5/umd/zxing-browser.min.js",
-            "https://unpkg.com/@zxing/browser@0.1.5/umd/zxing-browser.min.js",
             "./vendor/zxing-browser.min.js"
         ],
         jsqr: [
-            "https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js",
-            "https://unpkg.com/jsqr@1.4.0/dist/jsQR.min.js",
             "./vendor/jsQR.min.js"
         ]
     };
