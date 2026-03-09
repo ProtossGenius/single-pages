@@ -6,9 +6,11 @@ const FILE_SEND_DRAIN_THRESHOLD_BYTES = 96 * 1024;
 const HEARTBEAT_INTERVAL_MS = 5000;
 const HEARTBEAT_FAST_INTERVAL_MS = 1000;
 const HEARTBEAT_FAST_THRESHOLD_MS = 15000;
-const HEARTBEAT_DISCONNECT_TIMEOUT_MS = 10 * 60 * 1000;
+const HEARTBEAT_DISCONNECT_TIMEOUT_MS = 20000;
+const HEARTBEAT_KEEPALIVE_STALE_TIMEOUT_MS = 10 * 60 * 1000;
 const HEARTBEAT_KEEPALIVE_AUDIO_RETRY_MS = 3000;
 const HEARTBEAT_KEEPALIVE_AUDIO_SRC = "./silent-loop.mp3";
+const CONNECTION_HEALTH_RECHECK_DELAY_MS = 3000;
 
 class PeerManager {
     constructor(handlers = {}) {
@@ -31,6 +33,8 @@ class PeerManager {
         this.heartbeatKeepAliveEnabled = false;
         this.heartbeatKeepAliveAudio = null;
         this.heartbeatKeepAliveRetryTimer = null;
+        this.connectionHealthCleanup = null;
+        this.connectionHealthCheckTimer = null;
 
         this.incomingTransfers = new Map();
         this.outgoingTransferAcks = new Map();
@@ -353,6 +357,7 @@ class PeerManager {
     }
 
     closeConnection() {
+        this._clearConnectionHealthWatch();
         this._stopHeartbeatLoop();
         this._stopHeartbeatKeepAliveAudio();
         if (this.connection) {
@@ -412,17 +417,20 @@ class PeerManager {
         if (this.connection && this.connection !== conn) {
             this.connection.close();
         }
+        this._clearConnectionHealthWatch();
         this._stopHeartbeatKeepAliveAudio();
         this.connection = conn;
         this.helloSent = false;
         this.remoteDisplayName = (conn.metadata && conn.metadata.name) ? String(conn.metadata.name) : "";
         this.remotePersistentId = isIncoming && conn.metadata && conn.metadata.pid ? String(conn.metadata.pid) : "";
         this.remoteNodeInfo = this._normalizeNodeInfo(conn && conn.metadata ? conn.metadata.node : null);
+        this._installConnectionHealthWatch(conn);
 
         conn.on("open", () => {
             if (this.connection !== conn) {
                 return;
             }
+            this._installConnectionHealthWatch(conn);
             if (this.handlers.onConnected) {
                 this.handlers.onConnected({
                     peerId: conn.peer,
@@ -850,7 +858,14 @@ class PeerManager {
         if (!this.connection || !this.connection.open) {
             return;
         }
-        this.connection.send(payload);
+        try {
+            this.connection.send(payload);
+        } catch (error) {
+            if (this.handlers.onError) {
+                this.handlers.onError(error);
+            }
+            this._handleActiveConnectionClosed("连接发送失败，连接已断开");
+        }
     }
 
     _getLocalNodeInfo() {
@@ -976,13 +991,21 @@ class PeerManager {
         }
         this.heartbeatSequence += 1;
         const heartbeatId = `hb${now.toString(36)}${this.heartbeatSequence.toString(36)}`;
-        this.connection.send({
-            t: "heartbeat",
-            id: heartbeatId,
-            ts: now,
-            name: this.displayName,
-            pid: this.persistentId
-        });
+        try {
+            this.connection.send({
+                t: "heartbeat",
+                id: heartbeatId,
+                ts: now,
+                name: this.displayName,
+                pid: this.persistentId
+            });
+        } catch (error) {
+            if (this.handlers.onError) {
+                this.handlers.onError(error);
+            }
+            this._handleActiveConnectionClosed("心跳发送失败，连接已断开");
+            return;
+        }
         this.pendingHeartbeatId = heartbeatId;
         this.heartbeatDueAt = now + this.currentHeartbeatIntervalMs;
         this._syncHeartbeatKeepAliveAudio();
@@ -1024,6 +1047,7 @@ class PeerManager {
         this.helloSent = false;
         this.remoteDisplayName = "";
         this.remotePersistentId = "";
+        this._clearConnectionHealthWatch();
         this._stopHeartbeatLoop();
         this._stopHeartbeatKeepAliveAudio();
         if (activeConnection) {
@@ -1042,6 +1066,143 @@ class PeerManager {
                 peerId: closedPeerId
             });
         }
+    }
+
+    _clearConnectionHealthWatch() {
+        if (this.connectionHealthCheckTimer !== null) {
+            window.clearTimeout(this.connectionHealthCheckTimer);
+            this.connectionHealthCheckTimer = null;
+        }
+        if (typeof this.connectionHealthCleanup === "function") {
+            try {
+                this.connectionHealthCleanup();
+            } catch (_error) {
+                // Ignore cleanup errors.
+            }
+        }
+        this.connectionHealthCleanup = null;
+    }
+
+    _installConnectionHealthWatch(conn) {
+        if (!conn || this.connection !== conn) {
+            return;
+        }
+        this._clearConnectionHealthWatch();
+        const cleanups = [];
+        const bindEvent = (target, eventName, handler) => {
+            if (!target || typeof target.addEventListener !== "function") {
+                return;
+            }
+            target.addEventListener(eventName, handler);
+            cleanups.push(() => {
+                try {
+                    target.removeEventListener(eventName, handler);
+                } catch (_error) {
+                    // Ignore remove listener errors.
+                }
+            });
+        };
+
+        const peerConnection = conn.peerConnection;
+        if (peerConnection) {
+            const onConnectionStateChange = () => {
+                this._observeTransportState(conn, "rtc", peerConnection.connectionState);
+            };
+            const onIceConnectionStateChange = () => {
+                this._observeTransportState(conn, "ice", peerConnection.iceConnectionState);
+            };
+            bindEvent(peerConnection, "connectionstatechange", onConnectionStateChange);
+            bindEvent(peerConnection, "iceconnectionstatechange", onIceConnectionStateChange);
+            onConnectionStateChange();
+            onIceConnectionStateChange();
+        }
+
+        const dataChannel = conn.dataChannel;
+        if (dataChannel) {
+            const onDataChannelStateChange = () => {
+                this._observeTransportState(conn, "data", dataChannel.readyState);
+            };
+            const onDataChannelClose = () => {
+                this._observeTransportState(conn, "data", "closed");
+            };
+            bindEvent(dataChannel, "closing", onDataChannelStateChange);
+            bindEvent(dataChannel, "close", onDataChannelClose);
+            onDataChannelStateChange();
+        }
+
+        this.connectionHealthCleanup = () => {
+            for (let i = 0; i < cleanups.length; i += 1) {
+                cleanups[i]();
+            }
+        };
+    }
+
+    _observeTransportState(conn, source, state) {
+        if (!conn || this.connection !== conn) {
+            return;
+        }
+        const normalizedState = String(state || "").trim().toLowerCase();
+        if (!normalizedState) {
+            return;
+        }
+        if (
+            normalizedState === "connected"
+            || normalizedState === "completed"
+            || normalizedState === "open"
+        ) {
+            if (this.connectionHealthCheckTimer !== null) {
+                window.clearTimeout(this.connectionHealthCheckTimer);
+                this.connectionHealthCheckTimer = null;
+            }
+            return;
+        }
+        if (normalizedState === "failed" || normalizedState === "closed") {
+            this._handleActiveConnectionClosed(`连接已断开（${source}:${normalizedState}）`);
+            return;
+        }
+        if (normalizedState !== "disconnected" && normalizedState !== "closing") {
+            return;
+        }
+        if (this.connectionHealthCheckTimer !== null) {
+            window.clearTimeout(this.connectionHealthCheckTimer);
+        }
+        this.connectionHealthCheckTimer = window.setTimeout(() => {
+            this.connectionHealthCheckTimer = null;
+            if (this.connection !== conn) {
+                return;
+            }
+            if (!this._isTransportUnhealthy(conn)) {
+                return;
+            }
+            this._handleActiveConnectionClosed(`连接已断开（${source}:${normalizedState}）`);
+        }, CONNECTION_HEALTH_RECHECK_DELAY_MS);
+    }
+
+    _isTransportUnhealthy(conn) {
+        if (!conn) {
+            return false;
+        }
+        const peerConnection = conn.peerConnection;
+        if (peerConnection) {
+            const connectionState = String(peerConnection.connectionState || "").trim().toLowerCase();
+            const iceConnectionState = String(peerConnection.iceConnectionState || "").trim().toLowerCase();
+            if (
+                connectionState === "failed"
+                || connectionState === "closed"
+                || connectionState === "disconnected"
+                || iceConnectionState === "failed"
+                || iceConnectionState === "closed"
+                || iceConnectionState === "disconnected"
+            ) {
+                return true;
+            }
+        }
+        const dataChannel = conn.dataChannel;
+        if (!dataChannel) {
+            return false;
+        }
+        const readyState = String(dataChannel.readyState || "").trim().toLowerCase();
+        return readyState === "closing" || readyState === "closed";
     }
 
     _toArrayBuffer(value) {
@@ -1142,7 +1303,7 @@ class PeerManager {
         const canKeepAlive = Boolean(this.heartbeatKeepAliveEnabled && this.connection && this.connection.open);
         const hasRecentHeartbeatReply = Boolean(
             this.lastHeartbeatReplyAt > 0
-            && (Date.now() - this.lastHeartbeatReplyAt) < HEARTBEAT_DISCONNECT_TIMEOUT_MS
+            && (Date.now() - this.lastHeartbeatReplyAt) < HEARTBEAT_KEEPALIVE_STALE_TIMEOUT_MS
         );
         if (!canKeepAlive || !hasRecentHeartbeatReply) {
             this._stopHeartbeatKeepAliveAudio();

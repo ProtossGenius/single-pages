@@ -367,6 +367,8 @@
             peer: String(peerId || "peer-x"),
             open: opts.open !== false,
             metadata: opts.metadata || {},
+            peerConnection: opts.peerConnection || null,
+            dataChannel: opts.dataChannel || null,
             sent: [],
             closed: false,
             on(eventName, cb) {
@@ -389,6 +391,33 @@
             }
         };
         return conn;
+    }
+
+    function createMockEventTarget(initialState) {
+        const state = initialState || {};
+        const listeners = new Map();
+        return {
+            ...state,
+            addEventListener(eventName, cb) {
+                const list = listeners.get(eventName) || [];
+                list.push(cb);
+                listeners.set(eventName, list);
+            },
+            removeEventListener(eventName, cb) {
+                const list = listeners.get(eventName) || [];
+                const index = list.indexOf(cb);
+                if (index >= 0) {
+                    list.splice(index, 1);
+                }
+                listeners.set(eventName, list);
+            },
+            emit(eventName) {
+                const list = listeners.get(eventName) || [];
+                for (let i = 0; i < list.length; i += 1) {
+                    list[i]();
+                }
+            }
+        };
     }
 
     function createMockPeer(connectImpl) {
@@ -536,6 +565,54 @@
             assertEqual(connectedPeerIds[0], "scan-peer", "应只接收当前连接的 open 事件");
             assertEqual(received.length, 1, "失活连接不应触发消息处理");
             assertEqual(received[0].body, "from-active", "应只处理当前连接的数据");
+        });
+
+        runner.addTest("PeerManager 心跳超时会关闭连接", () => {
+            const closed = [];
+            const pm = new PeerManager({
+                onConnectionClosed(info) {
+                    closed.push(info);
+                }
+            });
+            pm.connection = createMockConn("remote-timeout", { open: true });
+            pm.lastHeartbeatReplyAt = Date.now() - 25000;
+
+            pm._sendHeartbeat();
+
+            assertEqual(pm.connection, null, "心跳超时后应清空当前连接");
+            assertEqual(closed.length, 1, "心跳超时后应触发关闭回调");
+            assert(String(closed[0].reason || "").includes("心跳超时"), "关闭原因应包含心跳超时");
+        });
+
+        runner.addTest("PeerManager 检测到底层 RTC failed 会关闭连接", () => {
+            const closed = [];
+            const peerConnection = createMockEventTarget({
+                connectionState: "connected",
+                iceConnectionState: "connected"
+            });
+            const dataChannel = createMockEventTarget({
+                readyState: "open"
+            });
+            const pm = new PeerManager({
+                onConnectionClosed(info) {
+                    closed.push(info);
+                }
+            });
+            const conn = createMockConn("remote-rtc", {
+                open: false,
+                peerConnection,
+                dataChannel
+            });
+
+            pm._attachConnection(conn, false);
+            conn.open = true;
+            conn.emit("open");
+            peerConnection.connectionState = "failed";
+            peerConnection.emit("connectionstatechange");
+
+            assertEqual(pm.connection, null, "RTC failed 后应清空当前连接");
+            assertEqual(closed.length, 1, "RTC failed 后应触发关闭回调");
+            assert(String(closed[0].reason || "").includes("rtc:failed"), "关闭原因应包含 rtc:failed");
         });
 
         runner.addTest("PeerManager.sendText 封包正确", () => {
