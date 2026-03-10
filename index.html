@@ -398,8 +398,6 @@
     <span>View on GitHub</span>
   </a>
 
-  <script src="https://cdn.jsdelivr.net/npm/fuse.js@7.1.0"></script>
-  <script src="https://cdn.jsdelivr.net/npm/pinyin-pro@3.27.0/dist/index.js"></script>
   <script>
     const TOOL_LIST = [
       {
@@ -425,22 +423,8 @@
     const resultTip = document.getElementById("resultTip");
     const emptyState = document.getElementById("emptyState");
 
-    const normalized = TOOL_LIST.map((tool) => buildSearchDoc(tool));
-
-    const fuse = window.Fuse
-      ? new window.Fuse(normalized, {
-          includeScore: true,
-          shouldSort: true,
-          ignoreLocation: true,
-          threshold: 0.42,
-          keys: [
-            { name: "title", weight: 0.35 },
-            { name: "description", weight: 0.2 },
-            { name: "keywordText", weight: 0.35 },
-            { name: "folder", weight: 0.1 }
-          ]
-        })
-      : null;
+    let normalized = TOOL_LIST.map((tool) => buildSearchDoc(tool));
+    let fuse = createFuse(normalized);
 
     init();
 
@@ -454,6 +438,96 @@
         syncQuery(query);
       });
       injectStructuredData();
+      scheduleSearchEnhancer();
+    }
+
+    function createFuse(list) {
+      if (!window.Fuse) {
+        return null;
+      }
+      return new window.Fuse(list, {
+        includeScore: true,
+        shouldSort: true,
+        ignoreLocation: true,
+        threshold: 0.42,
+        keys: [
+          { name: "title", weight: 0.35 },
+          { name: "description", weight: 0.2 },
+          { name: "keywordText", weight: 0.35 },
+          { name: "folder", weight: 0.1 }
+        ]
+      });
+    }
+
+    function scheduleSearchEnhancer() {
+      const run = () => {
+        enhanceSearchWithExternalLibs().catch(() => {
+          // 保持本地搜索可用；外部增强加载失败不影响首屏展示。
+        });
+      };
+
+      if (typeof window.requestIdleCallback === "function") {
+        window.requestIdleCallback(run, { timeout: 1200 });
+        return;
+      }
+      window.setTimeout(run, 0);
+    }
+
+    async function enhanceSearchWithExternalLibs() {
+      const [fuseLoaded, pinyinLoaded] = await Promise.all([
+        ensureScript(
+          ["./vendor/fuse.min.js"],
+          () => Boolean(window.Fuse)
+        ),
+        ensureScript(
+          ["./vendor/pinyin-pro.js"],
+          () => Boolean(window.pinyinPro && typeof window.pinyinPro.pinyin === "function")
+        )
+      ]);
+
+      if (!fuseLoaded && !pinyinLoaded) {
+        return;
+      }
+
+      normalized = TOOL_LIST.map((tool) => buildSearchDoc(tool));
+      fuse = createFuse(normalized);
+      renderByQuery(searchInput.value || "");
+    }
+
+    async function ensureScript(urls, isReady) {
+      if (isReady()) {
+        return true;
+      }
+
+      for (const url of urls) {
+        const loaded = await loadScript(url);
+        if (loaded && isReady()) {
+          return true;
+        }
+      }
+      return false;
+    }
+
+    function loadScript(url) {
+      return new Promise((resolve) => {
+        const existing = document.querySelector(`script[data-external-lib="${url}"]`);
+        if (existing) {
+          existing.addEventListener("load", () => resolve(true), { once: true });
+          existing.addEventListener("error", () => resolve(false), { once: true });
+          return;
+        }
+
+        const script = document.createElement("script");
+        script.src = url;
+        script.async = true;
+        script.dataset.externalLib = url;
+        script.onload = () => resolve(true);
+        script.onerror = () => {
+          script.remove();
+          resolve(false);
+        };
+        document.head.appendChild(script);
+      });
     }
 
     function buildSearchDoc(tool) {
