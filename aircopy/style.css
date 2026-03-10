@@ -20,6 +20,39 @@ body {
     align-items: center;
 }
 
+.home-entry {
+    position: fixed;
+    top: max(12px, env(safe-area-inset-top));
+    left: max(12px, env(safe-area-inset-left));
+    z-index: 500;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 12px;
+    border-radius: 999px;
+    border: 1px solid #dbe2ea;
+    background: rgba(255, 255, 255, 0.95);
+    box-shadow: 0 4px 14px rgba(15, 23, 42, 0.12);
+    color: #0f172a;
+    font-size: 0.88rem;
+    font-weight: 600;
+    line-height: 1;
+    text-decoration: none;
+    transition: transform 0.16s ease, box-shadow 0.16s ease, background-color 0.16s ease;
+}
+
+.home-entry:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 6px 18px rgba(15, 23, 42, 0.16);
+    background: #fff;
+}
+
+.home-entry img {
+    width: 18px;
+    height: 18px;
+    display: block;
+}
+
 #app {
     width: 100%;
     max-width: 1000px;
@@ -47,7 +80,9 @@ body {
 #connection-setup {
     padding: 40px;
     align-items: center;
-    justify-content: center;
+    justify-content: flex-start;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
 }
 
 .header {
@@ -997,6 +1032,13 @@ button.danger:hover {
 }
 
 @media (max-width: 760px) {
+    .home-entry {
+        top: max(10px, env(safe-area-inset-top));
+        left: max(10px, env(safe-area-inset-left));
+        padding: 6px 10px;
+        font-size: 0.84rem;
+    }
+
     #app {
         width: 100vw;
         height: 100dvh;
