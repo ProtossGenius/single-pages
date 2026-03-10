@@ -6,11 +6,11 @@
   <title>躺平至上 | 站长工具导航与端对端拷贝入口</title>
   <meta
     name="description"
-    content="站长工具导航页，聚合 AirCopy 等子项目，支持拼音/简拼/缺字模糊搜索。可通过端对端拷贝、点对点传输、局域网传文件等关键词快速找到工具。"
+    content="站长工具导航页，聚合 AirCopy 等子项目，支持中文/英文/拼音/简拼模糊搜索。可通过 file transfer、one line script、端对端拷贝等关键词快速找到工具。"
   />
   <meta
     name="keywords"
-    content="站长工具,工具导航,端对端拷贝,端到端拷贝,点对点传输,局域网传文件,WebRTC 文件传输,AirCopy"
+    content="站长工具,工具导航,AirCopy,file transfer,WebRTC file transfer,端对端拷贝,点对点传输,Linux one line,Linux one-liner,script"
   />
   <meta name="robots" content="index,follow,max-image-preview:large,max-snippet:-1,max-video-preview:-1" />
   <meta property="og:type" content="website" />
@@ -360,23 +360,23 @@
           id="searchInput"
           type="search"
           autocomplete="off"
-          placeholder="输入关键词/拼音/简拼，如：端对端拷贝、aircopy、dddkb"
+          placeholder="输入关键词/英文/拼音，如：aircopy、file transfer、linux one line、script"
         />
       </div>
-      <p class="search-tip">支持中文、拼音、简拼和缺字模糊匹配。</p>
+      <p class="search-tip">支持中文、英文、拼音、简拼和缺字模糊匹配。</p>
       <p id="resultTip" class="result-tip" aria-live="polite"></p>
     </section>
 
     <section aria-labelledby="tools-title">
       <h2 id="tools-title" class="visually-hidden">工具列表</h2>
       <div id="cardGrid" class="cards" role="list"></div>
-      <div id="emptyState" class="empty" hidden>未匹配到工具，试试「端对端拷贝 / 点对点传输 / aircopy」。</div>
+      <div id="emptyState" class="empty" hidden>未匹配到工具，试试「file transfer / linux one line / script / aircopy」。</div>
     </section>
 
     <section class="seo-block" aria-labelledby="seo-title">
       <h2 id="seo-title">常见检索词</h2>
       <p>
-        如果你在搜索「端对端拷贝」「端到端拷贝」「点对点传输」「局域网传文件」「WebRTC 文件传输」，可以在本页直接进入 AirCopy。
+        如果你在搜索「端对端拷贝」「点对点传输」「file transfer」「WebRTC file transfer」「linux one line」「script」，可以在本页快速定位对应工具。
       </p>
     </section>
 
@@ -408,12 +408,16 @@
         description: "基于 WebRTC 的端到端文件传输，支持扫码直连与点对点分享。",
         keywords: [
           "AirCopy",
+          "file transfer",
+          "WebRTC file transfer",
+          "P2P file transfer",
           "端对端拷贝",
           "端到端拷贝",
           "点对点传输",
           "局域网传文件",
           "WebRTC 文件传输",
-          "P2P 文件快传"
+          "P2P 文件快传",
+          "文件传输"
         ]
       },
       {
@@ -423,6 +427,11 @@
         url: "./linux-one-liners/",
         description: "常用 Linux one-liner 集合，支持参数填写、实时替换、高亮和一键复制。",
         keywords: [
+          "linux one line",
+          "linux one-liner",
+          "one line script",
+          "shell script",
+          "script",
           "Linux 一句话脚本",
           "runhttps",
           "反向代理",
