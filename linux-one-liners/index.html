@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Linux 一句话脚本库 | 躺平至上</title>
+  <meta
+    name="description"
+    content="Linux 常用一句话脚本集合，支持参数填写、实时替换、语法高亮与一键复制。"
+  />
+  <meta
+    name="keywords"
+    content="Linux 一句话脚本,runhttps,反向代理,SSH 隧道,日志过滤,端口占用"
+  />
+  <meta name="robots" content="index,follow,max-image-preview:large,max-snippet:-1,max-video-preview:-1" />
+  <meta property="og:type" content="website" />
+  <meta property="og:title" content="Linux 一句话脚本库 | 躺平至上" />
+  <meta property="og:description" content="常用 Linux one-liner，支持参数实时替换、语法高亮和复制。" />
+  <meta property="og:locale" content="zh_CN" />
+  <meta property="og:url" content="https://www.liedown.top/linux-one-liners/" />
+  <meta name="theme-color" content="#0f172a" />
+  <link rel="canonical" href="https://www.liedown.top/linux-one-liners/" />
+  <link rel="icon" type="image/svg+xml" href="../site-icon.svg" />
+  <link rel="stylesheet" href="../vendor/highlight-github.min.css" />
+  <link rel="stylesheet" href="./style.css" />
+</head>
+<body>
+  <main class="page">
+    <header class="hero">
+      <a class="back-link" href="../">← 返回首页</a>
+      <h1>Linux 一句话脚本库</h1>
+      <p>常用脚本集中维护，参数实时替换后可直接复制执行。</p>
+    </header>
+
+    <section class="search-panel" aria-labelledby="search-title">
+      <h2 id="search-title" class="search-title">搜索脚本</h2>
+      <label class="visually-hidden" for="searchInput">搜索脚本名称、关键词或拼音</label>
+      <div class="search-box">
+        <input
+          id="searchInput"
+          type="search"
+          autocomplete="off"
+          placeholder="输入关键词/拼音/简拼，例如：runhttps、fxdl、反向代理"
+        />
+      </div>
+      <p class="search-tip">支持中文、拼音、简拼和缺字模糊匹配。</p>
+      <p id="resultTip" class="result-tip" aria-live="polite"></p>
+    </section>
+
+    <section aria-labelledby="scripts-title">
+      <h2 id="scripts-title" class="visually-hidden">脚本列表</h2>
+      <div id="cardGrid" class="cards" role="list"></div>
+      <div id="emptyState" class="empty" hidden>没有匹配到脚本，试试关键词：runhttps、反向代理、日志。</div>
+    </section>
+  </main>
+
+  <script src="../vendor/fuse.min.js"></script>
+  <script src="../vendor/pinyin-pro.js"></script>
+  <script src="../vendor/highlight.min.js"></script>
+  <script src="./scripts-data.js"></script>
+  <script src="./app.js"></script>
+</body>
+</html>
