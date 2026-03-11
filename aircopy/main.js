@@ -217,6 +217,8 @@
             if (closedPeerId && appState.autoReconnectPeers && appState.autoReconnectPeers[closedPeerId]) {
                 handleAutoReconnectPeerFailure(closedPeerId, closeReason);
             }
+            // 任意连接关闭后刷新会话列表，更新左侧会话的在线/离线状态。
+            renderSessionList();
         },
         onError: (error) => {
             const details = describePeerRuntimeError(error, "连接异常");
@@ -248,6 +250,10 @@
                     peerId: message.peerId || ""
                 });
             }
+            // 如果当前仍被标记为未连接，但已经收到了对端消息，说明链路已恢复。
+            if (!appState.connected && peerManager && typeof peerManager.hasAnyConnection === "function" && peerManager.hasAnyConnection()) {
+                setConnectionState(true);
+            }
             if (message.type === "hello") {
                 const remoteName = message.name || appState.peerName || "对方";
                 setPeerName(remoteName);
@@ -258,16 +264,18 @@
             appendMessage(message.from, message.body, message.type === "hello");
             markUnreadIfNeeded(message.from === "peer");
         },
-        onHeartbeat: () => {
-            playHeartbeatFloatBurst();
+        onHeartbeat: (info) => {
+            handleHeartbeatPing(info);
         },
         onHeartbeatStatus: (payload) => {
             const status = payload && payload.status ? String(payload.status) : "online";
             if (status === "away") {
                 setPeerPresence("away");
-                return;
+            } else {
+                setPeerPresence("online");
             }
-            setPeerPresence("online");
+            // 心跳状态变化时刷新会话列表，保持左侧列表与头部状态一致。
+            renderSessionList();
         },
         onIncomingFileOffer: (offer) => {
             appState.incomingFileOffer = offer || null;
@@ -1662,6 +1670,27 @@
         }));
     }
 
+    function getConversationPresence(conversation) {
+        if (!conversation) {
+            return "offline";
+        }
+        // 当前会话直接复用全局 peerPresence，保证头部状态与列表一致。
+        if (conversation.id && conversation.id === appState.currentConversationId) {
+            const normalized = normalizePeerPresence(appState.peerPresence || "offline");
+            if (normalized !== "offline") {
+                return normalized;
+            }
+        }
+        if (!conversation.peerId || !peerManager || typeof peerManager.isPeerConnected !== "function") {
+            return "offline";
+        }
+        const peerId = String(conversation.peerId).trim();
+        if (!peerId) {
+            return "offline";
+        }
+        return peerManager.isPeerConnected(peerId) ? "online" : "offline";
+    }
+
     function renderSessionList() {
         if (!elements.sessionList) {
             return;
@@ -1699,6 +1728,13 @@
             nameSpan.className = "name";
             nameSpan.textContent = name;
             li.appendChild(nameSpan);
+
+            // 会话级连接状态（在线/暂离/离线）。
+            const presence = getConversationPresence(conversation);
+            const statusSpan = document.createElement("span");
+            statusSpan.className = `session-status ${presence}`;
+            statusSpan.textContent = presence === "away" ? "暂离" : (presence === "online" ? "在线" : "离线");
+            li.appendChild(statusSpan);
 
             const unreadCount = Math.max(0, Number(conversation.unreadCount || 0));
             if (unreadCount > 0) {
@@ -3337,6 +3373,18 @@
         setStatus("已退出会话，请重新扫码连接。");
     }
 
+    function isConversationConnected(conversation) {
+        if (!conversation) {
+            return false;
+        }
+        const peerId = conversation.peerId ? String(conversation.peerId).trim() : "";
+        if (!peerId || !peerManager || typeof peerManager.isPeerConnected !== "function") {
+            // 没有明确 peerId 时退回到当前全局连接标记，兼容旧格式会话。
+            return Boolean(appState.connected);
+        }
+        return peerManager.isPeerConnected(peerId);
+    }
+
     function setPeerName(name, options = {}) {
         appState.peerName = String(name || "").trim();
         const viewName = appState.peerName || "当前会话";
@@ -3404,11 +3452,7 @@
             return false;
         }
         const conversation = appState.conversations[currentId];
-        const peerId = conversation && conversation.peerId ? String(conversation.peerId).trim() : "";
-        if (!peerId || !peerManager || typeof peerManager.isPeerConnected !== "function") {
-            return Boolean(appState.connected);
-        }
-        return peerManager.isPeerConnected(peerId);
+        return isConversationConnected(conversation);
     }
 
     function updateSendControlsEnabledState() {
@@ -3529,6 +3573,34 @@
         }, duration + 200);
     }
 
+    function handleHeartbeatPing(info) {
+        playHeartbeatFloatBurst();
+        const peerId = info && info.peerId ? String(info.peerId).trim() : "";
+        if (!peerId) {
+            return;
+        }
+        const currentId = String(appState.currentConversationId || "").trim();
+        const currentConversation = currentId ? appState.conversations[currentId] : null;
+        const currentPeerId = currentConversation && currentConversation.peerId
+            ? String(currentConversation.peerId).trim()
+            : "";
+
+        // 如果心跳来自当前会话对应的节点，而当前被标记为未连接，则矫正为已连接。
+        if (
+            currentPeerId
+            && currentPeerId === peerId
+            && !appState.connected
+            && peerManager
+            && typeof peerManager.hasAnyConnection === "function"
+            && peerManager.hasAnyConnection()
+        ) {
+            setConnectionState(true);
+        }
+
+        // 无论是否来自当前会话，心跳到达都可能影响会话在线状态显示。
+        renderSessionList();
+    }
+
     function normalizePeerPresence(value) {
         const raw = String(value || "").trim().toLowerCase();
         if (raw === "away" || raw === "暂离") {
@@ -3542,7 +3614,8 @@
 
     function setPeerPresence(presence) {
         let next = normalizePeerPresence(presence);
-        if (!appState.connected && next !== "offline") {
+        // 如果当前会话本身未连接，则无论心跳回调如何都保持离线，避免出现“显示在线但实际不能发送”的状态。
+        if (!isCurrentConversationConnected() && next !== "offline") {
             next = "offline";
         }
         appState.peerPresence = next;
