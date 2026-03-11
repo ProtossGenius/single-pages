@@ -88,6 +88,9 @@
         refreshReconnectAttempted: false,
         refreshReconnectPending: null,
         manualReconnectInProgress: false,
+        // 记录本次页面加载时，基于会话持久化尝试自动重连的 peerId -> [conversationId] 映射。
+        // 仅用于「首次加载/刷新」阶段的一次性重连，不参与运行期的手动连接管理。
+        autoReconnectPeers: {},
         peerInitTask: null,
         initStages: createDefaultInitStages(),
         modeTask: Promise.resolve(),
@@ -181,6 +184,10 @@
             clearUnread();
             enterChatInterface();
             setStatus("连接成功。");
+            if (info && info.peerId && appState.autoReconnectPeers && appState.autoReconnectPeers[info.peerId]) {
+                // 自动重连成功，清理对应标记。
+                delete appState.autoReconnectPeers[info.peerId];
+            }
         },
         onConnectionClosed: (info) => {
             const wasConnected = appState.connected;
@@ -204,6 +211,11 @@
             }
             if (isRefreshReconnectPending()) {
                 handleRefreshReconnectFailure(closeReason);
+                return;
+            }
+            const closedPeerId = info && info.peerId ? String(info.peerId).trim() : "";
+            if (closedPeerId && appState.autoReconnectPeers && appState.autoReconnectPeers[closedPeerId]) {
+                handleAutoReconnectPeerFailure(closedPeerId, closeReason);
             }
         },
         onError: (error) => {
@@ -217,6 +229,10 @@
             }
             if (isRefreshReconnectPending()) {
                 handleRefreshReconnectFailure(details.message);
+                return;
+            }
+            if (details.peerId && appState.autoReconnectPeers && appState.autoReconnectPeers[details.peerId]) {
+                handleAutoReconnectPeerFailure(details.peerId, details.message);
                 return;
             }
             setStatus(`连接异常：${details.message}`);
@@ -594,6 +610,8 @@
             if (!hasUrlPeerTarget) {
                 await tryRefreshReconnectFromPersistedNode();
             }
+            // URL / 最近节点重连尝试结束后，再按会话持久化中的 peerId 做一次性重连。
+            await tryReconnectAllPersistedConversations();
         })();
     }
 
@@ -3349,6 +3367,37 @@
         setPeerPresence(appState.connected ? "online" : "offline");
     }
 
+    function handleAutoReconnectPeerFailure(peerId, reason) {
+        const id = String(peerId || "").trim();
+        if (!id || !appState.autoReconnectPeers || !appState.autoReconnectPeers[id]) {
+            return;
+        }
+        const relatedConversations = appState.autoReconnectPeers[id] || [];
+        delete appState.autoReconnectPeers[id];
+
+        let changed = false;
+        for (let i = 0; i < relatedConversations.length; i += 1) {
+            const convId = relatedConversations[i];
+            const conversation = appState.conversations[convId];
+            if (conversation && conversation.peerId === id) {
+                conversation.peerId = "";
+                changed = true;
+            }
+        }
+
+        if (changed) {
+            // 清除失效的 peerId 连接提示，但保留历史会话与消息。
+            persistChatState();
+            if (relatedConversations.indexOf(appState.currentConversationId) >= 0) {
+                updateSendControlsEnabledState();
+            }
+        }
+
+        if (reason) {
+            appendStatusLog(`自动重连失败：${toErrorMessage(reason)}（peerId=${formatPeerIdHint(id)}）`, "auto-reconnect");
+        }
+    }
+
     function isCurrentConversationConnected() {
         const currentId = String(appState.currentConversationId || "").trim();
         if (!currentId) {
@@ -3382,6 +3431,57 @@
         if (elements.messageInput) {
             elements.messageInput.disabled = !online;
             elements.messageInput.placeholder = online ? "输入消息..." : "当前会话未连接，连接后可发送消息...";
+        }
+    }
+
+    async function tryReconnectAllPersistedConversations() {
+        const conversations = appState.conversations || {};
+        const allIds = Object.keys(conversations);
+        if (allIds.length === 0) {
+            return;
+        }
+
+        const peerMap = {};
+        for (let i = 0; i < allIds.length; i += 1) {
+            const id = allIds[i];
+            const conversation = conversations[id];
+            if (!conversation || !conversation.peerId) {
+                continue;
+            }
+            const peerId = String(conversation.peerId).trim();
+            if (!peerId) {
+                continue;
+            }
+            if (!peerMap[peerId]) {
+                peerMap[peerId] = [];
+            }
+            peerMap[peerId].push(id);
+        }
+
+        const peerIds = Object.keys(peerMap);
+        if (peerIds.length === 0) {
+            return;
+        }
+
+        // 标记本次首次加载时需要自动重连的 peer 列表。
+        appState.autoReconnectPeers = peerMap;
+
+        try {
+            await ensurePeerReady();
+        } catch (_error) {
+            // 如果 Peer 初始化失败，则不做自动重连，也不清理会话，留待用户手动操作。
+            appState.autoReconnectPeers = {};
+            return;
+        }
+
+        for (let i = 0; i < peerIds.length; i += 1) {
+            const peerId = peerIds[i];
+            try {
+                // 仅按 peerId 发起轻量连接尝试；具体成功/失败通过 onConnected/onConnectionClosed/onError 回调感知。
+                peerManager.connect(peerId);
+            } catch (error) {
+                handleAutoReconnectPeerFailure(peerId, error);
+            }
         }
     }
 
@@ -3786,6 +3886,7 @@
                     nextConversations[id] = {
                         id,
                         peerName: item && item.peerName ? String(item.peerName) : "",
+                        peerId: item && item.peerId ? String(item.peerId).trim() : "",
                         unreadCount: Math.max(0, Number((item && item.unreadCount) || 0)),
                         messages: sanitizeMessages(item && item.messages)
                     };
@@ -3837,6 +3938,7 @@
                 const conversation = appState.conversations[id];
                 serializedConversations[id] = {
                     peerName: conversation.peerName || "",
+                    peerId: conversation.peerId || "",
                     unreadCount: Math.max(0, Number(conversation.unreadCount || 0)),
                     messages: sanitizeForStorage(conversation.messages)
                 };
