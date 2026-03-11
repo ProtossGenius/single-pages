@@ -41,6 +41,11 @@ body {
     transition: transform 0.16s ease, box-shadow 0.16s ease, background-color 0.16s ease;
 }
 
+/* 聊天页面隐藏返回主页悬浮入口，避免遮挡聊天头部 */
+body.chat-active .home-entry {
+    display: none;
+}
+
 .home-entry:hover {
     transform: translateY(-1px);
     box-shadow: 0 6px 18px rgba(15, 23, 42, 0.16);

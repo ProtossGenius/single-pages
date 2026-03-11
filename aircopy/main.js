@@ -1107,6 +1107,8 @@
         elements.chatInterface.classList.add("hidden");
         elements.connectionSetup.classList.remove("hidden");
         elements.backToChat.classList.toggle("hidden", !appState.connected);
+        // 退出聊天界面时移除聊天模式标记，用于恢复悬浮入口显示
+        document.body.classList.remove("chat-active");
         const preferred = getPreferredConnectorMode(appState.isMobileLayout ? "scanner" : "qr");
         setMode(preferred, { force: true });
     }
@@ -1116,6 +1118,8 @@
         elements.connectionSetup.classList.add("hidden");
         elements.chatInterface.classList.remove("hidden");
         elements.backToChat.classList.add("hidden");
+        // 进入聊天界面时标记聊天模式，隐藏返回主页悬浮入口
+        document.body.classList.add("chat-active");
         clearUnread();
     }
 
