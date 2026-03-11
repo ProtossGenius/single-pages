@@ -1521,6 +1521,9 @@
         if (peerName) {
             conversation.peerName = String(peerName);
         }
+        if (fallbackId) {
+            conversation.peerId = fallbackId.replace(/^peer:/, "") || fallbackId;
+        }
 
         const switched = appState.currentConversationId !== targetId;
         appState.currentConversationId = targetId;
@@ -1539,6 +1542,12 @@
         }
         renderSessionList();
         updateSendControlsEnabledState();
+        if (peerManager && typeof peerManager.setActivePeer === "function") {
+            const targetPeerId = conversation.peerId || (fallbackPeerId ? String(fallbackPeerId).trim() : "");
+            if (targetPeerId) {
+                peerManager.setActivePeer(targetPeerId);
+            }
+        }
         persistChatState();
     }
 
@@ -1588,6 +1597,7 @@
             appState.conversations[id] = {
                 id,
                 peerName: "",
+                peerId: "",
                 unreadCount: 0,
                 messages: []
             };
@@ -3340,20 +3350,16 @@
     }
 
     function isCurrentConversationConnected() {
-        if (!appState.connected) {
+        const currentId = String(appState.currentConversationId || "").trim();
+        if (!currentId) {
             return false;
         }
-        const id = String(appState.currentConversationId || "").trim();
-        if (!id) {
-            return false;
+        const conversation = appState.conversations[currentId];
+        const peerId = conversation && conversation.peerId ? String(conversation.peerId).trim() : "";
+        if (!peerId || !peerManager || typeof peerManager.isPeerConnected !== "function") {
+            return Boolean(appState.connected);
         }
-        if (appState.remotePersistentId) {
-            return id === `pid:${appState.remotePersistentId}`;
-        }
-        if (id.startsWith("peer:") || id.startsWith("legacy:") || id.startsWith("local:")) {
-            return true;
-        }
-        return false;
+        return peerManager.isPeerConnected(peerId);
     }
 
     function updateSendControlsEnabledState() {

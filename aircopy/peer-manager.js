@@ -375,6 +375,71 @@ class PeerManager {
         this.localPeerId = "";
     }
 
+    /**
+     * 将指定 peerId 对应的连接设为「当前激活连接」。
+     * 仅影响后续发送文本/文件/心跳等操作，不会新建连接。
+     */
+    setActivePeer(targetPeerId) {
+        const peerId = String(targetPeerId || "").trim();
+        if (!this.peer || !peerId) {
+            return false;
+        }
+        const allConnections = this.peer.connections || {};
+        const list = allConnections[peerId] || [];
+        if (!Array.isArray(list) || list.length === 0) {
+            return false;
+        }
+        const conn = list.find((c) => c && c.open) || list[0];
+        if (!conn) {
+            return false;
+        }
+        if (this.connection === conn) {
+            return true;
+        }
+        this._clearConnectionHealthWatch();
+        this._stopHeartbeatLoop();
+        this.connection = conn;
+        this.helloSent = false;
+        this._installConnectionHealthWatch(conn);
+        this._sendHello();
+        this._startHeartbeatLoop();
+        return true;
+    }
+
+    /**
+     * 判断指定 peerId 是否存在至少一个打开的连接。
+     */
+    isPeerConnected(targetPeerId) {
+        const peerId = String(targetPeerId || "").trim();
+        if (!this.peer || !peerId) {
+            return false;
+        }
+        const allConnections = this.peer.connections || {};
+        const list = allConnections[peerId] || [];
+        if (!Array.isArray(list) || list.length === 0) {
+            return false;
+        }
+        return list.some((conn) => conn && conn.open);
+    }
+
+    /**
+     * 是否还有至少一个打开的连接。
+     */
+    hasAnyConnection() {
+        if (!this.peer || !this.peer.connections) {
+            return false;
+        }
+        const allConnections = this.peer.connections;
+        const keys = Object.keys(allConnections);
+        for (let i = 0; i < keys.length; i += 1) {
+            const list = allConnections[keys[i]] || [];
+            if (Array.isArray(list) && list.some((conn) => conn && conn.open)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     isSignalingConnected() {
         return Boolean(
             this.peer
@@ -398,68 +463,71 @@ class PeerManager {
         }
     }
 
+    /**
+     * 为新的 DataConnection 安装事件处理。
+     * 支持同时维护多个连接，但仅有一个「当前激活连接」用于发送文本/文件/心跳等。
+     */
     _attachConnection(conn, isIncoming) {
         if (!conn) {
             return;
         }
-        if (this.connection && this.connection !== conn) {
-            this.connection.close();
+        const peerId = String(conn.peer || "").trim();
+        if (!peerId) {
+            return;
         }
-        this._clearConnectionHealthWatch();
-        this.connection = conn;
-        this.helloSent = false;
-        this.remoteDisplayName = (conn.metadata && conn.metadata.name) ? String(conn.metadata.name) : "";
-        this.remotePersistentId = isIncoming && conn.metadata && conn.metadata.pid ? String(conn.metadata.pid) : "";
-        this._installConnectionHealthWatch(conn);
 
         conn.on("open", () => {
-            if (this.connection !== conn) {
-                return;
-            }
-            this._installConnectionHealthWatch(conn);
             if (this.handlers.onConnected) {
                 this.handlers.onConnected({
-                    peerId: conn.peer,
+                    peerId,
                     isIncoming,
-                    peerName: this.remoteDisplayName,
-                    peerPersistentId: this.remotePersistentId
+                    peerName: (conn.metadata && conn.metadata.name) ? String(conn.metadata.name) : "",
+                    peerPersistentId: isIncoming && conn.metadata && conn.metadata.pid ? String(conn.metadata.pid) : ""
                 });
             }
-            this._sendHello();
-            this._startHeartbeatLoop();
         });
 
         conn.on("data", (payload) => {
-            if (this.connection !== conn) {
-                return;
-            }
-            this._onData(payload);
+            this._onData(payload, conn);
         });
 
         conn.on("close", () => {
-            if (this.connection !== conn) {
-                return;
+            const isActive = this.connection === conn;
+            if (isActive) {
+                this._handleActiveConnectionClosed("连接已断开", {
+                    source: "data",
+                    code: "closed",
+                    peerId
+                });
+            } else if (this.handlers.onConnectionClosed) {
+                const closeError = this._createManagedError(null, {
+                    source: "connection",
+                    code: "closed",
+                    phase: "runtime",
+                    peerId,
+                    reason: "连接已断开"
+                });
+                this.handlers.onConnectionClosed({
+                    reason: "连接已断开",
+                    peerId,
+                    error: closeError
+                });
             }
-            this._handleActiveConnectionClosed("连接已断开", {
-                source: "data",
-                code: "closed",
-                peerId: conn.peer
-            });
         });
 
         conn.on("error", (error) => {
-            if (this.connection !== conn) {
-                return;
-            }
             this._emitError(error, {
                 source: "data",
                 code: "connection-error",
-                peerId: conn.peer,
+                peerId,
                 phase: "runtime"
             });
         });
     }
 
+    /**
+     * 向当前激活连接发送一次 hello 握手。
+     */
     _sendHello() {
         if (!this.connection || !this.connection.open || this.helloSent) {
             return;
@@ -473,7 +541,12 @@ class PeerManager {
         });
     }
 
-    _onData(rawPayload) {
+    /**
+     * 处理任意连接上的数据包。
+     * @param {*} rawPayload
+     * @param {*} conn 对应的 DataConnection
+     */
+    _onData(rawPayload, conn) {
         let payload = rawPayload;
         if (typeof rawPayload === "string") {
             try {
@@ -489,11 +562,11 @@ class PeerManager {
 
         const type = payload.t ? String(payload.t) : "text";
         if (type === "heartbeat") {
-            this._handleIncomingHeartbeat(payload);
+            this._handleIncomingHeartbeat(payload, conn);
             return;
         }
         if (type === "heartbeat-ack") {
-            this._handleHeartbeatAck(payload);
+            this._handleHeartbeatAck(payload, conn);
             return;
         }
         if (type === "file-start" || type === "file-chunk" || type === "file-end" || type === "file-ack") {
@@ -522,7 +595,7 @@ class PeerManager {
                 body,
                 name,
                 persistentId,
-                peerId: this.connection ? this.connection.peer : ""
+                peerId: conn && conn.peer ? String(conn.peer) : ""
             });
         }
     }
@@ -889,7 +962,7 @@ class PeerManager {
             window.clearTimeout(this.heartbeatTimer);
             this.heartbeatTimer = null;
         }
-        if (!this.connection || !this.connection.open) {
+        if (!this.hasAnyConnection()) {
             return;
         }
         if (this.heartbeatDueAt <= 0) {
@@ -903,7 +976,7 @@ class PeerManager {
 
     _handleHeartbeatTick() {
         this.heartbeatTimer = null;
-        if (!this.connection || !this.connection.open) {
+        if (!this.hasAnyConnection()) {
             return;
         }
         const now = Date.now();
@@ -938,72 +1011,114 @@ class PeerManager {
     }
 
     _sendHeartbeat() {
-        if (!this.connection || !this.connection.open) {
+        if (!this.hasAnyConnection()) {
             return;
-        }
-
-        if (this.pendingHeartbeatId) {
-            this.heartbeatMissCount += 1;
-            if (this.heartbeatMissCount >= HEARTBEAT_OFFLINE_MISS_COUNT) {
-                this._handleActiveConnectionClosed("心跳超时 25 秒未响应，连接已断开", {
-                    source: "heartbeat",
-                    code: "timeout"
-                });
-                return;
-            }
-            if (this.heartbeatMissCount >= HEARTBEAT_AWAY_MISS_COUNT && this.heartbeatStatus !== "away") {
-                this.heartbeatStatus = "away";
-                this._emitHeartbeatStatus("away");
-            }
         }
 
         const now = Date.now();
-        this.heartbeatSequence += 1;
-        const heartbeatId = `hb${now.toString(36)}${this.heartbeatSequence.toString(36)}`;
-        try {
-            this.connection.send({
-                t: "heartbeat",
-                id: heartbeatId,
-                ts: now,
-                name: this.displayName,
-                pid: this.persistentId
-            });
-        } catch (error) {
-            const managedError = this._emitError(error, {
-                source: "heartbeat",
-                code: "send-failed",
-                phase: "runtime",
-                reason: "心跳发送失败，连接已断开",
-                handledByConnectionClose: true
-            });
-            this._handleActiveConnectionClosed("心跳发送失败，连接已断开", {
-                error: managedError
-            });
-            return;
+        const connections = this.peer && this.peer.connections ? this.peer.connections : {};
+
+        // 1. 针对当前激活连接，维持原有的心跳超时与状态检测逻辑。
+        const activeConn = (this.connection && this.connection.open) ? this.connection : null;
+        if (activeConn) {
+            if (this.pendingHeartbeatId) {
+                this.heartbeatMissCount += 1;
+                if (this.heartbeatMissCount >= HEARTBEAT_OFFLINE_MISS_COUNT) {
+                    this._handleActiveConnectionClosed("心跳超时 25 秒未响应，连接已断开", {
+                        source: "heartbeat",
+                        code: "timeout"
+                    });
+                    return;
+                }
+                if (this.heartbeatMissCount >= HEARTBEAT_AWAY_MISS_COUNT && this.heartbeatStatus !== "away") {
+                    this.heartbeatStatus = "away";
+                    this._emitHeartbeatStatus("away");
+                }
+            }
+
+            this.heartbeatSequence += 1;
+            const heartbeatId = `hb${now.toString(36)}${this.heartbeatSequence.toString(36)}`;
+            try {
+                activeConn.send({
+                    t: "heartbeat",
+                    id: heartbeatId,
+                    ts: now,
+                    name: this.displayName,
+                    pid: this.persistentId
+                });
+            } catch (error) {
+                const managedError = this._emitError(error, {
+                    source: "heartbeat",
+                    code: "send-failed",
+                    phase: "runtime",
+                    reason: "心跳发送失败，连接已断开",
+                    handledByConnectionClose: true
+                });
+                this._handleActiveConnectionClosed("心跳发送失败，连接已断开", {
+                    error: managedError
+                });
+                return;
+            }
+            this.pendingHeartbeatId = heartbeatId;
+            this.heartbeatDueAt = now + HEARTBEAT_INTERVAL_MS;
         }
-        this.pendingHeartbeatId = heartbeatId;
-        this.heartbeatDueAt = now + HEARTBEAT_INTERVAL_MS;
+
+        // 2. 对所有其他打开的连接发送轻量心跳，不做超时跟踪，仅作为 keep-alive。
+        const peerIds = Object.keys(connections);
+        for (let i = 0; i < peerIds.length; i += 1) {
+            const list = connections[peerIds[i]] || [];
+            if (!Array.isArray(list)) {
+                continue;
+            }
+            for (let j = 0; j < list.length; j += 1) {
+                const conn = list[j];
+                if (!conn || !conn.open || conn === activeConn) {
+                    continue;
+                }
+                try {
+                    conn.send({
+                        t: "heartbeat",
+                        id: `hb-${now.toString(36)}-${this.heartbeatSequence.toString(36)}-${i}-${j}`,
+                        ts: now,
+                        name: this.displayName,
+                        pid: this.persistentId
+                    });
+                } catch (_error) {
+                    // 轻量心跳发送失败不改变主连接状态，由健康检查逻辑决定是否后续关闭。
+                }
+            }
+        }
     }
 
-    _handleIncomingHeartbeat(payload) {
+    _handleIncomingHeartbeat(payload, conn) {
         const heartbeatId = payload && payload.id ? String(payload.id) : "";
-        this._markHeartbeatResponse();
-        this._sendIfConnected({
-            t: "heartbeat-ack",
-            id: heartbeatId,
-            ts: Date.now()
-        });
+        if (conn && conn.open) {
+            try {
+                conn.send({
+                    t: "heartbeat-ack",
+                    id: heartbeatId,
+                    ts: Date.now()
+                });
+            } catch (_error) {
+                // 忽略心跳 ACK 发送失败，交由后续健康探测处理。
+            }
+        }
+        if (conn === this.connection) {
+            this._markHeartbeatResponse();
+        }
         if (this.handlers.onHeartbeat) {
             this.handlers.onHeartbeat({
                 id: heartbeatId,
-                peerId: this.connection ? this.connection.peer : "",
+                peerId: conn && conn.peer ? String(conn.peer) : "",
                 timestamp: payload && payload.ts ? Number(payload.ts) : Date.now()
             });
         }
     }
 
-    _handleHeartbeatAck(payload) {
-        this._markHeartbeatResponse();
+    _handleHeartbeatAck(payload, conn) {
+        if (conn === this.connection) {
+            this._markHeartbeatResponse();
+        }
     }
 
     _handleActiveConnectionClosed(reasonText, options = {}) {
