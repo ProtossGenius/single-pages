@@ -426,12 +426,32 @@
             setHeaderMenuOpen(false);
             showConnectorScreen();
         });
-        elements.sessionList.addEventListener("click", () => {
-            clearUnread();
-            if (appState.isMobileLayout) {
-                setSessionPanelOpen(false);
-            }
-        });
+        if (elements.sessionList) {
+            elements.sessionList.addEventListener("click", (event) => {
+                const target = event.target;
+                if (!(target instanceof HTMLElement)) {
+                    return;
+                }
+                const item = target.closest(".session-item");
+                if (!item || item.dataset.empty === "1") {
+                    return;
+                }
+                const id = String(item.dataset.id || "").trim();
+                if (!id) {
+                    return;
+                }
+                if (target.classList.contains("session-delete")) {
+                    event.stopPropagation();
+                    handleDeleteConversation(id);
+                    return;
+                }
+                selectConversation(id);
+                clearUnread();
+                if (appState.isMobileLayout) {
+                    setSessionPanelOpen(false);
+                }
+            });
+        }
         if (elements.settingsToggle) {
             elements.settingsToggle.addEventListener("click", () => {
                 setSettingsPanelOpen(!appState.settingsOpen);
@@ -494,8 +514,8 @@
             void resetToSetup();
         });
         elements.sendFile.addEventListener("click", () => {
-            if (!appState.connected) {
-                setStatus("尚未连接，当前无法发送文件。");
+            if (!isCurrentConversationConnected()) {
+                setStatus("当前会话未连接，当前无法发送文件。");
                 return;
             }
             elements.fileInput.click();
@@ -1517,6 +1537,8 @@
         } else {
             renderUnread();
         }
+        renderSessionList();
+        updateSendControlsEnabledState();
         persistChatState();
     }
 
@@ -1610,6 +1632,103 @@
             blobUrl: msg.blobUrl || "",
             durationSec: Math.max(0, Number(msg.durationSec || 0))
         }));
+    }
+
+    function renderSessionList() {
+        if (!elements.sessionList) {
+            return;
+        }
+        const list = elements.sessionList;
+        list.innerHTML = "";
+
+        const ids = Object.keys(appState.conversations);
+        if (ids.length === 0) {
+            const emptyItem = document.createElement("li");
+            emptyItem.className = "session-item session-empty";
+            emptyItem.textContent = "暂无会话";
+            emptyItem.dataset.empty = "1";
+            list.appendChild(emptyItem);
+            return;
+        }
+
+        for (let i = 0; i < ids.length; i += 1) {
+            const id = ids[i];
+            const conversation = appState.conversations[id];
+            const li = document.createElement("li");
+            li.className = "session-item";
+            li.dataset.id = id;
+            if (id === appState.currentConversationId) {
+                li.classList.add("active");
+            }
+
+            const avatar = document.createElement("span");
+            avatar.className = "avatar";
+            const name = conversation.peerName || "未命名会话";
+            avatar.textContent = name ? name.slice(0, 1).toUpperCase() : "?";
+            li.appendChild(avatar);
+
+            const nameSpan = document.createElement("span");
+            nameSpan.className = "name";
+            nameSpan.textContent = name;
+            li.appendChild(nameSpan);
+
+            const unreadCount = Math.max(0, Number(conversation.unreadCount || 0));
+            if (unreadCount > 0) {
+                const unread = document.createElement("span");
+                unread.className = "session-unread";
+                unread.textContent = unreadCount > 99 ? "99+" : String(unreadCount);
+                li.appendChild(unread);
+            }
+
+            const deleteBtn = document.createElement("button");
+            deleteBtn.type = "button";
+            deleteBtn.className = "session-delete";
+            deleteBtn.textContent = "×";
+            deleteBtn.setAttribute("aria-label", "删除会话");
+            li.appendChild(deleteBtn);
+
+            list.appendChild(li);
+        }
+    }
+
+    function selectConversation(conversationId) {
+        const id = String(conversationId || "").trim();
+        if (!id || !appState.conversations[id]) {
+            return;
+        }
+        if (appState.currentConversationId === id && elements.chatMessages.dataset.inited) {
+            return;
+        }
+        const conversation = appState.conversations[id];
+        appState.currentConversationId = id;
+        appState.chatHistory = conversation.messages.slice(-CHAT_HISTORY_MAX);
+        appState.unreadCount = Math.max(0, Number(conversation.unreadCount || 0));
+        setPeerName(conversation.peerName || "", { persist: false });
+        syncVideoPrefForCurrentPeer();
+        if (elements.chatMessages.dataset.inited) {
+            renderHistoryFromState();
+        }
+        if (isChatActive()) {
+            clearUnread();
+        } else {
+            renderUnread();
+        }
+        renderSessionList();
+        updateSendControlsEnabledState();
+    }
+
+    function handleDeleteConversation(conversationId) {
+        const id = String(conversationId || "").trim();
+        if (!id || !appState.conversations[id]) {
+            return;
+        }
+        if (id === appState.currentConversationId) {
+            setStatus("不能删除当前正在聊天的会话，请先切换到其他会话。");
+            return;
+        }
+        delete appState.conversations[id];
+        persistChatState();
+        renderSessionList();
     }
 
     function isChatActive() {
@@ -2276,8 +2395,8 @@
     }
 
     function toggleEmojiPanel() {
-        if (!appState.connected) {
-            setStatus("尚未连接，当前无法发送表情。");
+        if (!isCurrentConversationConnected()) {
+            setStatus("当前会话未连接，当前无法发送表情。");
             return;
         }
         elements.emojiPanel.classList.toggle("hidden");
@@ -2645,8 +2764,8 @@
     }
 
     async function toggleVoiceRecording() {
-        if (!appState.connected) {
-            setStatus("尚未连接，当前无法发送语音。");
+        if (!isCurrentConversationConnected()) {
+            setStatus("当前会话未连接，当前无法发送语音。");
             return;
         }
         if (appState.recordingVoice) {
@@ -2794,8 +2913,8 @@
     }
 
     async function toggleVideoCall() {
-        if (!appState.connected) {
-            setStatus("尚未连接，当前无法发起视频通话。");
+        if (!isCurrentConversationConnected()) {
+            setStatus("当前会话未连接，当前无法发起视频通话。");
             return;
         }
 
@@ -3134,8 +3253,8 @@
         if (!text) {
             return;
         }
-        if (!appState.connected) {
-            setStatus("尚未连接，当前无法发送消息。");
+        if (!isCurrentConversationConnected()) {
+            setStatus("当前会话未连接，当前无法发送消息。");
             return;
         }
         try {
@@ -3156,6 +3275,8 @@
         closeFileOfferModal();
         setSessionPanelOpen(false);
         setHeaderMenuOpen(false);
+        // 退出会话时移除聊天模式标记，恢复「躺平至上」悬浮入口显示
+        document.body.classList.remove("chat-active");
         appState.videoState = "idle";
         if (appState.recordingVoice) {
             await stopVoiceRecording(false);
@@ -3205,25 +3326,6 @@
 
     function setConnectionState(connected) {
         appState.connected = Boolean(connected);
-        if (elements.sendBtn) {
-            elements.sendBtn.disabled = !appState.connected;
-        }
-        if (elements.sendFile) {
-            elements.sendFile.disabled = !appState.connected;
-        }
-        if (elements.sendEmoji) {
-            elements.sendEmoji.disabled = !appState.connected;
-        }
-        if (elements.recordVoice) {
-            elements.recordVoice.disabled = !appState.connected;
-        }
-        if (elements.videoCall) {
-            elements.videoCall.disabled = !appState.connected;
-        }
-        if (elements.messageInput) {
-            elements.messageInput.disabled = !appState.connected;
-            elements.messageInput.placeholder = appState.connected ? "输入消息..." : "连接后可发送消息...";
-        }
         if (!appState.connected) {
             closeEmojiPanel();
             closeFileOfferModal();
@@ -3231,9 +3333,50 @@
                 stopVoiceRecording(false);
             }
         }
+        updateSendControlsEnabledState();
         updateVoiceButton();
         updateVideoButton();
         setPeerPresence(appState.connected ? "online" : "offline");
+    }
+
+    function isCurrentConversationConnected() {
+        if (!appState.connected) {
+            return false;
+        }
+        const id = String(appState.currentConversationId || "").trim();
+        if (!id) {
+            return false;
+        }
+        if (appState.remotePersistentId) {
+            return id === `pid:${appState.remotePersistentId}`;
+        }
+        if (id.startsWith("peer:") || id.startsWith("legacy:") || id.startsWith("local:")) {
+            return true;
+        }
+        return false;
+    }
+
+    function updateSendControlsEnabledState() {
+        const online = isCurrentConversationConnected();
+        if (elements.sendBtn) {
+            elements.sendBtn.disabled = !online;
+        }
+        if (elements.sendFile) {
+            elements.sendFile.disabled = !online;
+        }
+        if (elements.sendEmoji) {
+            elements.sendEmoji.disabled = !online;
+        }
+        if (elements.recordVoice) {
+            elements.recordVoice.disabled = !online;
+        }
+        if (elements.videoCall) {
+            elements.videoCall.disabled = !online;
+        }
+        if (elements.messageInput) {
+            elements.messageInput.disabled = !online;
+            elements.messageInput.placeholder = online ? "输入消息..." : "当前会话未连接，连接后可发送消息...";
+        }
     }
 
     function playHeartbeatFloatBurst() {
@@ -3245,7 +3388,7 @@
     }
 
     function spawnStatusHeartBurst(anchor, count = 8) {
-        if (!anchor || !anchor.classList.contains("online")) {
+        if (!anchor || !anchor.classList || !anchor.classList.contains("online")) {
             return;
         }
         const total = Math.max(4, Number(count) || 0);
@@ -3674,6 +3817,8 @@
         } catch (_error) {
             // Ignore malformed local cache and continue.
         }
+        renderSessionList();
+        updateSendControlsEnabledState();
     }
 
     function persistChatState() {

@@ -481,6 +481,26 @@ body.chat-active .home-entry {
     border-left: 4px solid #007bff;
 }
 
+.session-item.session-empty {
+    cursor: default;
+    color: #6b7280;
+    justify-content: center;
+}
+
+.session-delete {
+    margin-left: auto;
+    border: none;
+    background: transparent;
+    color: #9ca3af;
+    font-size: 0.9rem;
+    padding: 2px 6px;
+    cursor: pointer;
+}
+
+.session-delete:hover {
+    color: #ef4444;
+}
+
 .avatar {
     width: 40px;
     height: 40px;
