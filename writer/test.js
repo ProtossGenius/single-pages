@@ -1718,5 +1718,252 @@ describe('P6 cleanup', () => {
   });
 });
 
+/* ================================================================
+   P7 测试用例 — 端到端集成测试
+   ================================================================ */
+
+describe('E2E — 创建类目 → 配置 AI → 写段落 → 生成章节', () => {
+  let _origCall;
+
+  it('E2E: 创建类目', async () => {
+    await DB.clearAll();
+    // 再次初始化 DB (clearAll 后需确保可用)
+    await DB.init();
+
+    const now = Utils.now();
+    await DB.put(DB.STORES.CATEGORIES, {
+      id: 'e2e-char-1', parentId: null, type: 'character', name: '林风',
+      description: '天才少年修仙者', attributes: '{"年龄":"16","境界":"筑基"}',
+      sortOrder: 1, version: 1, createdAt: now, updatedAt: now,
+    });
+    await DB.put(DB.STORES.CATEGORIES, {
+      id: 'e2e-loc-1', parentId: null, type: 'location', name: '天剑宗',
+      description: '修仙大宗门', attributes: '{"位置":"东洲"}',
+      sortOrder: 2, version: 1, createdAt: now, updatedAt: now,
+    });
+
+    const cats = await DB.getAll(DB.STORES.CATEGORIES);
+    assertEqual(cats.length, 2);
+  });
+
+  it('E2E: 配置 AI 供应商和模型', async () => {
+    const now = Utils.now();
+    await DB.put(DB.STORES.AI_PROVIDERS, {
+      id: 'e2e-prov', name: 'E2E-AI', apiUrl: 'https://api.e2e.com/v1',
+      apiKey: 'sk-e2e', retryCount: 2, sortOrder: 1,
+      createdAt: now, updatedAt: now,
+    });
+    await DB.put(DB.STORES.AI_MODELS, {
+      id: 'e2e-model', providerId: 'e2e-prov', name: 'e2e-gpt-4',
+      sortOrder: 1, createdAt: now,
+    });
+
+    // 配置职能
+    for (const role of RoleList) {
+      await DB.put(DB.STORES.ROLE_CONFIGS, {
+        role: role.value,
+        promptTemplate: `${role.label}:{{用户输入}}`,
+        providerId: 'e2e-prov', modelId: 'e2e-model',
+        outputVar: role.value === 'writer' ? 'generated_paragraph' :
+                   role.value === 'reviewer' ? 'ai_review' :
+                   role.value === 'summarizer' ? 'generated_summary' :
+                   'generated_recap',
+        createdAt: now, updatedAt: now,
+      });
+    }
+
+    const configs = await DB.getAll(DB.STORES.ROLE_CONFIGS);
+    assertEqual(configs.length, 4);
+  });
+
+  it('E2E: 配置流程', async () => {
+    const now = Utils.now();
+    await DB.put(DB.STORES.FLOW_CONFIGS, {
+      id: Utils.generateId(), name: 'E2E生成段落',
+      trigger: 'generate_paragraph', enabled: true, blocking: true,
+      steps: JSON.stringify([['writer', 'reviewer'], ['summarizer']]),
+      sortOrder: 1, createdAt: now, updatedAt: now,
+    });
+    await DB.put(DB.STORES.FLOW_CONFIGS, {
+      id: Utils.generateId(), name: 'E2E生成章节',
+      trigger: 'generate_chapter', enabled: true, blocking: true,
+      steps: JSON.stringify([['summarizer']]),
+      sortOrder: 2, createdAt: now, updatedAt: now,
+    });
+
+    const flows = await DB.getAll(DB.STORES.FLOW_CONFIGS);
+    assertEqual(flows.length, 2);
+  });
+
+  it('E2E: 创建章节和段落', async () => {
+    const now = Utils.now();
+    const chapterId = await DB.put(DB.STORES.CHAPTERS, {
+      title: '第一章 初入修仙界', summary: '', content: '', recapText: '',
+      reviewNotes: '', status: ChapterStatus.DRAFT, sortOrder: 1,
+      createdAt: now, updatedAt: now,
+    });
+
+    assert(chapterId > 0, '章节 ID 应为正数');
+
+    await DB.put(DB.STORES.PARAGRAPHS, {
+      id: Utils.generateId(), chapterId, content: '林风站在天剑宗门前。',
+      sortOrder: 1, recapBrief: '', followUp: '',
+      createdAt: now, updatedAt: now,
+    });
+
+    const paras = await DB.getByIndex(DB.STORES.PARAGRAPHS, 'idx_chapterId', chapterId);
+    assertEqual(paras.length, 1);
+  });
+
+  it('E2E: Mock AI 执行生成段落流程', async () => {
+    _origCall = AIService.call;
+    AIService.call = async (pid, mid, prompt) => ({
+      text: `[E2E] 生成内容: ${prompt.slice(0, 30)}`, failCount: 0, errors: [],
+    });
+
+    const context = {
+      context_before: '', user_input: '林风进入宗门大殿',
+      chapter_outline: '初入天剑宗', follow_up: '',
+      bound_settings: '人物:林风\n地点:天剑宗',
+      current_paragraph: '', chapter_content: '林风站在天剑宗门前。',
+      ai_review: '', generated_paragraph: '', generated_summary: '', generated_recap: '',
+    };
+
+    const result = await FlowEngine.execute('generate_paragraph', context);
+
+    assert(result.generated_paragraph.length > 0, '应生成段落');
+    assert(result.ai_review.length > 0, '应生成评审');
+    assert(result.generated_summary.length > 0, '应生成概要');
+  });
+
+  it('E2E: Mock AI 执行生成章节流程', async () => {
+    const context = {
+      context_before: '', user_input: '', chapter_outline: '',
+      follow_up: '', bound_settings: '', current_paragraph: '',
+      chapter_content: '林风站在天剑宗门前。\n\n林风进入宗门大殿。',
+      ai_review: '', generated_paragraph: '', generated_summary: '', generated_recap: '',
+    };
+
+    const result = await FlowEngine.execute('generate_chapter', context);
+    assert(result.generated_summary.length > 0, '应生成章节概要');
+
+    AIService.call = _origCall;
+  });
+});
+
+describe('E2E — 完整导出导入往返', () => {
+  it('E2E: 全量导出导入往返', async () => {
+    // 导出
+    const tables = [
+      'categories', 'chapters', 'paragraphs', 'paragraph_bindings',
+      'ai_providers', 'ai_models', 'role_configs', 'flow_configs',
+      'recap_data', 'app_settings',
+    ];
+
+    const exportData = {};
+    for (const t of tables) {
+      exportData[t] = await DB.getAll(t);
+    }
+
+    const zip = new JSZip();
+    zip.file('manifest.json', JSON.stringify({
+      version: '1.0', exportedAt: Utils.now(), appVersion: '1.0.0',
+      tables: Object.fromEntries(tables.map(t => [t, exportData[t].length])),
+    }));
+    for (const t of tables) {
+      zip.file(`${t}.json`, JSON.stringify(exportData[t]));
+    }
+    const blob = await zip.generateAsync({ type: 'blob' });
+
+    // 清空
+    await DB.clearAll();
+    for (const t of tables) {
+      const records = await DB.getAll(t);
+      assertEqual(records.length, 0);
+    }
+
+    // 导入
+    const importZip = await JSZip.loadAsync(blob);
+    for (const t of tables) {
+      const f = importZip.file(`${t}.json`);
+      if (f) {
+        const records = JSON.parse(await f.async('text'));
+        if (records.length > 0) await DB.putAll(t, records);
+      }
+    }
+
+    // 验证所有表记录数匹配
+    for (const t of tables) {
+      const imported = await DB.getAll(t);
+      assertEqual(imported.length, exportData[t].length);
+    }
+  });
+
+  it('E2E: 导入后类目数据完整', async () => {
+    const cat = await DB.getById(DB.STORES.CATEGORIES, 'e2e-char-1');
+    assertNotNull(cat);
+    assertEqual(cat.name, '林风');
+    const attrs = JSON.parse(cat.attributes);
+    assertEqual(attrs['境界'], '筑基');
+  });
+
+  it('E2E: 导入后 AI 配置完整', async () => {
+    const provider = await DB.getById(DB.STORES.AI_PROVIDERS, 'e2e-prov');
+    assertNotNull(provider);
+    assertEqual(provider.name, 'E2E-AI');
+
+    const configs = await DB.getAll(DB.STORES.ROLE_CONFIGS);
+    assertEqual(configs.length, 4);
+
+    const flows = await DB.getAll(DB.STORES.FLOW_CONFIGS);
+    assertEqual(flows.length, 2);
+  });
+});
+
+describe('E2E — Store 与事件总线集成', () => {
+  it('Store 初始化从 DB 恢复', async () => {
+    const chapters = await DB.getAll(DB.STORES.CHAPTERS);
+    if (chapters.length > 0) {
+      await DB.put(DB.STORES.APP_SETTINGS, {
+        key: 'current_chapter_id', value: JSON.stringify(chapters[0].id),
+      });
+      await Store.init();
+      assertEqual(Store.get('currentChapterId'), chapters[0].id);
+    } else {
+      assert(true, '无章节可测试');
+    }
+  });
+
+  it('EventBus 跨模块事件传播', () => {
+    let received = false;
+    const handler = () => { received = true; };
+    EventBus.on(Events.CATEGORY_TREE_CHANGED, handler);
+    EventBus.emit(Events.CATEGORY_TREE_CHANGED, {});
+    assert(received, '事件应被接收');
+    EventBus.off(Events.CATEGORY_TREE_CHANGED, handler);
+  });
+
+  it('Store.updateStatusPanel 多字段更新', () => {
+    Store.updateStatusPanel({
+      chapterSummary: '测试概要',
+      aiReviewNotes: '测试评审',
+      recapText: '测试提要',
+      followUpText: '测试后续',
+    });
+    assertEqual(Store.get('chapterSummary'), '测试概要');
+    assertEqual(Store.get('aiReviewNotes'), '测试评审');
+    assertEqual(Store.get('recapText'), '测试提要');
+    assertEqual(Store.get('followUpText'), '测试后续');
+  });
+});
+
+// 最终清理
+describe('P7 final cleanup', () => {
+  it('清理所有测试数据', async () => {
+    await DB.clearAll();
+    assert(true);
+  });
+});
+
 // ---- 运行测试 ----
 TestRunner.run();
