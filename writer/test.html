@@ -30,6 +30,21 @@
   <!-- 模态容器 (测试 ui-modal 用) -->
   <div id="modal-container"></div>
 
+  <!-- 类目管理器测试容器 -->
+  <div id="test-category-container" style="display:none;">
+    <div id="category-panel" class="panel panel-category">
+      <div class="panel-header">
+        <span class="panel-title">类目管理器</span>
+        <button id="btn-add-root-category" class="btn-icon" title="添加大类">+</button>
+      </div>
+      <div id="category-tree" class="category-tree"></div>
+    </div>
+  </div>
+  <div id="detail-panel" style="display:none;"></div>
+
+  <!-- 加载样式 -->
+  <link rel="stylesheet" href="style.css">
+
   <!-- 加载业务代码 -->
   <script src="enums.js"></script>
   <script src="utils.js"></script>
@@ -37,6 +52,8 @@
   <script src="db.js"></script>
   <script src="store.js"></script>
   <script src="ui-modal.js"></script>
+  <script src="ui-category.js"></script>
+  <script src="ui-detail.js"></script>
 
   <!-- 测试代码 -->
   <script src="test.js"></script>

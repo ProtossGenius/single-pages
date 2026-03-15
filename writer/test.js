@@ -724,5 +724,189 @@ describe('Modal (ui-modal)', () => {
   });
 });
 
+/* ================================================================
+   P2 测试用例 — 类目管理器
+   ================================================================ */
+
+describe('Category CRUD (业务逻辑)', () => {
+  it('创建顶级类目', async () => {
+    // 清空
+    await DB.clear(DB.STORES.CATEGORIES);
+
+    const now = Utils.now();
+    const cat = {
+      id: Utils.generateId(),
+      parentId: null,
+      type: 'character',
+      name: '人物',
+      description: '所有人物',
+      attributes: JSON.stringify({ 备注: '测试' }),
+      sortOrder: 1,
+      version: 1,
+      createdAt: now,
+      updatedAt: now,
+    };
+    await DB.put(DB.STORES.CATEGORIES, cat);
+    const loaded = await DB.getById(DB.STORES.CATEGORIES, cat.id);
+    assertEqual(loaded.name, '人物');
+    assertEqual(loaded.parentId, null);
+    assertEqual(loaded.version, 1);
+  });
+
+  it('创建子类目并验证层级', async () => {
+    const allCats = await DB.getAll(DB.STORES.CATEGORIES);
+    const parent = allCats.find(c => c.name === '人物');
+    assertNotNull(parent, '应有人物类目');
+
+    const childId = Utils.generateId();
+    const now = Utils.now();
+    await DB.put(DB.STORES.CATEGORIES, {
+      id: childId,
+      parentId: parent.id,
+      type: parent.type,
+      name: '主角',
+      description: '',
+      attributes: '{}',
+      sortOrder: 1,
+      version: 1,
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    const grandchildId = Utils.generateId();
+    await DB.put(DB.STORES.CATEGORIES, {
+      id: grandchildId,
+      parentId: childId,
+      type: parent.type,
+      name: '张三',
+      description: '主角',
+      attributes: JSON.stringify({ 年龄: '18', 境界: '筑基期' }),
+      sortOrder: 1,
+      version: 1,
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    // 验证层级
+    const children = await DB.getByIndex(DB.STORES.CATEGORIES, 'idx_parentId', parent.id);
+    assertEqual(children.length, 1);
+    assertEqual(children[0].name, '主角');
+
+    const grandchildren = await DB.getByIndex(DB.STORES.CATEGORIES, 'idx_parentId', childId);
+    assertEqual(grandchildren.length, 1);
+    assertEqual(grandchildren[0].name, '张三');
+  });
+
+  it('编辑类目 — version 递增', async () => {
+    const allCats = await DB.getAll(DB.STORES.CATEGORIES);
+    const item = allCats.find(c => c.name === '张三');
+    assertNotNull(item);
+
+    const oldVersion = item.version;
+    item.name = '张三丰';
+    item.version += 1;
+    item.updatedAt = Utils.now();
+    await DB.put(DB.STORES.CATEGORIES, item);
+
+    const updated = await DB.getById(DB.STORES.CATEGORIES, item.id);
+    assertEqual(updated.name, '张三丰');
+    assertEqual(updated.version, oldVersion + 1);
+    assert(updated.updatedAt >= item.updatedAt, 'updatedAt 应更新');
+  });
+
+  it('级联删除子节点', async () => {
+    // 获取顶级节点
+    const allCats = await DB.getAll(DB.STORES.CATEGORIES);
+    const parent = allCats.find(c => c.name === '人物');
+    assertNotNull(parent);
+
+    // 添加 paragraph_binding 用于测试级联删除
+    const grandchild = allCats.find(c => c.name === '张三丰');
+    const bindingId = Utils.generateId();
+    await DB.put(DB.STORES.PARAGRAPH_BINDINGS, {
+      id: bindingId,
+      paragraphId: 'fake-para-id',
+      categoryId: grandchild.id,
+      categoryVersion: 1,
+      bindingType: 'character',
+      createdAt: Utils.now(),
+    });
+
+    // 递归收集所有子孙 ID
+    async function collectIds(pid) {
+      const children = await DB.getByIndex(DB.STORES.CATEGORIES, 'idx_parentId', pid);
+      const ids = [];
+      for (const c of children) {
+        ids.push(c.id);
+        const subIds = await collectIds(c.id);
+        ids.push(...subIds);
+      }
+      return ids;
+    }
+
+    const descendantIds = await collectIds(parent.id);
+    descendantIds.push(parent.id);
+    assert(descendantIds.length === 3, '应有3个节点（人物 > 主角 > 张三丰）');
+
+    // 执行删除
+    for (const catId of descendantIds) {
+      const bindings = await DB.getByIndex(DB.STORES.PARAGRAPH_BINDINGS, 'idx_categoryId', catId);
+      for (const b of bindings) {
+        await DB.delete(DB.STORES.PARAGRAPH_BINDINGS, b.id);
+      }
+      await DB.delete(DB.STORES.CATEGORIES, catId);
+    }
+
+    // 验证全部删除
+    const remaining = await DB.getAll(DB.STORES.CATEGORIES);
+    assertEqual(remaining.length, 0, '所有类目应被删除');
+
+    // 验证 binding 也被删除
+    const remainingBindings = await DB.getByIndex(
+      DB.STORES.PARAGRAPH_BINDINGS, 'idx_categoryId', grandchild.id
+    );
+    assertEqual(remainingBindings.length, 0, '关联的 binding 应被删除');
+  });
+
+  it('属性解析 — 键值对格式', () => {
+    // 测试属性的序列化和反序列化
+    const attrs = { 年龄: '18', 境界: '筑基期', 性格: '坚韧不拔' };
+    const json = JSON.stringify(attrs);
+    const parsed = JSON.parse(json);
+    assertDeepEqual(parsed, attrs);
+  });
+
+  it('多个顶级类目排序', async () => {
+    await DB.clear(DB.STORES.CATEGORIES);
+    const now = Utils.now();
+    const types = ['character', 'location', 'sect', 'item'];
+    const names = ['人物', '地点', '宗门', '物品'];
+
+    for (let i = 0; i < types.length; i++) {
+      await DB.put(DB.STORES.CATEGORIES, {
+        id: Utils.generateId(),
+        parentId: null,
+        type: types[i],
+        name: names[i],
+        description: '',
+        attributes: '{}',
+        sortOrder: i + 1,
+        version: 1,
+        createdAt: now,
+        updatedAt: now,
+      });
+    }
+
+    const allCats = await DB.getAll(DB.STORES.CATEGORIES);
+    assertEqual(allCats.length, 4, '应有4个顶级类目');
+    allCats.sort((a, b) => a.sortOrder - b.sortOrder);
+    assertEqual(allCats[0].name, '人物');
+    assertEqual(allCats[3].name, '物品');
+
+    // 清理
+    await DB.clear(DB.STORES.CATEGORIES);
+  });
+});
+
 // ---- 运行测试 ----
 TestRunner.run();
