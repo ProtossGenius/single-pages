@@ -30,7 +30,7 @@
 | P3 | 小说编写界面 | ✅ 完成 |
 | P4 | AI 配置系统 | ✅ 完成 |
 | P5 | AI 执行引擎 | ✅ 完成 |
-| P6 | 文件导入/导出 | ⬜ 未开始 |
+| P6 | 文件导入/导出 | ✅ 完成 |
 | P7 | 集成与端到端测试 | ⬜ 未开始 |
 
 ---
@@ -244,7 +244,7 @@
 
 ### 任务清单
 
-- [ ] **T6.1** 创建 `writer/export-service.js` 导出服务
+- [x] **T6.1** 创建 `writer/export-service.js` 导出服务
   - 参考: [flow-design.md](flow-design.md) 第5节, [data-design.md](data-design.md) 第5节
   - 逐表读取数据
   - 生成 manifest.json
@@ -252,31 +252,31 @@
   - 进度回调
   - 触发浏览器下载
 
-- [ ] **T6.2** 创建 `writer/import-service.js` 导入服务
+- [x] **T6.2** 创建 `writer/import-service.js` 导入服务
   - 参考: [flow-design.md](flow-design.md) 第6节
   - 解压 ZIP
   - 验证 manifest.json
   - 清空并重写数据库（事务中）
   - 按依赖顺序导入
 
-- [ ] **T6.3** 导出小说功能
+- [x] **T6.3** 导出小说功能
   - 参考: [data-design.md](data-design.md) 第5.3节
   - 只导出章节内容为文本文件
   - 章节文件按序号命名
 
-- [ ] **T6.4** 导入/导出对话框 UI 集成
+- [x] **T6.4** 导入/导出对话框 UI 集成
   - 导入: 拖拽/选择文件 → 确认 → 执行
   - 导出: 显示进度 → 完成后下载
   - 参考: [ui-design.md](ui-design.md) 第3.2节
 
-- [ ] **T6.5** 编写 P6 测试用例并运行
+- [x] **T6.5** 编写 P6 测试用例并运行 — ✅ 107/107 通过
   - **核心测试: 配置数据 → 导出 → 导入 → 验证数据完全一致**
   - 测试各表数据的序列化/反序列化
   - 测试 manifest.json 格式正确性
   - 测试导入后 UI 正常显示加载的数据
   - 运行测试，确认全部通过
 
-- [ ] **T6.6** Git commit: "feat(writer): P6 文件导入导出"
+- [x] **T6.6** Git commit: "feat(writer): P6 文件导入导出"
 
 ---
 

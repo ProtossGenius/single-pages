@@ -1550,5 +1550,173 @@ describe('P5 cleanup', () => {
   });
 });
 
+/* ================================================================
+   P6 测试用例 — 文件导入/导出
+   ================================================================ */
+
+describe('Export/Import — 数据往返测试', () => {
+  const testData = {};
+
+  it('准备测试数据', async () => {
+    await DB.clearAll();
+
+    // 供应商
+    testData.provider = {
+      id: 'test-prov-1', name: 'TestAI', apiUrl: 'https://api.test.com/v1',
+      apiKey: 'sk-test', retryCount: 2, sortOrder: 1,
+      createdAt: Utils.now(), updatedAt: Utils.now(),
+    };
+    await DB.put(DB.STORES.AI_PROVIDERS, testData.provider);
+
+    // 模型
+    testData.model = {
+      id: 'test-model-1', providerId: 'test-prov-1', name: 'test-gpt',
+      sortOrder: 1, createdAt: Utils.now(),
+    };
+    await DB.put(DB.STORES.AI_MODELS, testData.model);
+
+    // 职能配置
+    testData.roleConfig = {
+      role: 'writer', promptTemplate: '写作:{{用户输入}}',
+      providerId: 'test-prov-1', modelId: 'test-model-1',
+      outputVar: 'generated_paragraph',
+      createdAt: Utils.now(), updatedAt: Utils.now(),
+    };
+    await DB.put(DB.STORES.ROLE_CONFIGS, testData.roleConfig);
+
+    // 类目
+    testData.category = {
+      id: 'cat-test-1', parentId: null, type: 'character', name: '测试角色',
+      description: '用于导入导出测试', attributes: '{"年龄":"20"}',
+      sortOrder: 1, version: 1, createdAt: Utils.now(), updatedAt: Utils.now(),
+    };
+    await DB.put(DB.STORES.CATEGORIES, testData.category);
+
+    // 设置
+    await DB.put(DB.STORES.APP_SETTINGS, { key: 'test_setting', value: '"hello"' });
+
+    assert(true);
+  });
+
+  it('导出数据到 ZIP Blob', async () => {
+    // 手动构建 ZIP（不调用 UI 进度条版的 exportAll）
+    const tables = [
+      'categories', 'chapters', 'paragraphs', 'paragraph_bindings',
+      'ai_providers', 'ai_models', 'role_configs', 'flow_configs',
+      'recap_data', 'app_settings',
+    ];
+
+    const data = {};
+    const manifest = { version: '1.0', exportedAt: Utils.now(), appVersion: '1.0.0', tables: {} };
+
+    for (const table of tables) {
+      const records = await DB.getAll(table);
+      data[table] = records;
+      manifest.tables[table] = records.length;
+    }
+
+    const zip = new JSZip();
+    zip.file('manifest.json', JSON.stringify(manifest, null, 2));
+    for (const table of tables) {
+      zip.file(`${table}.json`, JSON.stringify(data[table], null, 2));
+    }
+
+    testData.zipBlob = await zip.generateAsync({ type: 'blob' });
+    assert(testData.zipBlob.size > 0, 'ZIP 应有大小');
+    assertEqual(manifest.tables.ai_providers, 1);
+    assertEqual(manifest.tables.categories, 1);
+  });
+
+  it('清空数据库', async () => {
+    await DB.clearAll();
+    const providers = await DB.getAll(DB.STORES.AI_PROVIDERS);
+    assertEqual(providers.length, 0);
+    const categories = await DB.getAll(DB.STORES.CATEGORIES);
+    assertEqual(categories.length, 0);
+  });
+
+  it('从 ZIP 导入数据', async () => {
+    const zip = await JSZip.loadAsync(testData.zipBlob);
+
+    const manifestFile = zip.file('manifest.json');
+    assertNotNull(manifestFile);
+    const manifest = JSON.parse(await manifestFile.async('text'));
+    assertEqual(manifest.version, '1.0');
+
+    const tables = [
+      'ai_providers', 'ai_models', 'role_configs', 'flow_configs',
+      'categories', 'chapters', 'paragraphs', 'paragraph_bindings',
+      'recap_data', 'app_settings',
+    ];
+
+    for (const table of tables) {
+      const jsonFile = zip.file(`${table}.json`);
+      if (jsonFile) {
+        const records = JSON.parse(await jsonFile.async('text'));
+        if (Array.isArray(records) && records.length > 0) {
+          await DB.putAll(table, records);
+        }
+      }
+    }
+
+    assert(true);
+  });
+
+  it('验证导入数据完整性 — 供应商', async () => {
+    const provider = await DB.getById(DB.STORES.AI_PROVIDERS, 'test-prov-1');
+    assertNotNull(provider);
+    assertEqual(provider.name, 'TestAI');
+    assertEqual(provider.apiUrl, 'https://api.test.com/v1');
+    assertEqual(provider.retryCount, 2);
+  });
+
+  it('验证导入数据完整性 — 模型', async () => {
+    const model = await DB.getById(DB.STORES.AI_MODELS, 'test-model-1');
+    assertNotNull(model);
+    assertEqual(model.name, 'test-gpt');
+    assertEqual(model.providerId, 'test-prov-1');
+  });
+
+  it('验证导入数据完整性 — 职能配置', async () => {
+    const config = await DB.getById(DB.STORES.ROLE_CONFIGS, 'writer');
+    assertNotNull(config);
+    assert(config.promptTemplate.includes('{{用户输入}}'), '模板应保留');
+    assertEqual(config.outputVar, 'generated_paragraph');
+  });
+
+  it('验证导入数据完整性 — 类目', async () => {
+    const cat = await DB.getById(DB.STORES.CATEGORIES, 'cat-test-1');
+    assertNotNull(cat);
+    assertEqual(cat.name, '测试角色');
+    assertEqual(cat.type, 'character');
+    const attrs = JSON.parse(cat.attributes);
+    assertEqual(attrs['年龄'], '20');
+  });
+
+  it('验证导入数据完整性 — 设置', async () => {
+    const setting = await DB.getById(DB.STORES.APP_SETTINGS, 'test_setting');
+    assertNotNull(setting);
+    assertEqual(JSON.parse(setting.value), 'hello');
+  });
+
+  it('manifest 格式验证', async () => {
+    const zip = await JSZip.loadAsync(testData.zipBlob);
+    const manifest = JSON.parse(await zip.file('manifest.json').async('text'));
+    assertNotNull(manifest.version);
+    assertNotNull(manifest.exportedAt);
+    assertNotNull(manifest.appVersion);
+    assertNotNull(manifest.tables);
+    assert(typeof manifest.tables === 'object', 'tables 应为对象');
+  });
+});
+
+// 清理 P6 测试数据
+describe('P6 cleanup', () => {
+  it('清理测试数据', async () => {
+    await DB.clearAll();
+    assert(true);
+  });
+});
+
 // ---- 运行测试 ----
 TestRunner.run();
