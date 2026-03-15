@@ -1,7 +1,173 @@
-/* ===== 流程执行引擎 (待 P5 实现) ===== */
-const FlowEngine = {
-  async execute(trigger, context) {
-    throw new Error('FlowEngine not implemented yet');
-  },
-  getStatus() { return null; },
-};
+/* ===== 流程执行引擎 ===== */
+const FlowEngine = (() => {
+  let _status = null;
+  let _cancelled = false;
+
+  /**
+   * 执行流程
+   * @param {string} trigger - 触发方式 (TriggerEnum 的 value)
+   * @param {Object} context - 变量上下文
+   * @returns {Promise<Object>} 执行后的 context
+   */
+  async function execute(trigger, context) {
+    // 查找匹配的流程
+    const allFlows = await DB.getAll(DB.STORES.FLOW_CONFIGS);
+    const flows = allFlows.filter(f => f.trigger === trigger && f.enabled !== false);
+
+    if (flows.length === 0) {
+      throw new Error(`没有匹配的流程 (trigger: ${trigger})`);
+    }
+
+    _cancelled = false;
+
+    // 检查是否有阻塞流程
+    const hasBlocking = flows.some(f => f.blocking);
+    Store.setAIRunning(true, hasBlocking);
+    EventBus.emit(Events.AI_TASK_STARTED, { trigger });
+
+    try {
+      for (const flow of flows) {
+        let steps;
+        try {
+          steps = JSON.parse(flow.steps || '[]');
+        } catch { steps = []; }
+
+        if (!Array.isArray(steps) || steps.length === 0) continue;
+
+        // 初始化状态
+        _status = {
+          flowName: flow.name,
+          totalSteps: steps.length,
+          currentStep: 0,
+          currentRoleName: '',
+          steps: steps.map((step, i) => ({
+            index: i,
+            status: 'pending',
+            duration: 0,
+            roles: (Array.isArray(step) ? step : []).map(roleValue => {
+              const meta = getRoleByValue(roleValue);
+              return {
+                role: roleValue,
+                displayName: meta ? meta.label : roleValue,
+                status: 'pending',
+                duration: 0,
+                failCount: 0,
+                maxRetry: 3,
+                error: null,
+              };
+            }),
+          })),
+        };
+
+        _emitProgress();
+
+        for (let si = 0; si < steps.length; si++) {
+          if (_cancelled) throw new Error('流程已取消');
+
+          const step = steps[si];
+          if (!Array.isArray(step) || step.length === 0) continue;
+
+          _status.currentStep = si;
+          _status.steps[si].status = 'running';
+          const stepStart = Date.now();
+          _emitProgress();
+
+          // 并行执行同一步骤中的所有职能
+          await Promise.all(step.map((roleValue, ri) =>
+            _executeRole(roleValue, context, si, ri)
+          ));
+
+          _status.steps[si].duration = Date.now() - stepStart;
+
+          // 判断步骤整体结果
+          const allRolesCompleted = _status.steps[si].roles.every(r => r.status === 'completed');
+          _status.steps[si].status = allRolesCompleted ? 'completed' : 'failed';
+          _emitProgress();
+        }
+      }
+
+      EventBus.emit(Events.AI_TASK_COMPLETED, { trigger, context });
+      return context;
+    } catch (err) {
+      EventBus.emit(Events.AI_TASK_FAILED, { trigger, error: err.message });
+      throw err;
+    } finally {
+      Store.setAIRunning(false, false);
+    }
+  }
+
+  /**
+   * 执行单个职能
+   */
+  async function _executeRole(roleValue, context, stepIdx, roleIdx) {
+    const statusRole = _status.steps[stepIdx].roles[roleIdx];
+    statusRole.status = 'running';
+    const roleStart = Date.now();
+
+    _status.currentRoleName = statusRole.displayName;
+    _emitProgress();
+
+    try {
+      // 获取职能配置
+      const config = await DB.getById(DB.STORES.ROLE_CONFIGS, roleValue);
+      if (!config) throw new Error(`职能配置不存在: ${roleValue}`);
+      if (!config.providerId || !config.modelId) throw new Error(`职能 ${roleValue} 未配置供应商/模型`);
+
+      // 获取供应商信息以得到 retryCount
+      const provider = await DB.getById(DB.STORES.AI_PROVIDERS, config.providerId);
+      statusRole.maxRetry = provider ? (provider.retryCount || 3) : 3;
+
+      // 替换变量占位符
+      const prompt = _replaceVariables(config.promptTemplate || '', context);
+
+      // 调用 AI
+      const result = await AIService.call(config.providerId, config.modelId, prompt);
+
+      statusRole.failCount = result.failCount || 0;
+      statusRole.duration = Date.now() - roleStart;
+      statusRole.status = 'completed';
+
+      // 写入输出变量
+      if (config.outputVar && result.text) {
+        context[config.outputVar] = result.text;
+      }
+    } catch (err) {
+      statusRole.duration = Date.now() - roleStart;
+      statusRole.status = 'failed';
+      statusRole.error = err.message;
+      statusRole.failCount = err.failCount || statusRole.failCount;
+    }
+
+    _emitProgress();
+  }
+
+  /**
+   * 替换模板中的变量占位符 {{变量名}}
+   */
+  function _replaceVariables(template, context) {
+    return template.replace(/\{\{([^}]+)\}\}/g, (match, label) => {
+      // 根据 label 找到对应的 VariableEnum
+      const variable = VariableList.find(v => v.label === label);
+      if (variable && context[variable.value] !== undefined) {
+        return context[variable.value];
+      }
+      return match; // 未匹配的保持原样
+    });
+  }
+
+  function _emitProgress() {
+    if (_status) {
+      Store.setAIStatus(Utils.deepClone(_status));
+    }
+  }
+
+  function getStatus() {
+    return _status ? Utils.deepClone(_status) : null;
+  }
+
+  function cancel() {
+    _cancelled = true;
+  }
+
+  return { execute, getStatus, cancel, _replaceVariables };
+})();

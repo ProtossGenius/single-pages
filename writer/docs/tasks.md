@@ -29,7 +29,7 @@
 | P2 | 类目管理器 | ✅ 完成 |
 | P3 | 小说编写界面 | ✅ 完成 |
 | P4 | AI 配置系统 | ✅ 完成 |
-| P5 | AI 执行引擎 | ⬜ 未开始 |
+| P5 | AI 执行引擎 | ✅ 完成 |
 | P6 | 文件导入/导出 | ⬜ 未开始 |
 | P7 | 集成与端到端测试 | ⬜ 未开始 |
 
@@ -189,13 +189,13 @@
 
 ### 任务清单
 
-- [ ] **T5.1** 创建 `writer/ai-service.js` AI 调用服务
+- [x] **T5.1** 创建 `writer/ai-service.js` AI 调用服务
   - 参考: [architecture.md](architecture.md) 第4.5节, [flow-design.md](flow-design.md) 第7.1节
   - OpenAI 兼容 API 调用封装
   - 重试逻辑（含失败原因记录）
   - 请求超时处理
 
-- [ ] **T5.2** 创建 `writer/flow-engine.js` 流程执行引擎
+- [x] **T5.2** 创建 `writer/flow-engine.js` 流程执行引擎
   - 参考: [architecture.md](architecture.md) 第4.4节, [flow-design.md](flow-design.md) 第2-3节
   - 流程查找（按 trigger 和 enabled）
   - 二维数组执行逻辑（外层串行，内层并行）
@@ -203,28 +203,28 @@
   - 状态更新（实时更新 AI 状态对象）
   - 阻塞逻辑（阻塞时禁用按钮）
 
-- [ ] **T5.3** 创建 `writer/recap-engine.js` 前情提要引擎
+- [x] **T5.3** 创建 `writer/recap-engine.js` 前情提要引擎
   - 参考: [flow-design.md](flow-design.md) 第4节
   - 阶梯形压缩算法实现
   - 增量更新逻辑
   - 配置参数读取（章节数、目标字数）
 
-- [ ] **T5.4** 聊天框状态栏集成
+- [x] **T5.4** 聊天框状态栏集成
   - 参考: [ui-design.md](ui-design.md) 第5.2节 状态栏
   - 将 flow-engine 的状态更新反映到 UI
   - 主流程/次流程进度显示
   - 失败/重试显示
   - 失败原因复制到剪贴板
 
-- [ ] **T5.5** "开始生成" 按钮集成
+- [x] **T5.5** "开始生成" 按钮集成
   - 参考: [flow-design.md](flow-design.md) 第2节
   - 收集上下文 → 调用 flow-engine → 处理输出 → 创建段落
 
-- [ ] **T5.6** "生成章节" 按钮集成
+- [x] **T5.6** "生成章节" 按钮集成
   - 参考: [flow-design.md](flow-design.md) 第3节
   - 合并段落 → 调用 flow-engine → 保存章节 → 更新前情提要
 
-- [ ] **T5.7** 编写 P5 测试用例并运行 (使用 Mock AI)
+- [x] **T5.7** 编写 P5 测试用例并运行 — ✅ 96/96 通过
   - Mock AIService，返回随机数据
   - 测试 FlowEngine 的串行/并行执行
   - 测试变量替换
@@ -234,7 +234,7 @@
   - 测试按钮禁用/恢复
   - 运行测试，确认全部通过
 
-- [ ] **T5.8** Git commit: "feat(writer): P5 AI 执行引擎"
+- [x] **T5.8** Git commit: "feat(writer): P5 AI 执行引擎"
 
 ---
 

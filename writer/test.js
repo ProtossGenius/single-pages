@@ -1158,6 +1158,8 @@ describe('AI Provider CRUD', () => {
 
   it('删除模型', async () => {
     const models = await DB.getAll(DB.STORES.AI_MODELS);
+    models.sort((a, b) => a.sortOrder - b.sortOrder);
+    // 删除第二个 (gpt-3.5-turbo)
     await DB.delete(DB.STORES.AI_MODELS, models[1].id);
     const remaining = await DB.getAll(DB.STORES.AI_MODELS);
     assertEqual(remaining.length, 1);
@@ -1288,6 +1290,262 @@ describe('P4 cleanup', () => {
     await DB.clear(DB.STORES.AI_MODELS);
     await DB.clear(DB.STORES.ROLE_CONFIGS);
     await DB.clear(DB.STORES.FLOW_CONFIGS);
+    assert(true);
+  });
+});
+
+/* ================================================================
+   P5 测试用例 — AI 执行引擎 (Mock AI)
+   ================================================================ */
+
+describe('FlowEngine — 变量替换', () => {
+  it('替换已知变量', () => {
+    const context = {
+      context_before: '之前的故事...',
+      user_input: '主角进入山洞',
+    };
+    const template = '前文：{{前文信息}}\n要求：{{用户输入}}';
+    const result = FlowEngine._replaceVariables(template, context);
+    assert(result.includes('之前的故事...'), '应替换前文信息');
+    assert(result.includes('主角进入山洞'), '应替换用户输入');
+    assert(!result.includes('{{'), '不应有未替换的变量');
+  });
+
+  it('未知变量保持原样', () => {
+    const context = {};
+    const template = '{{不存在的变量}}';
+    const result = FlowEngine._replaceVariables(template, context);
+    assertEqual(result, '{{不存在的变量}}');
+  });
+
+  it('多个变量混合替换', () => {
+    const context = {
+      chapter_outline: '大纲',
+      follow_up: '后续',
+      bound_settings: '设定',
+    };
+    const template = '概述:{{章节概述}};后续:{{后续概要}};设定:{{绑定设定}}';
+    const result = FlowEngine._replaceVariables(template, context);
+    assert(result.includes('大纲'), '替换章节概述');
+    assert(result.includes('后续'), '替换后续概要');
+    assert(result.includes('设定'), '替换绑定设定');
+  });
+});
+
+describe('FlowEngine — Mock 执行', () => {
+  // 保存原始 AIService.call 并用 Mock 替换
+  let _origCall;
+
+  it('准备 Mock 环境', async () => {
+    _origCall = AIService.call;
+
+    // Mock: 返回随机文本
+    AIService.call = async (providerId, modelId, prompt) => {
+      return { text: `[Mock AI 输出 for ${modelId}] ` + prompt.slice(0, 20), failCount: 0, errors: [] };
+    };
+
+    // 创建测试用供应商和模型
+    await DB.clear(DB.STORES.AI_PROVIDERS);
+    await DB.clear(DB.STORES.AI_MODELS);
+    await DB.clear(DB.STORES.ROLE_CONFIGS);
+    await DB.clear(DB.STORES.FLOW_CONFIGS);
+
+    const pid = 'mock-provider';
+    await DB.put(DB.STORES.AI_PROVIDERS, {
+      id: pid, name: 'Mock', apiUrl: 'http://localhost', apiKey: 'test',
+      retryCount: 3, sortOrder: 1, createdAt: Utils.now(), updatedAt: Utils.now(),
+    });
+    await DB.put(DB.STORES.AI_MODELS, {
+      id: 'mock-model', providerId: pid, name: 'mock-gpt',
+      sortOrder: 1, createdAt: Utils.now(),
+    });
+
+    // 配置写手
+    await DB.put(DB.STORES.ROLE_CONFIGS, {
+      role: 'writer', promptTemplate: '写一段:{{用户输入}}',
+      providerId: pid, modelId: 'mock-model', outputVar: 'generated_paragraph',
+      createdAt: Utils.now(), updatedAt: Utils.now(),
+    });
+
+    // 配置评审员
+    await DB.put(DB.STORES.ROLE_CONFIGS, {
+      role: 'reviewer', promptTemplate: '评审:{{当前段落}}',
+      providerId: pid, modelId: 'mock-model', outputVar: 'ai_review',
+      createdAt: Utils.now(), updatedAt: Utils.now(),
+    });
+
+    // 配置概要师
+    await DB.put(DB.STORES.ROLE_CONFIGS, {
+      role: 'summarizer', promptTemplate: '概要:{{章节内容}}',
+      providerId: pid, modelId: 'mock-model', outputVar: 'generated_summary',
+      createdAt: Utils.now(), updatedAt: Utils.now(),
+    });
+
+    assert(true);
+  });
+
+  it('执行串行流程 — 单步骤单角色', async () => {
+    const flowId = Utils.generateId();
+    await DB.put(DB.STORES.FLOW_CONFIGS, {
+      id: flowId, name: '简单流程', trigger: 'generate_paragraph',
+      enabled: true, blocking: true, steps: JSON.stringify([['writer']]),
+      sortOrder: 1, createdAt: Utils.now(), updatedAt: Utils.now(),
+    });
+
+    const context = {
+      user_input: '主角进入山洞',
+      context_before: '', chapter_outline: '', follow_up: '', bound_settings: '',
+      current_paragraph: '', chapter_content: '', ai_review: '',
+      generated_paragraph: '', generated_summary: '', generated_recap: '',
+    };
+
+    const result = await FlowEngine.execute('generate_paragraph', context);
+    assert(result.generated_paragraph.length > 0, '应生成段落');
+    assert(result.generated_paragraph.includes('Mock AI'), '应包含 Mock 输出');
+  });
+
+  it('执行并行流程 — 同步骤多角色', async () => {
+    await DB.clear(DB.STORES.FLOW_CONFIGS);
+    const flowId = Utils.generateId();
+    await DB.put(DB.STORES.FLOW_CONFIGS, {
+      id: flowId, name: '并行流程', trigger: 'generate_paragraph',
+      enabled: true, blocking: true, steps: JSON.stringify([['writer', 'reviewer']]),
+      sortOrder: 1, createdAt: Utils.now(), updatedAt: Utils.now(),
+    });
+
+    const context = {
+      user_input: '测试并行', context_before: '', chapter_outline: '', follow_up: '',
+      bound_settings: '', current_paragraph: '', chapter_content: '', ai_review: '',
+      generated_paragraph: '', generated_summary: '', generated_recap: '',
+    };
+
+    const result = await FlowEngine.execute('generate_paragraph', context);
+    assert(result.generated_paragraph.length > 0, '写手应产出段落');
+    assert(result.ai_review.length > 0, '评审员应产出评审意见');
+  });
+
+  it('执行多步骤流程 — 串行步骤+并行角色', async () => {
+    await DB.clear(DB.STORES.FLOW_CONFIGS);
+    const flowId = Utils.generateId();
+    await DB.put(DB.STORES.FLOW_CONFIGS, {
+      id: flowId, name: '多步骤流程', trigger: 'generate_paragraph',
+      enabled: true, blocking: true,
+      steps: JSON.stringify([['writer', 'reviewer'], ['summarizer']]),
+      sortOrder: 1, createdAt: Utils.now(), updatedAt: Utils.now(),
+    });
+
+    const context = {
+      user_input: '多步骤测试', context_before: '', chapter_outline: '', follow_up: '',
+      bound_settings: '', current_paragraph: '', chapter_content: '', ai_review: '',
+      generated_paragraph: '', generated_summary: '', generated_recap: '',
+    };
+
+    const result = await FlowEngine.execute('generate_paragraph', context);
+    assert(result.generated_paragraph.length > 0, '步骤1写手产出');
+    assert(result.ai_review.length > 0, '步骤1评审员产出');
+    assert(result.generated_summary.length > 0, '步骤2概要师产出');
+
+    // 验证状态
+    const status = FlowEngine.getStatus();
+    assertNotNull(status);
+    assertEqual(status.totalSteps, 2);
+    assertEqual(status.steps[0].roles.length, 2);
+    assertEqual(status.steps[1].roles.length, 1);
+  });
+
+  it('无匹配流程时抛出错误', async () => {
+    let thrown = false;
+    try {
+      await FlowEngine.execute('setting_changed', {});
+    } catch (e) {
+      thrown = true;
+      assert(e.message.includes('没有匹配'), '错误信息应包含提示');
+    }
+    assert(thrown, '应抛出错误');
+  });
+
+  it('阻塞状态管理', async () => {
+    // 在执行期间检查阻塞状态
+    let wasRunning = false;
+    let wasBlocking = false;
+    const handler = ({ key, value }) => {
+      if (key === 'aiRunning') wasRunning = value;
+      if (key === 'aiBlocking') wasBlocking = value;
+    };
+
+    // mock 中间检查在异步完成后验证
+    const context = {
+      user_input: '阻塞测试', context_before: '', chapter_outline: '', follow_up: '',
+      bound_settings: '', current_paragraph: '', chapter_content: '', ai_review: '',
+      generated_paragraph: '', generated_summary: '', generated_recap: '',
+    };
+
+    await FlowEngine.execute('generate_paragraph', context);
+    // 执行完后应恢复
+    assertEqual(Store.get('aiRunning'), false);
+    assertEqual(Store.get('aiBlocking'), false);
+  });
+
+  it('恢复 AIService', () => {
+    AIService.call = _origCall;
+    assert(true);
+  });
+});
+
+describe('FlowEngine — 失败处理', () => {
+  let _origCall;
+
+  it('角色执行失败不影响其他角色', async () => {
+    _origCall = AIService.call;
+
+    let callCount = 0;
+    AIService.call = async (providerId, modelId, prompt) => {
+      callCount++;
+      if (callCount === 1) {
+        // 第一个角色失败
+        const err = new Error('模拟失败');
+        err.failCount = 3;
+        err.errors = ['err1', 'err2', 'err3'];
+        throw err;
+      }
+      return { text: '成功输出', failCount: 0, errors: [] };
+    };
+
+    await DB.clear(DB.STORES.FLOW_CONFIGS);
+    await DB.put(DB.STORES.FLOW_CONFIGS, {
+      id: Utils.generateId(), name: '失败测试', trigger: 'generate_paragraph',
+      enabled: true, blocking: true, steps: JSON.stringify([['writer', 'reviewer']]),
+      sortOrder: 1, createdAt: Utils.now(), updatedAt: Utils.now(),
+    });
+
+    const context = {
+      user_input: '失败测试', context_before: '', chapter_outline: '', follow_up: '',
+      bound_settings: '', current_paragraph: '', chapter_content: '', ai_review: '',
+      generated_paragraph: '', generated_summary: '', generated_recap: '',
+    };
+
+    await FlowEngine.execute('generate_paragraph', context);
+
+    // 写手失败，段落应为空; 评审员成功
+    assertEqual(context.generated_paragraph, '');
+    assertEqual(context.ai_review, '成功输出');
+
+    const status = FlowEngine.getStatus();
+    assertEqual(status.steps[0].roles[0].status, 'failed');
+    assertEqual(status.steps[0].roles[1].status, 'completed');
+
+    AIService.call = _origCall;
+  });
+});
+
+// 清理 P5 测试数据
+describe('P5 cleanup', () => {
+  it('清理测试数据', async () => {
+    await DB.clear(DB.STORES.AI_PROVIDERS);
+    await DB.clear(DB.STORES.AI_MODELS);
+    await DB.clear(DB.STORES.ROLE_CONFIGS);
+    await DB.clear(DB.STORES.FLOW_CONFIGS);
+    await DB.clear(DB.STORES.RECAP_DATA);
     assert(true);
   });
 });
