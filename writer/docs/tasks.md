@@ -25,7 +25,7 @@
 | 阶段 | 说明 | 状态 |
 |------|------|------|
 | P0 | 设计文档 | ✅ 完成 |
-| P1 | 基础设施层 | ⬜ 未开始 |
+| P1 | 基础设施层 | ✅ 完成 |
 | P2 | 类目管理器 | ⬜ 未开始 |
 | P3 | 小说编写界面 | ⬜ 未开始 |
 | P4 | AI 配置系统 | ⬜ 未开始 |
@@ -41,73 +41,19 @@
 
 ### 任务清单
 
-- [ ] **T1.1** 创建 `writer/index.html` 主页面骨架
-  - 四栏布局 HTML 结构
-  - 引入所有 CSS 和 JS 文件（按架构文档第8节加载顺序）
-  - 参考: [ui-design.md](ui-design.md) 第1节 整体布局
-  
-- [ ] **T1.2** 创建 `writer/style.css` 全局样式
-  - CSS 变量定义（参考 [ui-design.md](ui-design.md) 第7节配色方案）
-  - 四栏布局样式 (flexbox)
-  - 通用组件样式（按钮、输入框、卡片、滚动条）
-  - 模态对话框样式
-  - 树形视图基础样式
-  - ⚠️ **UI 确认点 UC-01**: 完成后请用户确认整体布局是否满足需求
-    - 预期: 页面打开后能看到四栏（左/中左/中/右）的空白区域，正确分割比例
-    
-- [ ] **T1.3** 创建 `writer/enums.js` 枚举定义
-  - 参考: [data-design.md](data-design.md) 第4节 枚举定义
-  - 职能枚举 (RoleEnum)
-  - 变量枚举 (VariableEnum)，含是否阻塞标记
-  - 触发方式枚举 (TriggerEnum)
-  - 类目类型枚举 (CategoryTypeEnum)
-  
-- [ ] **T1.4** 创建 `writer/utils.js` 工具函数
-  - UUID 生成函数
-  - 时间戳格式化
-  - 文本截断
-  - DOM 创建辅助函数
-  - 深拷贝
-  - 防抖/节流
-  
-- [ ] **T1.5** 创建 `writer/events.js` 事件总线
-  - 参考: [architecture.md](architecture.md) 第4.3节
-  - on / off / emit 三个方法
-  - 事件名称常量
-  
-- [ ] **T1.6** 创建 `writer/db.js` IndexedDB 数据库层
-  - 参考: [data-design.md](data-design.md) 全文，[architecture.md](architecture.md) 第4.1节
-  - 数据库初始化（创建所有 ObjectStore 和索引）
-  - 通用 CRUD 方法
-  - 事务封装
-  
-- [ ] **T1.7** 创建 `writer/store.js` 应用状态管理
-  - 参考: [architecture.md](architecture.md) 第4.2节
-  - 状态结构定义
-  - 状态变更方法
-  - 变更时触发事件总线通知
-  
-- [ ] **T1.8** 创建 `writer/ui-modal.js` 模态对话框组件
-  - 参考: [ui-design.md](ui-design.md) 第3.2节 导入/导出对话框
-  - 通用模态框：标题、内容、按钮
-  - 确认对话框
-  - 进度对话框（带进度条）
-  
-- [ ] **T1.9** 创建 `writer/test.html` 和 `writer/test.js` 测试框架
-  - 简单的测试运行器（HTML 页面中显示测试结果）
-  - 断言辅助函数
-  
-- [ ] **T1.10** 编写 P1 阶段测试用例并运行
-  - 测试 EventBus: on/off/emit
-  - 测试 DB: 初始化、CRUD 各表
-  - 测试 Store: 状态变更和事件触发
-  - 测试 enums: 枚举值完整性
-  - 测试 utils: 各工具函数
-  - 运行测试，确认全部通过
-  
-- [ ] **T1.11** 下载 JSZip 到 `writer/vendor/jszip.min.js`
-  
-- [ ] **T1.12** Git commit: "feat(writer): P1 基础设施层"
+- [x] **T1.1** 创建 `writer/index.html` 主页面骨架
+- [x] **T1.2** 创建 `writer/style.css` 全局样式
+  - ⚠️ **UI 确认点 UC-01**: 待 P2 完成后请用户确认整体布局
+- [x] **T1.3** 创建 `writer/enums.js` 枚举定义
+- [x] **T1.4** 创建 `writer/utils.js` 工具函数
+- [x] **T1.5** 创建 `writer/events.js` 事件总线
+- [x] **T1.6** 创建 `writer/db.js` IndexedDB 数据库层
+- [x] **T1.7** 创建 `writer/store.js` 应用状态管理
+- [x] **T1.8** 创建 `writer/ui-modal.js` 模态对话框组件
+- [x] **T1.9** 创建 `writer/test.html` 和 `writer/test.js` 测试框架
+- [x] **T1.10** 编写 P1 阶段测试用例并运行 — ✅ 55/55 通过
+- [x] **T1.11** 下载 JSZip 到 `writer/vendor/jszip.min.js`
+- [x] **T1.12** Git commit: "feat(writer): P1 基础设施层"
 
 ---
 

@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AI 小说写作工具</title>
+  <link rel="icon" type="image/svg+xml" href="../site-icon.svg">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div id="app">
+    <!-- 菜单栏 -->
+    <div id="menu-bar" class="menu-bar"></div>
+
+    <!-- 主内容区域 -->
+    <div id="main-content" class="main-content">
+      <!-- 左侧：类目管理器 -->
+      <div id="category-panel" class="panel panel-category">
+        <div class="panel-header">
+          <span class="panel-title">类目管理器</span>
+          <button id="btn-add-root-category" class="btn-icon" title="添加大类">+</button>
+        </div>
+        <div id="category-tree" class="category-tree"></div>
+      </div>
+
+      <!-- 类目详情面板（选中时显示） -->
+      <div id="detail-panel" class="panel panel-detail" style="display:none;"></div>
+
+      <!-- 中间：小说编写区 -->
+      <div id="editor-area" class="editor-area">
+        <!-- 小说内容区 -->
+        <div id="editor-panel" class="panel panel-editor">
+          <div id="chapter-header" class="chapter-header">
+            <input id="chapter-title" type="text" class="chapter-title-input" placeholder="章节名..." />
+          </div>
+          <div id="paragraph-list" class="paragraph-list"></div>
+        </div>
+
+        <!-- 聊天框区域 -->
+        <div id="chat-panel" class="panel panel-chat">
+          <!-- AI 状态栏 -->
+          <div id="ai-status-bar" class="ai-status-bar collapsed">
+            <div class="ai-status-summary">
+              <span class="ai-status-toggle">▶</span>
+              <span class="ai-status-text">AI 空闲</span>
+            </div>
+            <div class="ai-status-detail"></div>
+          </div>
+
+          <!-- 输入区域 -->
+          <div class="chat-tabs">
+            <button class="chat-tab active" data-tab="outline">章节概述</button>
+            <button class="chat-tab" data-tab="followUp">后续概要</button>
+            <button class="chat-tab" data-tab="bindings">绑定设定</button>
+          </div>
+          <div class="chat-input-area">
+            <div id="tab-outline" class="tab-content active">
+              <textarea id="input-outline" class="chat-textarea" placeholder="输入章节概述..."></textarea>
+            </div>
+            <div id="tab-followUp" class="tab-content">
+              <textarea id="input-followUp" class="chat-textarea" placeholder="输入后续概要..."></textarea>
+            </div>
+            <div id="tab-bindings" class="tab-content">
+              <div id="binding-list" class="binding-list">
+                <p class="hint-text">在左侧类目管理器中点击项目以添加绑定</p>
+              </div>
+            </div>
+          </div>
+
+          <!-- 操作按钮 -->
+          <div class="chat-actions">
+            <button id="btn-generate" class="btn btn-primary">开始生成</button>
+            <button id="btn-generate-chapter" class="btn btn-secondary">生成章节</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- 右侧：当前状态面板 -->
+      <div id="status-panel" class="panel panel-status">
+        <div class="panel-header">
+          <span class="panel-title">当前状态</span>
+        </div>
+        <div class="status-content">
+          <div class="status-section">
+            <h3 class="status-section-title">📝 章节概要</h3>
+            <div id="status-summary" class="status-text">暂无</div>
+          </div>
+          <div class="status-section">
+            <h3 class="status-section-title">💬 AI 评审意见</h3>
+            <div id="status-review" class="status-text">暂无</div>
+          </div>
+          <div class="status-section">
+            <h3 class="status-section-title">📖 前情提要</h3>
+            <div id="status-recap" class="status-text">暂无</div>
+          </div>
+          <div class="status-section">
+            <h3 class="status-section-title">📋 后续概要</h3>
+            <div id="status-followup" class="status-text">暂无</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 模态对话框容器 -->
+  <div id="modal-container"></div>
+
+  <!-- 第三方库 -->
+  <script src="vendor/jszip.min.js"></script>
+
+  <!-- 基础层 -->
+  <script src="enums.js"></script>
+  <script src="utils.js"></script>
+  <script src="events.js"></script>
+  <script src="db.js"></script>
+  <script src="store.js"></script>
+
+  <!-- 服务层 -->
+  <script src="ai-service.js"></script>
+  <script src="flow-engine.js"></script>
+  <script src="recap-engine.js"></script>
+  <script src="export-service.js"></script>
+  <script src="import-service.js"></script>
+
+  <!-- UI 层 -->
+  <script src="ui-modal.js"></script>
+  <script src="ui-menu.js"></script>
+  <script src="ui-category.js"></script>
+  <script src="ui-detail.js"></script>
+  <script src="ui-editor.js"></script>
+  <script src="ui-chat.js"></script>
+  <script src="ui-status.js"></script>
+  <script src="ui-ai-config.js"></script>
+  <script src="ui-role-config.js"></script>
+  <script src="ui-flow-config.js"></script>
+
+  <!-- 入口 -->
+  <script src="app.js"></script>
+</body>
+</html>

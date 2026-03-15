@@ -1,0 +1,728 @@
+/* ===== 轻量测试框架 ===== */
+
+const TestRunner = (() => {
+  const groups = [];
+  let currentGroup = null;
+
+  function describe(name, fn) {
+    currentGroup = { name, tests: [] };
+    groups.push(currentGroup);
+    fn();
+    currentGroup = null;
+  }
+
+  function it(name, fn) {
+    if (!currentGroup) throw new Error('it() must be inside describe()');
+    currentGroup.tests.push({ name, fn });
+  }
+
+  function assert(condition, message = 'Assertion failed') {
+    if (!condition) throw new Error(message);
+  }
+
+  function assertEqual(actual, expected, message) {
+    if (actual !== expected) {
+      throw new Error(
+        (message ? message + ': ' : '') +
+        `expected ${JSON.stringify(expected)}, got ${JSON.stringify(actual)}`
+      );
+    }
+  }
+
+  function assertDeepEqual(actual, expected, message) {
+    const a = JSON.stringify(actual);
+    const b = JSON.stringify(expected);
+    if (a !== b) {
+      throw new Error(
+        (message ? message + ': ' : '') +
+        `expected ${b}, got ${a}`
+      );
+    }
+  }
+
+  function assertThrows(fn, message = 'Expected function to throw') {
+    try {
+      fn();
+      throw new Error(message);
+    } catch (e) {
+      if (e.message === message) throw e;
+    }
+  }
+
+  function assertNotNull(value, message = 'Expected non-null value') {
+    if (value === null || value === undefined) throw new Error(message);
+  }
+
+  function assertNull(value, message) {
+    if (value !== null && value !== undefined) {
+      throw new Error((message || 'Expected null') + `: got ${JSON.stringify(value)}`);
+    }
+  }
+
+  function assertArrayLength(arr, len, message) {
+    if (!Array.isArray(arr)) throw new Error((message || '') + ': not an array');
+    if (arr.length !== len) {
+      throw new Error(
+        (message ? message + ': ' : '') +
+        `expected length ${len}, got ${arr.length}`
+      );
+    }
+  }
+
+  async function run() {
+    const logEl = document.getElementById('test-log');
+    const summaryEl = document.getElementById('test-summary');
+    logEl.innerHTML = '';
+
+    let totalPass = 0;
+    let totalFail = 0;
+
+    for (const group of groups) {
+      const groupEl = document.createElement('div');
+      groupEl.className = 'test-group';
+
+      const titleEl = document.createElement('div');
+      titleEl.className = 'test-group-title';
+      titleEl.textContent = group.name;
+      groupEl.appendChild(titleEl);
+
+      for (const test of group.tests) {
+        const itemEl = document.createElement('div');
+        try {
+          await test.fn();
+          itemEl.className = 'test-item pass';
+          itemEl.innerHTML = `<span class="test-icon">✓</span><span class="test-name">${escapeHtml(test.name)}</span>`;
+          totalPass++;
+        } catch (err) {
+          itemEl.className = 'test-item fail';
+          itemEl.innerHTML = `<span class="test-icon">✗</span><span class="test-name">${escapeHtml(test.name)}</span>`;
+          const errEl = document.createElement('div');
+          errEl.className = 'test-error';
+          errEl.textContent = err.message || String(err);
+          groupEl.appendChild(itemEl);
+          groupEl.appendChild(errEl);
+          totalFail++;
+          continue;
+        }
+        groupEl.appendChild(itemEl);
+      }
+      logEl.appendChild(groupEl);
+    }
+
+    const total = totalPass + totalFail;
+    if (totalFail === 0) {
+      summaryEl.className = 'test-summary all-pass';
+      summaryEl.textContent = `全部通过 ✓ ${totalPass}/${total} 个测试`;
+    } else {
+      summaryEl.className = 'test-summary has-fail';
+      summaryEl.textContent = `有失败 ✗ ${totalFail} 个失败, ${totalPass} 个通过, 共 ${total} 个测试`;
+    }
+  }
+
+  function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+  }
+
+  return { describe, it, assert, assertEqual, assertDeepEqual, assertThrows, assertNotNull, assertNull, assertArrayLength, run };
+})();
+
+const { describe, it, assert, assertEqual, assertDeepEqual, assertThrows, assertNotNull, assertNull, assertArrayLength } = TestRunner;
+
+/* ================================================================
+   P1 测试用例
+   ================================================================ */
+
+// ---- Enums 测试 ----
+describe('Enums', () => {
+  it('RoleEnum 包含所有预定义角色', () => {
+    assertEqual(RoleList.length, 4);
+    assertNotNull(getRoleByValue('writer'));
+    assertNotNull(getRoleByValue('reviewer'));
+    assertNotNull(getRoleByValue('summarizer'));
+    assertNotNull(getRoleByValue('recap_writer'));
+  });
+
+  it('getRoleByValue 返回正确的角色', () => {
+    const writer = getRoleByValue('writer');
+    assertEqual(writer.label, '写手');
+    assertEqual(writer.value, 'writer');
+  });
+
+  it('getRoleByValue 对不存在的值返回 null', () => {
+    assertNull(getRoleByValue('nonexistent'));
+  });
+
+  it('VariableEnum 包含所有变量', () => {
+    assertEqual(VariableList.length, 11);
+  });
+
+  it('InputVariables 和 OutputVariables 筛选正确', () => {
+    assert(InputVariables.length > 0, 'InputVariables 不应为空');
+    assert(OutputVariables.length > 0, 'OutputVariables 不应为空');
+    assert(InputVariables.every(v => v.isInput), '所有 InputVariables 的 isInput 应为 true');
+    assert(OutputVariables.every(v => v.isOutput), '所有 OutputVariables 的 isOutput 应为 true');
+  });
+
+  it('阻塞变量标记正确', () => {
+    const genParagraph = getVariableByValue('generated_paragraph');
+    assertEqual(genParagraph.blocking, true, '生成段落应为阻塞');
+    const aiReview = getVariableByValue('ai_review');
+    assertEqual(aiReview.blocking, false, 'AI评审意见应为非阻塞');
+  });
+
+  it('TriggerEnum 包含所有触发方式', () => {
+    assertEqual(TriggerList.length, 3);
+    assertNotNull(getTriggerByValue('generate_paragraph'));
+    assertNotNull(getTriggerByValue('generate_chapter'));
+    assertNotNull(getTriggerByValue('setting_changed'));
+  });
+
+  it('CategoryTypeEnum 包含所有类型', () => {
+    assertEqual(CategoryTypeList.length, 6);
+    assertNotNull(getCategoryTypeByValue('character'));
+    assertNotNull(getCategoryTypeByValue('location'));
+    assertNotNull(getCategoryTypeByValue('custom'));
+  });
+});
+
+// ---- Utils 测试 ----
+describe('Utils', () => {
+  it('generateId 生成有效 UUID', () => {
+    const id = Utils.generateId();
+    assertNotNull(id);
+    assert(typeof id === 'string', 'UUID 应为字符串');
+    assert(id.length > 0, 'UUID 不应为空');
+    // UUID 格式验证
+    assert(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(id),
+      'UUID 格式不正确: ' + id);
+  });
+
+  it('generateId 每次生成不同的 UUID', () => {
+    const id1 = Utils.generateId();
+    const id2 = Utils.generateId();
+    assert(id1 !== id2, '两次生成的 UUID 不应相同');
+  });
+
+  it('now 返回时间戳', () => {
+    const ts = Utils.now();
+    assert(typeof ts === 'number', '应为数字');
+    assert(ts > 0, '应大于0');
+  });
+
+  it('formatTime 格式化时间戳', () => {
+    const ts = new Date(2026, 2, 15, 10, 30, 45).getTime();
+    const formatted = Utils.formatTime(ts);
+    assertEqual(formatted, '2026-03-15 10:30:45');
+  });
+
+  it('formatTime 处理空值', () => {
+    assertEqual(Utils.formatTime(null), '');
+    assertEqual(Utils.formatTime(undefined), '');
+  });
+
+  it('truncate 截断长文本', () => {
+    const long = '这是一段很长的文本，需要被截断以适应显示空间';
+    const result = Utils.truncate(long, 10);
+    assert(result.endsWith('...'), '应以...结尾');
+    assertEqual(result.length, 13); // 10 chars + '...'
+  });
+
+  it('truncate 不截断短文本', () => {
+    assertEqual(Utils.truncate('短文本', 10), '短文本');
+  });
+
+  it('truncate 处理空值', () => {
+    assertEqual(Utils.truncate(null), '');
+    assertEqual(Utils.truncate(''), '');
+  });
+
+  it('createElement 创建基本元素', () => {
+    const el = Utils.createElement('div', { className: 'test', textContent: 'hello' });
+    assertEqual(el.tagName, 'DIV');
+    assertEqual(el.className, 'test');
+    assertEqual(el.textContent, 'hello');
+  });
+
+  it('createElement 处理 dataset', () => {
+    const el = Utils.createElement('div', { dataset: { id: '123', name: 'test' } });
+    assertEqual(el.dataset.id, '123');
+    assertEqual(el.dataset.name, 'test');
+  });
+
+  it('createElement 支持子元素', () => {
+    const el = Utils.createElement('div', {}, [
+      Utils.createElement('span', { textContent: 'child1' }),
+      'text node',
+    ]);
+    assertEqual(el.children.length, 1);
+    assertEqual(el.childNodes.length, 2);
+  });
+
+  it('deepClone 深拷贝对象', () => {
+    const obj = { a: 1, b: { c: [1, 2, 3] } };
+    const clone = Utils.deepClone(obj);
+    assertDeepEqual(clone, obj);
+    clone.b.c.push(4);
+    assertEqual(obj.b.c.length, 3, '修改副本不应影响原对象');
+  });
+
+  it('debounce 延迟执行', async () => {
+    let count = 0;
+    const fn = Utils.debounce(() => count++, 50);
+    fn(); fn(); fn();
+    assertEqual(count, 0, '应延迟执行');
+    await new Promise(r => setTimeout(r, 100));
+    assertEqual(count, 1, '只应执行一次');
+  });
+
+  it('throttle 节流执行', async () => {
+    let count = 0;
+    const fn = Utils.throttle(() => count++, 50);
+    fn(); fn(); fn();
+    assertEqual(count, 1, '短时间内只应执行一次');
+    await new Promise(r => setTimeout(r, 60));
+    fn();
+    assertEqual(count, 2, '间隔后应再次执行');
+  });
+});
+
+// ---- EventBus 测试 ----
+describe('EventBus', () => {
+  it('on + emit 触发事件', () => {
+    let received = null;
+    const handler = (data) => { received = data; };
+    EventBus.on('test:event1', handler);
+    EventBus.emit('test:event1', { hello: 'world' });
+    assertDeepEqual(received, { hello: 'world' });
+    EventBus.off('test:event1', handler);
+  });
+
+  it('off 移除监听', () => {
+    let count = 0;
+    const handler = () => count++;
+    EventBus.on('test:event2', handler);
+    EventBus.emit('test:event2');
+    assertEqual(count, 1);
+    EventBus.off('test:event2', handler);
+    EventBus.emit('test:event2');
+    assertEqual(count, 1, '移除后不应再触发');
+  });
+
+  it('多个监听器都应被触发', () => {
+    let a = 0, b = 0;
+    const h1 = () => a++;
+    const h2 = () => b++;
+    EventBus.on('test:event3', h1);
+    EventBus.on('test:event3', h2);
+    EventBus.emit('test:event3');
+    assertEqual(a, 1);
+    assertEqual(b, 1);
+    EventBus.off('test:event3', h1);
+    EventBus.off('test:event3', h2);
+  });
+
+  it('offAll 移除所有监听', () => {
+    let count = 0;
+    EventBus.on('test:event4', () => count++);
+    EventBus.on('test:event4', () => count++);
+    EventBus.offAll('test:event4');
+    EventBus.emit('test:event4');
+    assertEqual(count, 0, '所有监听应被移除');
+  });
+
+  it('listenerCount 返回正确数量', () => {
+    const h = () => {};
+    EventBus.on('test:event5', h);
+    EventBus.on('test:event5', () => {});
+    assertEqual(EventBus.listenerCount('test:event5'), 2);
+    EventBus.offAll('test:event5');
+    assertEqual(EventBus.listenerCount('test:event5'), 0);
+  });
+
+  it('handler 抛出异常不应影响其他 handler', () => {
+    let reached = false;
+    EventBus.on('test:event6', () => { throw new Error('oops'); });
+    EventBus.on('test:event6', () => { reached = true; });
+    EventBus.emit('test:event6');
+    assert(reached, '第二个 handler 应正常执行');
+    EventBus.offAll('test:event6');
+  });
+
+  it('emit 不存在的事件不报错', () => {
+    EventBus.emit('test:nonexistent', { data: 1 });
+    // 不应抛出异常
+    assert(true);
+  });
+});
+
+// ---- DB 测试 ----
+describe('DB (IndexedDB)', () => {
+  it('初始化数据库', async () => {
+    // 先删除已有数据库避免冲突
+    await DB.deleteDatabase();
+    await DB.init();
+    assertNotNull(DB.getDB(), '数据库应已打开');
+  });
+
+  it('categories CRUD', async () => {
+    const id = Utils.generateId();
+    const now = Utils.now();
+    const cat = {
+      id,
+      parentId: null,
+      type: 'character',
+      name: '测试人物',
+      description: '描述',
+      attributes: '{}',
+      sortOrder: 1,
+      version: 1,
+      createdAt: now,
+      updatedAt: now,
+    };
+
+    // 新增
+    await DB.put(DB.STORES.CATEGORIES, cat);
+    const loaded = await DB.getById(DB.STORES.CATEGORIES, id);
+    assertEqual(loaded.name, '测试人物');
+    assertEqual(loaded.type, 'character');
+
+    // 更新
+    loaded.name = '修改后人物';
+    loaded.version = 2;
+    await DB.put(DB.STORES.CATEGORIES, loaded);
+    const updated = await DB.getById(DB.STORES.CATEGORIES, id);
+    assertEqual(updated.name, '修改后人物');
+    assertEqual(updated.version, 2);
+
+    // 按索引查询
+    const byType = await DB.getByIndex(DB.STORES.CATEGORIES, 'idx_type', 'character');
+    assert(byType.length >= 1, '应至少有一条 character 记录');
+
+    // 删除
+    await DB.delete(DB.STORES.CATEGORIES, id);
+    const deleted = await DB.getById(DB.STORES.CATEGORIES, id);
+    assertNull(deleted, '删除后应为 undefined/null');
+  });
+
+  it('chapters 自增主键', async () => {
+    const now = Utils.now();
+    const id1 = await DB.put(DB.STORES.CHAPTERS, {
+      title: '第一章',
+      summary: '',
+      content: '',
+      recapText: '',
+      reviewNotes: '',
+      status: 'draft',
+      sortOrder: 1,
+      createdAt: now,
+      updatedAt: now,
+    });
+    assert(typeof id1 === 'number' || id1 > 0, '应返回自增 ID');
+
+    const chapter = await DB.getById(DB.STORES.CHAPTERS, id1);
+    assertEqual(chapter.title, '第一章');
+
+    // 清理
+    await DB.delete(DB.STORES.CHAPTERS, id1);
+  });
+
+  it('paragraphs CRUD 和索引查询', async () => {
+    // 先创建章节
+    const now = Utils.now();
+    const chapterId = await DB.put(DB.STORES.CHAPTERS, {
+      title: '测试章',
+      summary: '',
+      content: '',
+      recapText: '',
+      reviewNotes: '',
+      status: 'draft',
+      sortOrder: 1,
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    const pId1 = Utils.generateId();
+    const pId2 = Utils.generateId();
+    await DB.put(DB.STORES.PARAGRAPHS, {
+      id: pId1, chapterId, content: '段落一', sortOrder: 1,
+      recapBrief: '', followUp: '', createdAt: now, updatedAt: now,
+    });
+    await DB.put(DB.STORES.PARAGRAPHS, {
+      id: pId2, chapterId, content: '段落二', sortOrder: 2,
+      recapBrief: '', followUp: '', createdAt: now, updatedAt: now,
+    });
+
+    const ps = await DB.getByIndex(DB.STORES.PARAGRAPHS, 'idx_chapterId', chapterId);
+    assertEqual(ps.length, 2, '应有两个段落');
+
+    // 清理
+    await DB.delete(DB.STORES.PARAGRAPHS, pId1);
+    await DB.delete(DB.STORES.PARAGRAPHS, pId2);
+    await DB.delete(DB.STORES.CHAPTERS, chapterId);
+  });
+
+  it('ai_providers CRUD', async () => {
+    const id = Utils.generateId();
+    await DB.put(DB.STORES.AI_PROVIDERS, {
+      id, name: 'TestProvider', apiUrl: 'https://test.api.com',
+      apiKey: 'sk-test', retryCount: 3, sortOrder: 1,
+      createdAt: Utils.now(), updatedAt: Utils.now(),
+    });
+    const loaded = await DB.getById(DB.STORES.AI_PROVIDERS, id);
+    assertEqual(loaded.name, 'TestProvider');
+    await DB.delete(DB.STORES.AI_PROVIDERS, id);
+  });
+
+  it('ai_models CRUD 和索引', async () => {
+    const providerId = Utils.generateId();
+    const modelId = Utils.generateId();
+    await DB.put(DB.STORES.AI_MODELS, {
+      id: modelId, providerId, name: 'gpt-4', sortOrder: 1, createdAt: Utils.now(),
+    });
+    const byProvider = await DB.getByIndex(DB.STORES.AI_MODELS, 'idx_providerId', providerId);
+    assertEqual(byProvider.length, 1);
+    assertEqual(byProvider[0].name, 'gpt-4');
+    await DB.delete(DB.STORES.AI_MODELS, modelId);
+  });
+
+  it('role_configs CRUD', async () => {
+    await DB.put(DB.STORES.ROLE_CONFIGS, {
+      role: 'writer',
+      promptTemplate: '你是写手 {{用户输入}}',
+      providerId: 'p1',
+      modelId: 'm1',
+      outputVar: 'generated_paragraph',
+      createdAt: Utils.now(),
+      updatedAt: Utils.now(),
+    });
+    const loaded = await DB.getById(DB.STORES.ROLE_CONFIGS, 'writer');
+    assertEqual(loaded.promptTemplate, '你是写手 {{用户输入}}');
+    await DB.delete(DB.STORES.ROLE_CONFIGS, 'writer');
+  });
+
+  it('flow_configs CRUD', async () => {
+    const id = Utils.generateId();
+    await DB.put(DB.STORES.FLOW_CONFIGS, {
+      id, name: '生成段落流程', trigger: 'generate_paragraph',
+      enabled: true, blocking: true,
+      steps: JSON.stringify([['writer', 'reviewer'], ['summarizer']]),
+      sortOrder: 1, createdAt: Utils.now(), updatedAt: Utils.now(),
+    });
+    const loaded = await DB.getById(DB.STORES.FLOW_CONFIGS, id);
+    const steps = JSON.parse(loaded.steps);
+    assertArrayLength(steps, 2, '应有两个步骤');
+    assertArrayLength(steps[0], 2, '第一步应有两个角色');
+    await DB.delete(DB.STORES.FLOW_CONFIGS, id);
+  });
+
+  it('app_settings CRUD', async () => {
+    await DB.put(DB.STORES.APP_SETTINGS, {
+      key: 'test_key',
+      value: JSON.stringify({ hello: 'world' }),
+    });
+    const loaded = await DB.getById(DB.STORES.APP_SETTINGS, 'test_key');
+    assertDeepEqual(JSON.parse(loaded.value), { hello: 'world' });
+    await DB.delete(DB.STORES.APP_SETTINGS, 'test_key');
+  });
+
+  it('putAll 批量写入', async () => {
+    const items = [
+      { id: Utils.generateId(), parentId: null, type: 'character', name: '批量1', description: '', attributes: '{}', sortOrder: 1, version: 1, createdAt: Utils.now(), updatedAt: Utils.now() },
+      { id: Utils.generateId(), parentId: null, type: 'character', name: '批量2', description: '', attributes: '{}', sortOrder: 2, version: 1, createdAt: Utils.now(), updatedAt: Utils.now() },
+    ];
+    await DB.putAll(DB.STORES.CATEGORIES, items);
+    const all = await DB.getAll(DB.STORES.CATEGORIES);
+    assert(all.length >= 2, '应至少有两条记录');
+    // 清理
+    for (const item of items) {
+      await DB.delete(DB.STORES.CATEGORIES, item.id);
+    }
+  });
+
+  it('clear 清空表', async () => {
+    await DB.put(DB.STORES.APP_SETTINGS, { key: 'clear_test', value: '1' });
+    await DB.clear(DB.STORES.APP_SETTINGS);
+    const all = await DB.getAll(DB.STORES.APP_SETTINGS);
+    assertEqual(all.length, 0, '清空后应无记录');
+  });
+
+  it('count 返回记录数', async () => {
+    await DB.put(DB.STORES.APP_SETTINGS, { key: 'count_1', value: '1' });
+    await DB.put(DB.STORES.APP_SETTINGS, { key: 'count_2', value: '2' });
+    const c = await DB.count(DB.STORES.APP_SETTINGS);
+    assertEqual(c, 2);
+    await DB.clear(DB.STORES.APP_SETTINGS);
+  });
+
+  it('paragraph_bindings CRUD 和索引', async () => {
+    const id = Utils.generateId();
+    const paragraphId = Utils.generateId();
+    const categoryId = Utils.generateId();
+    await DB.put(DB.STORES.PARAGRAPH_BINDINGS, {
+      id, paragraphId, categoryId,
+      categoryVersion: 1, bindingType: 'character',
+      createdAt: Utils.now(),
+    });
+    const byParagraph = await DB.getByIndex(DB.STORES.PARAGRAPH_BINDINGS, 'idx_paragraphId', paragraphId);
+    assertEqual(byParagraph.length, 1);
+    const byCategory = await DB.getByIndex(DB.STORES.PARAGRAPH_BINDINGS, 'idx_categoryId', categoryId);
+    assertEqual(byCategory.length, 1);
+    await DB.delete(DB.STORES.PARAGRAPH_BINDINGS, id);
+  });
+
+  it('recap_data CRUD', async () => {
+    const id = Utils.generateId();
+    await DB.put(DB.STORES.RECAP_DATA, {
+      id, chapterId: null, recapText: '前情提要',
+      coverRange: JSON.stringify([1, 10]),
+      createdAt: Utils.now(), updatedAt: Utils.now(),
+    });
+    const loaded = await DB.getById(DB.STORES.RECAP_DATA, id);
+    assertEqual(loaded.recapText, '前情提要');
+    await DB.delete(DB.STORES.RECAP_DATA, id);
+  });
+});
+
+// ---- Store 测试 ----
+describe('Store', () => {
+  it('init 不报错', async () => {
+    // 清空设置
+    await DB.clear(DB.STORES.APP_SETTINGS);
+    await Store.init();
+    assert(true);
+  });
+
+  it('set/get 状态', () => {
+    Store.set('chapterOutline', '测试概述');
+    assertEqual(Store.get('chapterOutline'), '测试概述');
+  });
+
+  it('set 触发 STORE_CHANGED 事件', () => {
+    let received = null;
+    const handler = (data) => { received = data; };
+    EventBus.on(Events.STORE_CHANGED, handler);
+    Store.set('chatTab', 'followUp');
+    assertNotNull(received);
+    assertEqual(received.key, 'chatTab');
+    assertEqual(received.value, 'followUp');
+    EventBus.off(Events.STORE_CHANGED, handler);
+  });
+
+  it('selectCategory 触发事件', () => {
+    let received = null;
+    const handler = (data) => { received = data; };
+    EventBus.on(Events.CATEGORY_SELECTED, handler);
+    Store.selectCategory('cat-123');
+    assertEqual(received.id, 'cat-123');
+    assertEqual(Store.get('selectedCategoryId'), 'cat-123');
+    EventBus.off(Events.CATEGORY_SELECTED, handler);
+  });
+
+  it('selectParagraph 触发事件', () => {
+    let received = null;
+    const handler = (data) => { received = data; };
+    EventBus.on(Events.PARAGRAPH_SELECTED, handler);
+    Store.selectParagraph('p-456');
+    assertEqual(received.id, 'p-456');
+    EventBus.off(Events.PARAGRAPH_SELECTED, handler);
+  });
+
+  it('addBoundSetting / removeBoundSetting', () => {
+    // 清空
+    while (Store.get('boundSettings').length > 0) {
+      Store.removeBoundSetting(Store.get('boundSettings')[0]);
+    }
+
+    let addReceived = null;
+    const addHandler = (data) => { addReceived = data; };
+    EventBus.on(Events.BINDING_ADDED, addHandler);
+
+    Store.addBoundSetting('cat-1');
+    Store.addBoundSetting('cat-2');
+    Store.addBoundSetting('cat-1'); // 重复添加
+    assertArrayLength(Store.get('boundSettings'), 2, '不应重复添加');
+    assertEqual(addReceived.categoryId, 'cat-2');
+
+    let removeReceived = null;
+    const removeHandler = (data) => { removeReceived = data; };
+    EventBus.on(Events.BINDING_REMOVED, removeHandler);
+
+    Store.removeBoundSetting('cat-1');
+    assertArrayLength(Store.get('boundSettings'), 1);
+    assertEqual(removeReceived.categoryId, 'cat-1');
+
+    EventBus.off(Events.BINDING_ADDED, addHandler);
+    EventBus.off(Events.BINDING_REMOVED, removeHandler);
+
+    // 清空
+    Store.removeBoundSetting('cat-2');
+  });
+
+  it('setAIRunning', () => {
+    Store.setAIRunning(true, true);
+    assertEqual(Store.get('aiRunning'), true);
+    assertEqual(Store.get('aiBlocking'), true);
+    Store.setAIRunning(false);
+    assertEqual(Store.get('aiRunning'), false);
+  });
+
+  it('updateStatusPanel 更新状态', () => {
+    let received = null;
+    const handler = (data) => { received = data; };
+    EventBus.on(Events.STATUS_UPDATED, handler);
+
+    Store.updateStatusPanel({
+      chapterSummary: '概要数据',
+      aiReviewNotes: '评审数据',
+    });
+    assertEqual(Store.get('chapterSummary'), '概要数据');
+    assertEqual(Store.get('aiReviewNotes'), '评审数据');
+    assertNotNull(received);
+
+    EventBus.off(Events.STATUS_UPDATED, handler);
+  });
+
+  it('getSnapshot 返回深拷贝', () => {
+    const snap = Store.getSnapshot();
+    assertNotNull(snap);
+    snap.chatTab = 'modified';
+    assert(Store.get('chatTab') !== 'modified', '修改快照不应影响原状态');
+  });
+});
+
+// ---- Modal 测试 ----
+describe('Modal (ui-modal)', () => {
+  it('show 创建模态框', () => {
+    const overlay = Modal.show({
+      title: '测试标题',
+      body: '测试内容',
+      buttons: [{ text: '关闭', className: 'btn-secondary' }],
+    });
+    assertNotNull(overlay);
+    assert(document.querySelector('.modal-overlay') !== null, '应存在模态遮罩');
+    assert(document.querySelector('.modal-title').textContent === '测试标题', '标题应正确');
+    Modal.close(overlay);
+    assert(document.querySelector('.modal-overlay') === null, '关闭后应不存在');
+  });
+
+  it('show 接受 DOM 元素作为 body', () => {
+    const el = Utils.createElement('div', { textContent: 'DOM body' });
+    const overlay = Modal.show({ title: 'DOM test', body: el });
+    assert(document.querySelector('.modal-body').textContent === 'DOM body');
+    Modal.close(overlay);
+  });
+
+  it('progress 创建进度对话框', () => {
+    const prog = Modal.progress('导出中...');
+    assertNotNull(prog);
+    prog.update(50, '处理中...');
+    const fill = document.querySelector('.progress-bar-fill');
+    assertEqual(fill.style.width, '50%');
+    prog.close();
+  });
+});
+
+// ---- 运行测试 ----
+TestRunner.run();
