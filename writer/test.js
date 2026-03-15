@@ -908,5 +908,202 @@ describe('Category CRUD (业务逻辑)', () => {
   });
 });
 
+/* ================================================================
+   P3 测试用例 — 小说编写界面
+   ================================================================ */
+
+describe('Chapter CRUD', () => {
+  it('创建新章节', async () => {
+    await DB.clear(DB.STORES.CHAPTERS);
+    await DB.clear(DB.STORES.APP_SETTINGS);
+
+    const now = Utils.now();
+    const id = await DB.put(DB.STORES.CHAPTERS, {
+      title: '第一章 初入修仙界',
+      summary: '',
+      content: '',
+      recapText: '',
+      reviewNotes: '',
+      status: ChapterStatus.DRAFT,
+      sortOrder: 1,
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    assert(id > 0, '应返回自增ID');
+    const chapter = await DB.getById(DB.STORES.CHAPTERS, id);
+    assertEqual(chapter.title, '第一章 初入修仙界');
+    assertEqual(chapter.status, 'draft');
+  });
+
+  it('修改章节标题和状态', async () => {
+    const chapters = await DB.getAll(DB.STORES.CHAPTERS);
+    const chapter = chapters[0];
+    chapter.title = '第一章 修仙传奇';
+    chapter.status = ChapterStatus.COMPLETED;
+    chapter.updatedAt = Utils.now();
+    await DB.put(DB.STORES.CHAPTERS, chapter);
+
+    const updated = await DB.getById(DB.STORES.CHAPTERS, chapter.id);
+    assertEqual(updated.title, '第一章 修仙传奇');
+    assertEqual(updated.status, 'completed');
+  });
+});
+
+describe('Paragraph CRUD', () => {
+  it('添加段落到章节', async () => {
+    await DB.clear(DB.STORES.PARAGRAPHS);
+
+    const chapters = await DB.getAll(DB.STORES.CHAPTERS);
+    const chapterId = chapters[0].id;
+
+    const now = Utils.now();
+    const para1 = {
+      id: Utils.generateId(),
+      chapterId,
+      content: '张三站在山门前，抬头望去，巍峨的山峰直插云霄。',
+      sortOrder: 1,
+      recapBrief: '',
+      followUp: '',
+      createdAt: now,
+      updatedAt: now,
+    };
+
+    const para2 = {
+      id: Utils.generateId(),
+      chapterId,
+      content: '一位白发老者从云雾中缓步走出，正是天剑宗掌门。',
+      sortOrder: 2,
+      recapBrief: '',
+      followUp: '',
+      createdAt: now,
+      updatedAt: now,
+    };
+
+    await DB.put(DB.STORES.PARAGRAPHS, para1);
+    await DB.put(DB.STORES.PARAGRAPHS, para2);
+
+    const paras = await DB.getByIndex(DB.STORES.PARAGRAPHS, 'idx_chapterId', chapterId);
+    assertEqual(paras.length, 2);
+    paras.sort((a, b) => a.sortOrder - b.sortOrder);
+    assertEqual(paras[0].content, '张三站在山门前，抬头望去，巍峨的山峰直插云霄。');
+    assertEqual(paras[1].sortOrder, 2);
+  });
+
+  it('修改段落内容 — updatedAt 更新', async () => {
+    const paras = await DB.getAll(DB.STORES.PARAGRAPHS);
+    const para = paras[0];
+    const oldTime = para.updatedAt;
+
+    // 模拟等待 1ms
+    await new Promise(r => setTimeout(r, 2));
+
+    para.content = '张三站在天剑宗山门前，深吸一口气。';
+    para.updatedAt = Utils.now();
+    await DB.put(DB.STORES.PARAGRAPHS, para);
+
+    const updated = await DB.getById(DB.STORES.PARAGRAPHS, para.id);
+    assertEqual(updated.content, '张三站在天剑宗山门前，深吸一口气。');
+    assert(updated.updatedAt > oldTime, 'updatedAt 应更新');
+  });
+
+  it('段落绑定类目信息', async () => {
+    await DB.clear(DB.STORES.PARAGRAPH_BINDINGS);
+
+    const paras = await DB.getAll(DB.STORES.PARAGRAPHS);
+    const para = paras[0];
+
+    // 创建类目
+    const catId = Utils.generateId();
+    await DB.put(DB.STORES.CATEGORIES, {
+      id: catId, parentId: null, type: 'character', name: '张三',
+      description: '', attributes: '{}', sortOrder: 1, version: 2,
+      createdAt: Utils.now(), updatedAt: Utils.now(),
+    });
+
+    // 绑定
+    const bindingId = Utils.generateId();
+    await DB.put(DB.STORES.PARAGRAPH_BINDINGS, {
+      id: bindingId,
+      paragraphId: para.id,
+      categoryId: catId,
+      categoryVersion: 2,
+      bindingType: 'character',
+      createdAt: Utils.now(),
+    });
+
+    // 验证
+    const bindings = await DB.getByIndex(DB.STORES.PARAGRAPH_BINDINGS, 'idx_paragraphId', para.id);
+    assertEqual(bindings.length, 1);
+    assertEqual(bindings[0].categoryVersion, 2);
+    assertEqual(bindings[0].bindingType, 'character');
+
+    // 清理
+    await DB.delete(DB.STORES.PARAGRAPH_BINDINGS, bindingId);
+    await DB.delete(DB.STORES.CATEGORIES, catId);
+  });
+
+  it('删除段落', async () => {
+    const paras = await DB.getAll(DB.STORES.PARAGRAPHS);
+    const paraToDelete = paras[1];
+    await DB.delete(DB.STORES.PARAGRAPHS, paraToDelete.id);
+
+    const remaining = await DB.getAll(DB.STORES.PARAGRAPHS);
+    assertEqual(remaining.length, 1);
+  });
+});
+
+describe('Store — 章节/段落状态管理', () => {
+  it('setCurrentChapter 持久化当前章节', async () => {
+    const chapters = await DB.getAll(DB.STORES.CHAPTERS);
+    const chapterId = chapters[0].id;
+
+    await Store.setCurrentChapter(chapterId);
+    assertEqual(Store.get('currentChapterId'), chapterId);
+
+    // 验证持久化
+    const setting = await DB.getById(DB.STORES.APP_SETTINGS, 'current_chapter_id');
+    assertNotNull(setting);
+    assertEqual(JSON.parse(setting.value), chapterId);
+  });
+
+  it('selectParagraph 触发事件', () => {
+    let received = null;
+    const handler = (data) => { received = data; };
+    EventBus.on(Events.PARAGRAPH_SELECTED, handler);
+    Store.selectParagraph('test-para-id');
+    assertEqual(received.id, 'test-para-id');
+    EventBus.off(Events.PARAGRAPH_SELECTED, handler);
+  });
+
+  it('boundSettings 管理', () => {
+    // 清空
+    const current = Store.get('boundSettings');
+    while (current.length > 0) Store.removeBoundSetting(current[0]);
+
+    Store.addBoundSetting('cat-A');
+    Store.addBoundSetting('cat-B');
+    assertArrayLength(Store.get('boundSettings'), 2);
+
+    Store.removeBoundSetting('cat-A');
+    assertArrayLength(Store.get('boundSettings'), 1);
+    assertEqual(Store.get('boundSettings')[0], 'cat-B');
+
+    Store.removeBoundSetting('cat-B');
+  });
+});
+
+// 清理 P3 测试数据
+describe('P3 cleanup', () => {
+  it('清理测试数据', async () => {
+    await DB.clear(DB.STORES.CHAPTERS);
+    await DB.clear(DB.STORES.PARAGRAPHS);
+    await DB.clear(DB.STORES.PARAGRAPH_BINDINGS);
+    await DB.clear(DB.STORES.CATEGORIES);
+    await DB.clear(DB.STORES.APP_SETTINGS);
+    assert(true);
+  });
+});
+
 // ---- 运行测试 ----
 TestRunner.run();
