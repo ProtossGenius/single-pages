@@ -1105,5 +1105,192 @@ describe('P3 cleanup', () => {
   });
 });
 
+/* ================================================================
+   P4 测试用例 — AI 配置系统
+   ================================================================ */
+
+describe('AI Provider CRUD', () => {
+  it('创建供应商', async () => {
+    await DB.clear(DB.STORES.AI_PROVIDERS);
+    await DB.clear(DB.STORES.AI_MODELS);
+
+    const id = Utils.generateId();
+    const now = Utils.now();
+    await DB.put(DB.STORES.AI_PROVIDERS, {
+      id, name: 'OpenAI', apiUrl: 'https://api.openai.com/v1',
+      apiKey: 'sk-test123', retryCount: 3, sortOrder: 1,
+      createdAt: now, updatedAt: now,
+    });
+
+    const provider = await DB.getById(DB.STORES.AI_PROVIDERS, id);
+    assertEqual(provider.name, 'OpenAI');
+    assertEqual(provider.retryCount, 3);
+  });
+
+  it('更新供应商', async () => {
+    const providers = await DB.getAll(DB.STORES.AI_PROVIDERS);
+    const p = providers[0];
+    p.name = 'OpenAI Updated';
+    p.updatedAt = Utils.now();
+    await DB.put(DB.STORES.AI_PROVIDERS, p);
+
+    const updated = await DB.getById(DB.STORES.AI_PROVIDERS, p.id);
+    assertEqual(updated.name, 'OpenAI Updated');
+  });
+
+  it('供应商添加模型', async () => {
+    const providers = await DB.getAll(DB.STORES.AI_PROVIDERS);
+    const pid = providers[0].id;
+
+    for (const name of ['gpt-4', 'gpt-3.5-turbo']) {
+      await DB.put(DB.STORES.AI_MODELS, {
+        id: Utils.generateId(), providerId: pid, name,
+        sortOrder: name === 'gpt-4' ? 1 : 2, createdAt: Utils.now(),
+      });
+    }
+
+    const models = await DB.getByIndex(DB.STORES.AI_MODELS, 'idx_providerId', pid);
+    assertEqual(models.length, 2);
+    models.sort((a, b) => a.sortOrder - b.sortOrder);
+    assertEqual(models[0].name, 'gpt-4');
+    assertEqual(models[1].name, 'gpt-3.5-turbo');
+  });
+
+  it('删除模型', async () => {
+    const models = await DB.getAll(DB.STORES.AI_MODELS);
+    await DB.delete(DB.STORES.AI_MODELS, models[1].id);
+    const remaining = await DB.getAll(DB.STORES.AI_MODELS);
+    assertEqual(remaining.length, 1);
+    assertEqual(remaining[0].name, 'gpt-4');
+  });
+
+  it('删除供应商级联删除模型', async () => {
+    const providers = await DB.getAll(DB.STORES.AI_PROVIDERS);
+    const pid = providers[0].id;
+
+    // 先删除关联模型
+    const models = await DB.getByIndex(DB.STORES.AI_MODELS, 'idx_providerId', pid);
+    for (const m of models) await DB.delete(DB.STORES.AI_MODELS, m.id);
+    await DB.delete(DB.STORES.AI_PROVIDERS, pid);
+
+    const remainProviders = await DB.getAll(DB.STORES.AI_PROVIDERS);
+    assertEqual(remainProviders.length, 0);
+    const remainModels = await DB.getAll(DB.STORES.AI_MODELS);
+    assertEqual(remainModels.length, 0);
+  });
+});
+
+describe('Role Config CRUD', () => {
+  it('保存职能配置', async () => {
+    await DB.clear(DB.STORES.ROLE_CONFIGS);
+
+    const now = Utils.now();
+    await DB.put(DB.STORES.ROLE_CONFIGS, {
+      role: 'writer',
+      promptTemplate: '你是写手。\n前文：{{前文信息}}\n要求：{{用户输入}}',
+      providerId: 'test-provider-id',
+      modelId: 'test-model-id',
+      outputVar: 'generated_paragraph',
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    const config = await DB.getById(DB.STORES.ROLE_CONFIGS, 'writer');
+    assertNotNull(config);
+    assertEqual(config.role, 'writer');
+    assert(config.promptTemplate.includes('{{前文信息}}'), '模板应包含变量占位');
+    assertEqual(config.outputVar, 'generated_paragraph');
+  });
+
+  it('更新职能配置', async () => {
+    const config = await DB.getById(DB.STORES.ROLE_CONFIGS, 'writer');
+    config.promptTemplate = '改进的模板：{{用户输入}}';
+    config.updatedAt = Utils.now();
+    await DB.put(DB.STORES.ROLE_CONFIGS, config);
+
+    const updated = await DB.getById(DB.STORES.ROLE_CONFIGS, 'writer');
+    assert(updated.promptTemplate.includes('改进的模板'), '更新应生效');
+  });
+
+  it('所有职能枚举可作为 role_configs 主键', async () => {
+    for (const role of RoleList) {
+      const now = Utils.now();
+      await DB.put(DB.STORES.ROLE_CONFIGS, {
+        role: role.value,
+        promptTemplate: `${role.label}的模板`,
+        providerId: '', modelId: '', outputVar: '',
+        createdAt: now, updatedAt: now,
+      });
+    }
+    const all = await DB.getAll(DB.STORES.ROLE_CONFIGS);
+    assertEqual(all.length, RoleList.length);
+  });
+});
+
+describe('Flow Config CRUD', () => {
+  it('创建流程配置', async () => {
+    await DB.clear(DB.STORES.FLOW_CONFIGS);
+
+    const id = Utils.generateId();
+    const now = Utils.now();
+    const steps = [['writer', 'reviewer'], ['summarizer']];
+    await DB.put(DB.STORES.FLOW_CONFIGS, {
+      id, name: '生成段落流程',
+      trigger: 'generate_paragraph', enabled: true, blocking: true,
+      steps: JSON.stringify(steps), sortOrder: 1,
+      createdAt: now, updatedAt: now,
+    });
+
+    const flow = await DB.getById(DB.STORES.FLOW_CONFIGS, id);
+    assertEqual(flow.name, '生成段落流程');
+    assertEqual(flow.trigger, 'generate_paragraph');
+
+    const parsed = JSON.parse(flow.steps);
+    assertEqual(parsed.length, 2);
+    assertEqual(parsed[0].length, 2);
+    assertEqual(parsed[0][0], 'writer');
+    assertEqual(parsed[1][0], 'summarizer');
+  });
+
+  it('更新流程步骤', async () => {
+    const flows = await DB.getAll(DB.STORES.FLOW_CONFIGS);
+    const flow = flows[0];
+
+    const newSteps = [['writer'], ['reviewer'], ['summarizer']];
+    flow.steps = JSON.stringify(newSteps);
+    flow.updatedAt = Utils.now();
+    await DB.put(DB.STORES.FLOW_CONFIGS, flow);
+
+    const updated = await DB.getById(DB.STORES.FLOW_CONFIGS, flow.id);
+    const parsed = JSON.parse(updated.steps);
+    assertEqual(parsed.length, 3);
+  });
+
+  it('触发方式枚举验证', () => {
+    assertNotNull(getTriggerByValue('generate_paragraph'));
+    assertNotNull(getTriggerByValue('generate_chapter'));
+    assertNotNull(getTriggerByValue('setting_changed'));
+    assertEqual(getTriggerByValue('nonexistent'), null);
+  });
+
+  it('输出变量阻塞标记验证', () => {
+    const genPara = getVariableByValue('generated_paragraph');
+    assert(genPara.blocking === true, 'generated_paragraph 应为阻塞');
+    const review = getVariableByValue('ai_review');
+    assert(review.blocking === false, 'ai_review 不应为阻塞');
+  });
+});
+
+// 清理 P4 测试数据
+describe('P4 cleanup', () => {
+  it('清理测试数据', async () => {
+    await DB.clear(DB.STORES.AI_PROVIDERS);
+    await DB.clear(DB.STORES.AI_MODELS);
+    await DB.clear(DB.STORES.ROLE_CONFIGS);
+    await DB.clear(DB.STORES.FLOW_CONFIGS);
+    assert(true);
+  });
+});
+
 // ---- 运行测试 ----
 TestRunner.run();
