@@ -1986,5 +1986,111 @@ describe('P7 final cleanup', () => {
   });
 });
 
+// ========== P9: 书籍管理与数据关联 ==========
+describe('P9 — 书籍 CRUD', () => {
+  it('创建书籍', async () => {
+    await DB.clearAll();
+    const now = Utils.now();
+    const id = Utils.generateId();
+    await DB.put(DB.STORES.BOOKS, {
+      id, name: '修仙传奇', description: '一个少年的修仙之路',
+      sortOrder: 0, createdAt: now, updatedAt: now,
+    });
+    const book = await DB.getById(DB.STORES.BOOKS, id);
+    assertNotNull(book);
+    assertEqual(book.name, '修仙传奇');
+    assertEqual(book.description, '一个少年的修仙之路');
+  });
+
+  it('更新书籍', async () => {
+    const books = await DB.getAll(DB.STORES.BOOKS);
+    const book = books[0];
+    book.name = '修仙传奇2';
+    book.updatedAt = Utils.now();
+    await DB.put(DB.STORES.BOOKS, book);
+    const updated = await DB.getById(DB.STORES.BOOKS, book.id);
+    assertEqual(updated.name, '修仙传奇2');
+  });
+
+  it('删除书籍', async () => {
+    const books = await DB.getAll(DB.STORES.BOOKS);
+    assertEqual(books.length, 1);
+    await DB.delete(DB.STORES.BOOKS, books[0].id);
+    const remaining = await DB.getAll(DB.STORES.BOOKS);
+    assertEqual(remaining.length, 0);
+  });
+
+  it('多本书籍', async () => {
+    const now = Utils.now();
+    for (let i = 0; i < 3; i++) {
+      await DB.put(DB.STORES.BOOKS, {
+        id: `book-${i}`, name: `书籍${i}`, description: '',
+        sortOrder: i, createdAt: now, updatedAt: now,
+      });
+    }
+    const all = await DB.getAll(DB.STORES.BOOKS);
+    assertEqual(all.length, 3);
+  });
+});
+
+describe('P9 — bookId 数据关联', () => {
+  it('章节关联 bookId', async () => {
+    await Store.setCurrentBook('book-0');
+    const chapterId = await Store.createNewChapter();
+    const chapter = await DB.getById(DB.STORES.CHAPTERS, chapterId);
+    assertEqual(chapter.bookId, 'book-0');
+  });
+
+  it('类目关联 bookId', async () => {
+    await Store.setCurrentBook('book-1');
+    const now = Utils.now();
+    const catId = Utils.generateId();
+    await DB.put(DB.STORES.CATEGORIES, {
+      id: catId, parentId: null, bookId: Store.get('currentBookId') || null,
+      type: 'character', name: '角色A', description: '', attributes: '{}',
+      sortOrder: 1, version: 1, createdAt: now, updatedAt: now,
+    });
+    const cat = await DB.getById(DB.STORES.CATEGORIES, catId);
+    assertEqual(cat.bookId, 'book-1');
+  });
+
+  it('按 bookId 过滤类目', async () => {
+    const now = Utils.now();
+    await DB.put(DB.STORES.CATEGORIES, {
+      id: 'cat-b2', parentId: null, bookId: 'book-2',
+      type: 'location', name: '地点X', description: '', attributes: '{}',
+      sortOrder: 1, version: 1, createdAt: now, updatedAt: now,
+    });
+    const all = await DB.getAll(DB.STORES.CATEGORIES);
+    const book1 = all.filter(c => c.bookId === 'book-1');
+    const book2 = all.filter(c => c.bookId === 'book-2');
+    assertEqual(book1.length, 1);
+    assertEqual(book2.length, 1);
+  });
+
+  it('Store.setCurrentBook 持久化', async () => {
+    await Store.setCurrentBook('book-0');
+    assertEqual(Store.get('currentBookId'), 'book-0');
+    const setting = await DB.getById(DB.STORES.APP_SETTINGS, 'current_book_id');
+    assertNotNull(setting);
+    assertEqual(JSON.parse(setting.value), 'book-0');
+  });
+
+  it('BOOK_CHANGED 事件触发', () => {
+    let received = null;
+    const handler = (data) => { received = data; };
+    EventBus.on(Events.BOOK_CHANGED, handler);
+    EventBus.emit(Events.BOOK_CHANGED, { bookId: 'book-1' });
+    assertNotNull(received);
+    assertEqual(received.bookId, 'book-1');
+    EventBus.off(Events.BOOK_CHANGED, handler);
+  });
+
+  it('清理 P9 测试数据', async () => {
+    await DB.clearAll();
+    assert(true);
+  });
+});
+
 // ---- 运行测试 ----
 TestRunner.run();

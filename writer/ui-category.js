@@ -18,6 +18,7 @@ const CategoryUI = (() => {
     // 监听类目变更事件以刷新
     EventBus.on(Events.CATEGORY_TREE_CHANGED, () => refresh());
     EventBus.on(Events.DATA_IMPORTED, () => refresh());
+    EventBus.on(Events.BOOK_CHANGED, () => refresh());
 
     // 全局点击关闭右键菜单
     document.addEventListener('click', () => hideContextMenu());
@@ -26,8 +27,10 @@ const CategoryUI = (() => {
   }
 
   async function refresh() {
+    const bookId = Store.get('currentBookId') || null;
     const allCategories = await DB.getAll(DB.STORES.CATEGORIES);
-    const tree = buildTree(allCategories);
+    const filtered = bookId ? allCategories.filter(c => c.bookId === bookId) : allCategories;
+    const tree = buildTree(filtered);
     renderTree(tree);
   }
 
@@ -206,6 +209,7 @@ const CategoryUI = (() => {
     const category = {
       id: Utils.generateId(),
       parentId: parentId || null,
+      bookId: Store.get('currentBookId') || null,
       type,
       name: name.trim(),
       description: '',

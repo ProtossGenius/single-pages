@@ -190,8 +190,10 @@ const Store = (() => {
 
     /** 创建新章节 */
     async createNewChapter() {
+      const bookId = state.currentBookId || null;
       const allChapters = await DB.getAll(DB.STORES.CHAPTERS);
-      const sortOrder = allChapters.length + 1;
+      const bookChapters = bookId ? allChapters.filter(c => c.bookId === bookId) : allChapters;
+      const sortOrder = bookChapters.length + 1;
       const now = Utils.now();
       const chapter = {
         title: `第${sortOrder}章`,
@@ -200,6 +202,7 @@ const Store = (() => {
         recapText: '',
         reviewNotes: '',
         status: ChapterStatus.DRAFT,
+        bookId,
         sortOrder,
         createdAt: now,
         updatedAt: now,
