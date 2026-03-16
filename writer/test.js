@@ -2403,5 +2403,80 @@ describe('P13 — 自定义变量输出集成', () => {
   });
 });
 
+// ========== P14: 日志管理系统 ==========
+describe('P14 — 日志记录与查询', () => {
+  it('记录日志', async () => {
+    await DB.clearAll();
+    const log = await LogService.record({
+      providerId: 'p1', providerName: 'TestProvider',
+      modelId: 'm1', modelName: 'Model1',
+      prompt: '写一段故事', response: '从前有座山...',
+      duration: 1500, status: 'success',
+    });
+    assert(!!log.id, '应有日志ID');
+    assert(!!log.createdAt, '应有创建时间');
+    assertEqual(log.providerName, 'TestProvider');
+    assertEqual(log.status, 'success');
+  });
+
+  it('记录失败日志', async () => {
+    const log = await LogService.record({
+      providerId: 'p1', providerName: 'TestProvider',
+      modelId: 'm1', modelName: 'Model1',
+      prompt: '写一段故事', response: '',
+      duration: 500, status: 'failed', error: 'Rate limit',
+    });
+    assertEqual(log.status, 'failed');
+    assertEqual(log.error, 'Rate limit');
+  });
+
+  it('查询全部日志 — 时间倒序', async () => {
+    const logs = await LogService.query();
+    assertEqual(logs.length, 2);
+    assert(logs[0].createdAt >= logs[1].createdAt, '应按时间倒序');
+  });
+
+  it('按状态筛选日志', async () => {
+    const successLogs = await LogService.query({ status: 'success' });
+    assertEqual(successLogs.length, 1);
+    assertEqual(successLogs[0].status, 'success');
+
+    const failedLogs = await LogService.query({ status: 'failed' });
+    assertEqual(failedLogs.length, 1);
+    assertEqual(failedLogs[0].status, 'failed');
+  });
+});
+
+describe('P14 — 日志清理', () => {
+  it('按条数限制清理', async () => {
+    await DB.clearAll();
+    // Insert 5 logs
+    for (let i = 0; i < 5; i++) {
+      await LogService.record({ providerId: 'p1', providerName: 'P', modelId: 'm1', modelName: 'M', prompt: `q${i}`, response: `a${i}`, duration: 100, status: 'success' });
+    }
+    // Set max_count to 3
+    await DB.put(DB.STORES.APP_SETTINGS, { key: 'log_max_count', value: 3 });
+    await DB.put(DB.STORES.APP_SETTINGS, { key: 'log_max_days', value: 365 });
+    const deleted = await LogService.cleanup();
+    assertEqual(deleted, 2);
+    const remaining = await LogService.query();
+    assertEqual(remaining.length, 3);
+  });
+
+  it('导出日志为JSON', async () => {
+    const blob = await LogService.exportJSON();
+    assert(blob instanceof Blob, '应返回Blob');
+    assertEqual(blob.type, 'application/json');
+    const text = await blob.text();
+    const data = JSON.parse(text);
+    assertEqual(data.length, 3);
+  });
+
+  it('清理 P14 测试数据', async () => {
+    await DB.clearAll();
+    assert(true);
+  });
+});
+
 // ---- 运行测试 ----
 TestRunner.run();

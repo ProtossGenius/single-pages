@@ -17,7 +17,29 @@ const AIService = {
     if (!model) throw new Error(`模型不存在: ${modelId}`);
 
     const retryCount = provider.retryCount || 3;
-    return this._callWithRetry(provider, model.name, prompt, retryCount, options);
+    const start = Date.now();
+    try {
+      const result = await this._callWithRetry(provider, model.name, prompt, retryCount, options);
+      // Auto-log success
+      LogService.record({
+        providerId, providerName: provider.name,
+        modelId, modelName: model.name,
+        prompt, response: result.text,
+        duration: Date.now() - start,
+        status: 'success',
+      }).catch(() => {}); // fire-and-forget
+      return result;
+    } catch (err) {
+      // Auto-log failure
+      LogService.record({
+        providerId, providerName: provider.name,
+        modelId, modelName: model.name,
+        prompt, response: '',
+        duration: Date.now() - start,
+        status: 'failed', error: err.message,
+      }).catch(() => {}); // fire-and-forget
+      throw err;
+    }
   },
 
   /**
