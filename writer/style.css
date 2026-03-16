@@ -668,6 +668,41 @@ html, body {
   color: var(--text-muted);
 }
 
+.style-tag-input-wrap {
+  display: inline-flex;
+  align-items: center;
+  gap: 0;
+  flex-shrink: 0;
+}
+
+.style-tag-input {
+  width: 80px;
+  min-width: 80px;
+  max-width: 200px;
+  padding: 2px 6px;
+  border: 1px solid var(--border);
+  border-radius: 12px 0 0 12px;
+  font-size: 12px;
+  outline: none;
+  box-sizing: border-box;
+}
+
+.style-tag-input:focus {
+  border-color: var(--accent);
+}
+
+.style-tag-add-btn {
+  padding: 2px 8px;
+  border: 1px solid var(--border);
+  border-left: none;
+  border-radius: 0 12px 12px 0;
+  background: var(--accent-soft);
+  color: var(--accent);
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+}
+
 .binding-item .binding-remove:hover {
   color: var(--danger);
 }

@@ -62,6 +62,15 @@ const ChatUI = (() => {
     // V2: 风格标签
     const addTagBtn = document.getElementById('btn-add-style-tag');
     if (addTagBtn) addTagBtn.addEventListener('click', addStyleTag);
+    const tagInput = document.getElementById('style-tag-input');
+    if (tagInput) {
+      tagInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') addStyleTag(); });
+      tagInput.addEventListener('input', () => {
+        // 自动调整宽度
+        const len = tagInput.value.length;
+        tagInput.style.width = Math.min(200, Math.max(80, len * 12 + 20)) + 'px';
+      });
+    }
     renderStyleTags();
 
     // 监听绑定设定添加
@@ -98,13 +107,15 @@ const ChatUI = (() => {
   }
 
   function addStyleTag() {
-    const name = prompt('输入风格标签:');
-    if (!name || !name.trim()) return;
+    const input = document.getElementById('style-tag-input');
+    const name = input ? input.value.trim() : '';
+    if (!name) return;
     const tags = Store.get('styleTags') || [];
-    if (!tags.includes(name.trim())) {
-      tags.push(name.trim());
+    if (!tags.includes(name)) {
+      tags.push(name);
       Store.setStyleTags(tags);
     }
+    if (input) { input.value = ''; input.style.width = '80px'; }
     renderStyleTags();
   }
 
