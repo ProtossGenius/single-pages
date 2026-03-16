@@ -20,6 +20,9 @@ const FlowEngine = (() => {
 
     _cancelled = false;
 
+    // Initialize custom vars context
+    if (!context._customVars) context._customVars = {};
+
     // 检查是否有阻塞流程
     const hasBlocking = flows.some(f => f.blocking);
     Store.setAIRunning(true, hasBlocking);
@@ -133,6 +136,17 @@ const FlowEngine = (() => {
       if (config.outputVar && result.text) {
         context[config.outputVar] = result.text;
       }
+
+      // 写入自定义输出变量
+      let customVars = [];
+      try { customVars = JSON.parse(config.customVars || '[]'); } catch {}
+      const outputCustomVars = customVars.filter(v => v.isOutput && v.name);
+      if (outputCustomVars.length > 0 && result.text) {
+        if (!context._customVars) context._customVars = {};
+        for (const cv of outputCustomVars) {
+          context._customVars[cv.name] = result.text;
+        }
+      }
     } catch (err) {
       statusRole.duration = Date.now() - roleStart;
       statusRole.status = 'failed';
@@ -144,10 +158,18 @@ const FlowEngine = (() => {
   }
 
   /**
-   * 替换模板中的变量占位符 {{变量名}}
+   * 替换模板中的变量占位符 {{变量名}} 和自定义变量 {{自定义:变量名}}
    */
   function _replaceVariables(template, context) {
     return template.replace(/\{\{([^}]+)\}\}/g, (match, label) => {
+      // Check custom variable format: {{自定义:变量名}}
+      if (label.startsWith('自定义:')) {
+        const varName = label.slice(4);
+        if (context._customVars && context._customVars[varName] !== undefined) {
+          return context._customVars[varName];
+        }
+        return match;
+      }
       // 根据 label 找到对应的 VariableEnum
       const variable = VariableList.find(v => v.label === label);
       if (variable && context[variable.value] !== undefined) {

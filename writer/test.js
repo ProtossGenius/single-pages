@@ -2251,5 +2251,157 @@ describe('P12 — 风格标签与大纲处理', () => {
   });
 });
 
+// ========== P13: 模板导入导出 & 自定义变量 ==========
+describe('P13 — 模板导出', () => {
+  it('导出包含职能和流程', async () => {
+    await DB.clearAll();
+    // Create provider + model
+    await DB.put(DB.STORES.AI_PROVIDERS, { id: 'p1', name: 'TestProvider', endpoint: 'http://test', apiKey: 'k', retryCount: 3 });
+    await DB.put(DB.STORES.AI_MODELS, { id: 'm1', name: 'Model1', providerId: 'p1', intelligenceLevel: 'high', sortOrder: 0 });
+    // Create roles
+    await DB.put(DB.STORES.ROLE_CONFIGS, { id: 'r1', name: '写手', promptTemplate: '写{{用户输入}}', outputVar: 'draft', customVars: '[]', providerId: 'p1', modelId: 'm1', sortOrder: 0, createdAt: '2024-01-01', updatedAt: '2024-01-01' });
+    await DB.put(DB.STORES.ROLE_CONFIGS, { id: 'r2', name: '审稿', promptTemplate: '审{{草稿}}', outputVar: 'review', customVars: '[{"name":"风格","isOutput":true}]', providerId: 'p1', modelId: 'm1', sortOrder: 1, createdAt: '2024-01-01', updatedAt: '2024-01-01' });
+    // Create flow
+    await DB.put(DB.STORES.FLOW_CONFIGS, { id: 'f1', name: '写作流', trigger: 'generate_paragraph', enabled: true, blocking: true, steps: JSON.stringify([['r1'], ['r2']]), sortOrder: 0, createdAt: '2024-01-01', updatedAt: '2024-01-01' });
+
+    const tpl = await TemplateService.exportTemplate();
+    assertEqual(tpl.version, '2.0');
+    assertEqual(tpl.type, 'template');
+    assertEqual(tpl.roles.length, 2);
+    assertEqual(tpl.flows.length, 1);
+    assertEqual(tpl.roles[0].name, '写手');
+    assertEqual(tpl.roles[0].intelligenceLevel, 'high');
+    assertEqual(tpl.roles[1].customVars.length, 1);
+    assertEqual(tpl.roles[1].customVars[0].name, '风格');
+    // Flow steps should use names, not UUIDs
+    assertEqual(tpl.flows[0].steps[0][0], '写手');
+    assertEqual(tpl.flows[0].steps[1][0], '审稿');
+  });
+});
+
+describe('P13 — 模型匹配', () => {
+  it('按智能等级匹配模型', async () => {
+    const roles = [
+      { name: '写手', intelligenceLevel: 'high' },
+      { name: '审稿', intelligenceLevel: 'medium' },
+    ];
+    const matches = await TemplateService.matchModels(roles);
+    assertEqual(matches.length, 2);
+    assertEqual(matches[0].roleName, '写手');
+    assertEqual(matches[0].level, 'high');
+    // We have a 'high' model from previous test
+    assertEqual(matches[0].matchedModelId, 'm1');
+    // No 'medium' model exists
+    assertEqual(matches[1].matchedModelId, null);
+  });
+});
+
+describe('P13 — 模板导入', () => {
+  it('导入创建新职能和流程', async () => {
+    await DB.clearAll();
+    // Setup provider+model for binding
+    await DB.put(DB.STORES.AI_PROVIDERS, { id: 'p1', name: 'TestProvider', endpoint: 'http://test', apiKey: 'k', retryCount: 3 });
+    await DB.put(DB.STORES.AI_MODELS, { id: 'm1', name: 'Model1', providerId: 'p1', intelligenceLevel: 'high', sortOrder: 0 });
+
+    const template = {
+      version: '2.0',
+      type: 'template',
+      roles: [
+        { name: '策划', promptTemplate: '策划{{用户输入}}', outputVar: 'draft', customVars: [{ name: '主题', isOutput: true }], intelligenceLevel: 'high' },
+        { name: '润色', promptTemplate: '润色{{草稿}}', outputVar: 'review', customVars: [], intelligenceLevel: 'high' },
+      ],
+      flows: [
+        { name: '创作流', trigger: 'generate_paragraph', enabled: true, blocking: true, steps: [['策划'], ['润色']] },
+      ],
+    };
+
+    const bindings = [
+      { roleName: '策划', providerId: 'p1', modelId: 'm1' },
+      { roleName: '润色', providerId: 'p1', modelId: 'm1' },
+    ];
+
+    const result = await TemplateService.importTemplate(template, bindings);
+    assertEqual(result.roleCount, 2);
+    assertEqual(result.flowCount, 1);
+
+    // Verify roles were created with new UUIDs
+    const roles = await DB.getAll(DB.STORES.ROLE_CONFIGS);
+    assertEqual(roles.length, 2);
+    assert(roles[0].id !== 'r1' && roles[0].id !== 'r2', '应使用新UUID');
+    const planRole = roles.find(r => r.name === '策划');
+    assert(!!planRole, '应创建策划职能');
+    assertEqual(planRole.providerId, 'p1');
+    assertEqual(planRole.modelId, 'm1');
+    const cvs = JSON.parse(planRole.customVars);
+    assertEqual(cvs.length, 1);
+    assertEqual(cvs[0].name, '主题');
+
+    // Verify flow steps use new role UUIDs
+    const flows = await DB.getAll(DB.STORES.FLOW_CONFIGS);
+    assertEqual(flows.length, 1);
+    const steps = JSON.parse(flows[0].steps);
+    assertEqual(steps[0][0], planRole.id);
+  });
+});
+
+describe('P13 — 自定义变量替换', () => {
+  it('替换自定义变量 {{自定义:变量名}}', () => {
+    const context = {
+      user_input: '主角进入山洞',
+      _customVars: { '风格': '悬疑推理', '主题': '冒险' },
+    };
+    const template = '要求：{{用户输入}}\n风格：{{自定义:风格}}\n主题：{{自定义:主题}}';
+    const result = FlowEngine._replaceVariables(template, context);
+    assert(result.includes('主角进入山洞'), '应替换用户输入');
+    assert(result.includes('悬疑推理'), '应替换自定义风格');
+    assert(result.includes('冒险'), '应替换自定义主题');
+    assert(!result.includes('{{'), '不应有未替换的变量');
+  });
+
+  it('未设置的自定义变量保持原样', () => {
+    const context = { _customVars: {} };
+    const template = '{{自定义:不存在}}';
+    const result = FlowEngine._replaceVariables(template, context);
+    assertEqual(result, '{{自定义:不存在}}');
+  });
+
+  it('无_customVars时自定义变量保持原样', () => {
+    const context = {};
+    const template = '{{自定义:风格}}';
+    const result = FlowEngine._replaceVariables(template, context);
+    assertEqual(result, '{{自定义:风格}}');
+  });
+});
+
+describe('P13 — 自定义变量输出集成', () => {
+  let _origCall;
+  it('flow执行时自定义输出变量写入context', async () => {
+    await DB.clearAll();
+    _origCall = AIService.call;
+    let callCount = 0;
+    AIService.call = async () => {
+      callCount++;
+      return { text: callCount === 1 ? '生成的风格数据' : '最终结果', failCount: 0 };
+    };
+
+    await DB.put(DB.STORES.AI_PROVIDERS, { id: 'p1', name: 'Test', endpoint: 'http://test', apiKey: 'k', retryCount: 3 });
+    await DB.put(DB.STORES.AI_MODELS, { id: 'm1', name: 'M1', providerId: 'p1', intelligenceLevel: 'high', sortOrder: 0 });
+    await DB.put(DB.STORES.ROLE_CONFIGS, { id: 'cv-r1', name: '风格生成', promptTemplate: '生成风格', outputVar: '', customVars: JSON.stringify([{ name: '风格', isOutput: true }]), providerId: 'p1', modelId: 'm1', sortOrder: 0, createdAt: '2024-01-01', updatedAt: '2024-01-01' });
+    await DB.put(DB.STORES.ROLE_CONFIGS, { id: 'cv-r2', name: '应用风格', promptTemplate: '用{{自定义:风格}}写文', outputVar: 'draft', customVars: JSON.stringify([{ name: '风格', isOutput: false }]), providerId: 'p1', modelId: 'm1', sortOrder: 1, createdAt: '2024-01-01', updatedAt: '2024-01-01' });
+    await DB.put(DB.STORES.FLOW_CONFIGS, { id: 'cv-f1', name: '风格流', trigger: 'generate_paragraph', enabled: true, blocking: false, steps: JSON.stringify([['cv-r1'], ['cv-r2']]), sortOrder: 0, createdAt: '2024-01-01', updatedAt: '2024-01-01' });
+
+    const context = { user_input: '测试' };
+    const result = await FlowEngine.execute('generate_paragraph', context);
+    assertEqual(result._customVars['风格'], '生成的风格数据');
+    assertEqual(result.draft, '最终结果');
+  });
+
+  it('清理 P13 测试数据', async () => {
+    AIService.call = _origCall;
+    await DB.clearAll();
+    assert(true);
+  });
+});
+
 // ---- 运行测试 ----
 TestRunner.run();

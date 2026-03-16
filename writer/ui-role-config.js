@@ -198,6 +198,59 @@ const RoleConfigUI = {
     }
     formCol.appendChild(outputSelect);
 
+    // V2: 自定义变量
+    formCol.appendChild(Utils.createElement('label', {
+      textContent: '自定义变量',
+      style: { display: 'block', marginBottom: '4px', fontSize: '13px', fontWeight: '600', color: 'var(--text-secondary)' },
+    }));
+
+    let customVars = [];
+    try { customVars = JSON.parse(config.customVars || '[]'); } catch {}
+
+    const cvContainer = Utils.createElement('div', { style: { marginBottom: '12px' } });
+    const renderCustomVars = () => {
+      cvContainer.innerHTML = '';
+      for (let i = 0; i < customVars.length; i++) {
+        const cv = customVars[i];
+        const row = Utils.createElement('div', { style: { display: 'flex', gap: '6px', alignItems: 'center', marginBottom: '4px' } });
+        const nameIn = Utils.createElement('input', {
+          type: 'text',
+          value: cv.name,
+          placeholder: '变量名',
+          style: { flex: '1', padding: '4px 8px', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', fontSize: '13px' },
+        });
+        nameIn.addEventListener('change', () => { customVars[i].name = nameIn.value.trim(); });
+        row.appendChild(nameIn);
+
+        const label = Utils.createElement('label', { style: { display: 'flex', alignItems: 'center', gap: '4px', fontSize: '12px', whiteSpace: 'nowrap' } });
+        const cb = Utils.createElement('input', { type: 'checkbox' });
+        cb.checked = cv.isOutput;
+        cb.addEventListener('change', () => { customVars[i].isOutput = cb.checked; });
+        label.appendChild(cb);
+        label.appendChild(document.createTextNode('输出'));
+        row.appendChild(label);
+
+        const delBtn = Utils.createElement('button', {
+          className: 'btn-icon',
+          textContent: '✕',
+          style: { color: 'var(--danger)', fontSize: '14px' },
+          onClick: () => { customVars.splice(i, 1); renderCustomVars(); },
+        });
+        row.appendChild(delBtn);
+        cvContainer.appendChild(row);
+      }
+    };
+    renderCustomVars();
+    formCol.appendChild(cvContainer);
+
+    const addCvBtn = Utils.createElement('button', {
+      className: 'btn btn-sm btn-secondary',
+      textContent: '+ 添加自定义变量',
+      style: { marginBottom: '16px' },
+      onClick: () => { customVars.push({ name: '', isOutput: false }); renderCustomVars(); },
+    });
+    formCol.appendChild(addCvBtn);
+
     // V2: 保存 + 删除按钮行
     const btnRow = Utils.createElement('div', { style: { display: 'flex', justifyContent: 'flex-end', gap: '8px' } });
     btnRow.appendChild(Utils.createElement('button', {
@@ -220,6 +273,7 @@ const RoleConfigUI = {
         config.providerId = providerSelect.value;
         config.modelId = modelSelect.value;
         config.outputVar = outputSelect.value;
+        config.customVars = JSON.stringify(customVars);
         config.updatedAt = Utils.now();
         await DB.put(DB.STORES.ROLE_CONFIGS, config);
         // Update sidebar list item text
