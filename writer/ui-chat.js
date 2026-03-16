@@ -55,6 +55,12 @@ const ChatUI = (() => {
     const directAddBtn = document.getElementById('btn-direct-add');
     if (directAddBtn) directAddBtn.addEventListener('click', handleDirectAdd);
 
+    // P18: 更新设定按钮
+    const updateSettingsBtn = document.getElementById('btn-update-settings');
+    if (updateSettingsBtn) updateSettingsBtn.addEventListener('click', () => {
+      if (typeof SettingUpdateUI !== 'undefined') SettingUpdateUI.start();
+    });
+
     // V2: 批量生成按钮
     const batchBtn = document.getElementById('btn-batch-generate');
     if (batchBtn) batchBtn.addEventListener('click', handleBatchGenerate);

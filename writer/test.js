@@ -2847,5 +2847,42 @@ describe('P18 — 模型状态指示器', () => {
   });
 });
 
+describe('P18 — 设定更新与 diff', () => {
+  it('SettingUpdateUI 模块存在', () => {
+    assert(typeof SettingUpdateUI === 'object', 'SettingUpdateUI 应存在');
+    assert(typeof SettingUpdateUI._renderDiff === 'function', '_renderDiff 应是函数');
+    assert(typeof SettingUpdateUI._buildAnalysisPrompt === 'function', '_buildAnalysisPrompt 应是函数');
+  });
+
+  it('_renderDiff 渲染差异标记', () => {
+    const diffEl = SettingUpdateUI._renderDiff('旧文本内容', '新文本内容');
+    assert(diffEl instanceof HTMLElement, '应返回 DOM 元素');
+    // Check that it contains spans with diff styles
+    const spans = diffEl.querySelectorAll('span');
+    assert(spans.length > 0, '应包含差异标记 span');
+  });
+
+  it('_buildAnalysisPrompt 包含类目信息', () => {
+    const cats = [{ name: '张三', type: 'character', description: '主角', attributes: '{"境界":"筑基"}' }];
+    const prompt = SettingUpdateUI._buildAnalysisPrompt(cats, '章节内容', '情节', '后续');
+    assert(prompt.includes('张三'), '应包含类目名称');
+    assert(prompt.includes('筑基'), '应包含属性值');
+    assert(prompt.includes('后续情节'), '应包含后续情节提示');
+    assert(prompt.includes('JSON'), '应要求 JSON 格式返回');
+  });
+
+  it('jsdiff 库可用', () => {
+    assert(typeof Diff !== 'undefined', 'Diff 应存在');
+    assert(typeof Diff.diffWords === 'function', 'Diff.diffWords 应是函数');
+    const parts = Diff.diffWords('hello world', 'hello new world');
+    assert(parts.length > 1, '应能分析差异');
+  });
+
+  it('清理 P18.5 测试数据', async () => {
+    await DB.clearAll();
+    assert(true);
+  });
+});
+
 // ---- 运行测试 ----
 TestRunner.run();
