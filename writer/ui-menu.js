@@ -7,10 +7,13 @@ const MenuUI = {
       {
         label: '📁 文件',
         items: [
-          { label: '📥 导入...', action: () => ImportService.showDialog() },
-          { label: '📤 导出...', action: () => ExportService.exportAll() },
+          { label: '📥 导入工作区...', action: () => ImportService.showDialog() },
+          { label: '📤 导出工作区...', action: () => ExportService.exportAll() },
           { type: 'divider' },
           { label: '📖 导出小说', action: () => ExportService.exportNovel() },
+          { type: 'divider' },
+          { label: '📑 导出模板...', action: () => typeof TemplateUI !== 'undefined' && TemplateUI.showExport() },
+          { label: '📑 导入模板...', action: () => typeof TemplateUI !== 'undefined' && TemplateUI.showImport() },
         ],
       },
       {
@@ -19,6 +22,9 @@ const MenuUI = {
           { label: '🏢 供应商管理', action: () => AIConfigUI.show() },
           { label: '👤 职能配置', action: () => RoleConfigUI.show() },
           { label: '🔄 流程配置', action: () => FlowConfigUI.show() },
+          { type: 'divider' },
+          { label: '📊 日志管理', action: () => typeof LogUI !== 'undefined' && LogUI.show() },
+          { label: '✨ 提示词优化', action: () => typeof PromptOptUI !== 'undefined' && PromptOptUI.show() },
         ],
       },
     ];

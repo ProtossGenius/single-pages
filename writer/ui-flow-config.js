@@ -131,6 +131,10 @@ const FlowConfigUI = {
     } catch { steps = []; }
     if (!Array.isArray(steps)) steps = [];
 
+    // V2: Load all user-created roles for the dropdown
+    const allRoles = await DB.getAll(DB.STORES.ROLE_CONFIGS);
+    allRoles.sort((a, b) => (a.sortOrder || 0) - (b.sortOrder || 0));
+
     const stepsContainer = Utils.createElement('div', { style: { marginBottom: '8px' } });
     formCol.appendChild(stepsContainer);
 
@@ -157,10 +161,10 @@ const FlowConfigUI = {
         // 角色标签区
         const rolesArea = Utils.createElement('div', { className: 'step-roles' });
         if (Array.isArray(step)) {
-          step.forEach((roleValue, roleIdx) => {
-            const roleMeta = getRoleByValue(roleValue);
+          step.forEach((roleId, roleIdx) => {
+            const roleConfig = allRoles.find(r => r.id === roleId);
             const tag = Utils.createElement('span', { className: 'step-role-tag' }, [
-              document.createTextNode(roleMeta ? roleMeta.label : roleValue),
+              document.createTextNode(roleConfig ? roleConfig.name : roleId),
               Utils.createElement('span', {
                 className: 'remove',
                 textContent: '×',
@@ -174,13 +178,13 @@ const FlowConfigUI = {
           });
         }
 
-        // 添加角色下拉
+        // V2: 添加角色下拉（从用户创建的职能列表）
         const addRoleSelect = Utils.createElement('select', {
           style: { fontSize: '12px', padding: '3px 6px', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)' },
         });
         addRoleSelect.appendChild(Utils.createElement('option', { value: '', textContent: '+ 添加角色' }));
-        for (const r of RoleList) {
-          addRoleSelect.appendChild(Utils.createElement('option', { value: r.value, textContent: r.label }));
+        for (const r of allRoles) {
+          addRoleSelect.appendChild(Utils.createElement('option', { value: r.id, textContent: r.name || '未命名' }));
         }
         addRoleSelect.addEventListener('change', () => {
           if (addRoleSelect.value) {

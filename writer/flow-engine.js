@@ -44,11 +44,10 @@ const FlowEngine = (() => {
             index: i,
             status: 'pending',
             duration: 0,
-            roles: (Array.isArray(step) ? step : []).map(roleValue => {
-              const meta = getRoleByValue(roleValue);
+            roles: (Array.isArray(step) ? step : []).map(roleId => {
               return {
-                role: roleValue,
-                displayName: meta ? meta.label : roleValue,
+                roleId: roleId,
+                displayName: roleId,  // will be updated when config is loaded
                 status: 'pending',
                 duration: 0,
                 failCount: 0,
@@ -73,8 +72,8 @@ const FlowEngine = (() => {
           _emitProgress();
 
           // 并行执行同一步骤中的所有职能
-          await Promise.all(step.map((roleValue, ri) =>
-            _executeRole(roleValue, context, si, ri)
+          await Promise.all(step.map((roleId, ri) =>
+            _executeRole(roleId, context, si, ri)
           ));
 
           _status.steps[si].duration = Date.now() - stepStart;
@@ -99,19 +98,22 @@ const FlowEngine = (() => {
   /**
    * 执行单个职能
    */
-  async function _executeRole(roleValue, context, stepIdx, roleIdx) {
+  async function _executeRole(roleId, context, stepIdx, roleIdx) {
     const statusRole = _status.steps[stepIdx].roles[roleIdx];
     statusRole.status = 'running';
     const roleStart = Date.now();
 
-    _status.currentRoleName = statusRole.displayName;
-    _emitProgress();
-
     try {
-      // 获取职能配置
-      const config = await DB.getById(DB.STORES.ROLE_CONFIGS, roleValue);
-      if (!config) throw new Error(`职能配置不存在: ${roleValue}`);
-      if (!config.providerId || !config.modelId) throw new Error(`职能 ${roleValue} 未配置供应商/模型`);
+      // V2: 获取职能配置 by UUID
+      const config = await DB.getById(DB.STORES.ROLE_CONFIGS, roleId);
+      if (!config) throw new Error(`职能配置不存在: ${roleId}`);
+
+      // Update display name from config
+      statusRole.displayName = config.name || roleId;
+      _status.currentRoleName = statusRole.displayName;
+      _emitProgress();
+
+      if (!config.providerId || !config.modelId) throw new Error(`职能 ${config.name || roleId} 未配置供应商/模型`);
 
       // 获取供应商信息以得到 retryCount
       const provider = await DB.getById(DB.STORES.AI_PROVIDERS, config.providerId);

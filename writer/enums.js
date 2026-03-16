@@ -1,16 +1,17 @@
 /* ===== 枚举定义 ===== */
 
-const RoleEnum = Object.freeze({
-  WRITER:       { value: 'writer',       label: '写手',   description: '负责生成小说段落' },
-  REVIEWER:     { value: 'reviewer',     label: '评审员', description: '负责评审段落质量' },
-  SUMMARIZER:   { value: 'summarizer',   label: '概要师', description: '负责生成章节概要' },
-  RECAP_WRITER: { value: 'recap_writer', label: '前情师', description: '负责生成前情提要' },
+/* V2: RoleEnum 已移除。职能不再是固定枚举，由用户自行创建，存储在 role_configs 表中 (UUID 主键)。 */
+
+const IntelligenceLevelEnum = Object.freeze({
+  HIGH:   { value: 'high',   label: '高级' },
+  MEDIUM: { value: 'medium', label: '中级' },
+  BASIC:  { value: 'basic',  label: '基础' },
 });
 
-const RoleList = Object.values(RoleEnum);
+const IntelligenceLevelList = Object.values(IntelligenceLevelEnum);
 
-function getRoleByValue(value) {
-  return RoleList.find(r => r.value === value) || null;
+function getIntelligenceLevelByValue(value) {
+  return IntelligenceLevelList.find(l => l.value === value) || null;
 }
 
 const VariableEnum = Object.freeze({

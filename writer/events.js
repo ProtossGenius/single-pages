@@ -94,6 +94,17 @@ const Events = Object.freeze({
   BINDING_ADDED:         'binding:added',
   BINDING_REMOVED:       'binding:removed',
 
+  // V2: 书籍事件
+  BOOK_CHANGED:          'book:changed',
+  BOOK_CREATED:          'book:created',
+  BOOK_DELETED:          'book:deleted',
+
+  // V2: 侧边栏事件
+  SIDEBAR_TAB_CHANGED:   'sidebar:tabChanged',
+
+  // V2: 日志事件
+  LOG_RECORDED:          'log:recorded',
+
   // 通用
   STORE_CHANGED:         'store:changed',
 });

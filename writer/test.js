@@ -136,22 +136,21 @@ const { describe, it, assert, assertEqual, assertDeepEqual, assertThrows, assert
 
 // ---- Enums 测试 ----
 describe('Enums', () => {
-  it('RoleEnum 包含所有预定义角色', () => {
-    assertEqual(RoleList.length, 4);
-    assertNotNull(getRoleByValue('writer'));
-    assertNotNull(getRoleByValue('reviewer'));
-    assertNotNull(getRoleByValue('summarizer'));
-    assertNotNull(getRoleByValue('recap_writer'));
+  it('V2: IntelligenceLevelEnum 包含所有等级', () => {
+    assertEqual(IntelligenceLevelList.length, 3);
+    assertNotNull(getIntelligenceLevelByValue('high'));
+    assertNotNull(getIntelligenceLevelByValue('medium'));
+    assertNotNull(getIntelligenceLevelByValue('basic'));
   });
 
-  it('getRoleByValue 返回正确的角色', () => {
-    const writer = getRoleByValue('writer');
-    assertEqual(writer.label, '写手');
-    assertEqual(writer.value, 'writer');
+  it('V2: getIntelligenceLevelByValue 返回正确的等级', () => {
+    const high = getIntelligenceLevelByValue('high');
+    assertEqual(high.label, '高级');
+    assertEqual(high.value, 'high');
   });
 
-  it('getRoleByValue 对不存在的值返回 null', () => {
-    assertNull(getRoleByValue('nonexistent'));
+  it('V2: getIntelligenceLevelByValue 对不存在的值返回 null', () => {
+    assertNull(getIntelligenceLevelByValue('nonexistent'));
   });
 
   it('VariableEnum 包含所有变量', () => {
@@ -487,19 +486,24 @@ describe('DB (IndexedDB)', () => {
     await DB.delete(DB.STORES.AI_MODELS, modelId);
   });
 
-  it('role_configs CRUD', async () => {
+  it('role_configs CRUD (V2: UUID key)', async () => {
+    const roleId = Utils.generateId();
     await DB.put(DB.STORES.ROLE_CONFIGS, {
-      role: 'writer',
+      id: roleId,
+      name: '写手',
       promptTemplate: '你是写手 {{用户输入}}',
       providerId: 'p1',
       modelId: 'm1',
       outputVar: 'generated_paragraph',
+      customVars: '[]',
+      sortOrder: 0,
       createdAt: Utils.now(),
       updatedAt: Utils.now(),
     });
-    const loaded = await DB.getById(DB.STORES.ROLE_CONFIGS, 'writer');
+    const loaded = await DB.getById(DB.STORES.ROLE_CONFIGS, roleId);
     assertEqual(loaded.promptTemplate, '你是写手 {{用户输入}}');
-    await DB.delete(DB.STORES.ROLE_CONFIGS, 'writer');
+    assertEqual(loaded.name, '写手');
+    await DB.delete(DB.STORES.ROLE_CONFIGS, roleId);
   });
 
   it('flow_configs CRUD', async () => {
@@ -1183,49 +1187,58 @@ describe('AI Provider CRUD', () => {
 });
 
 describe('Role Config CRUD', () => {
-  it('保存职能配置', async () => {
+  it('V2: 保存用户自建职能配置', async () => {
     await DB.clear(DB.STORES.ROLE_CONFIGS);
 
+    const roleId = Utils.generateId();
     const now = Utils.now();
     await DB.put(DB.STORES.ROLE_CONFIGS, {
-      role: 'writer',
+      id: roleId,
+      name: '写手',
       promptTemplate: '你是写手。\n前文：{{前文信息}}\n要求：{{用户输入}}',
       providerId: 'test-provider-id',
       modelId: 'test-model-id',
       outputVar: 'generated_paragraph',
+      customVars: '[]',
+      sortOrder: 0,
       createdAt: now,
       updatedAt: now,
     });
 
-    const config = await DB.getById(DB.STORES.ROLE_CONFIGS, 'writer');
+    const config = await DB.getById(DB.STORES.ROLE_CONFIGS, roleId);
     assertNotNull(config);
-    assertEqual(config.role, 'writer');
+    assertEqual(config.name, '写手');
     assert(config.promptTemplate.includes('{{前文信息}}'), '模板应包含变量占位');
     assertEqual(config.outputVar, 'generated_paragraph');
   });
 
-  it('更新职能配置', async () => {
-    const config = await DB.getById(DB.STORES.ROLE_CONFIGS, 'writer');
+  it('V2: 更新职能配置', async () => {
+    const all = await DB.getAll(DB.STORES.ROLE_CONFIGS);
+    const config = all[0];
     config.promptTemplate = '改进的模板：{{用户输入}}';
     config.updatedAt = Utils.now();
     await DB.put(DB.STORES.ROLE_CONFIGS, config);
 
-    const updated = await DB.getById(DB.STORES.ROLE_CONFIGS, 'writer');
+    const updated = await DB.getById(DB.STORES.ROLE_CONFIGS, config.id);
     assert(updated.promptTemplate.includes('改进的模板'), '更新应生效');
   });
 
-  it('所有职能枚举可作为 role_configs 主键', async () => {
-    for (const role of RoleList) {
+  it('V2: 多个用户自建职能', async () => {
+    await DB.clear(DB.STORES.ROLE_CONFIGS);
+    const roles = ['写手', '评审员', '概要师', '前情师'];
+    for (let i = 0; i < roles.length; i++) {
       const now = Utils.now();
       await DB.put(DB.STORES.ROLE_CONFIGS, {
-        role: role.value,
-        promptTemplate: `${role.label}的模板`,
+        id: Utils.generateId(),
+        name: roles[i],
+        promptTemplate: `${roles[i]}的模板`,
         providerId: '', modelId: '', outputVar: '',
+        customVars: '[]', sortOrder: i,
         createdAt: now, updatedAt: now,
       });
     }
     const all = await DB.getAll(DB.STORES.ROLE_CONFIGS);
-    assertEqual(all.length, RoleList.length);
+    assertEqual(all.length, 4);
   });
 });
 
@@ -1360,24 +1373,27 @@ describe('FlowEngine — Mock 执行', () => {
       sortOrder: 1, createdAt: Utils.now(),
     });
 
-    // 配置写手
+    // 配置写手 (V2: id key)
     await DB.put(DB.STORES.ROLE_CONFIGS, {
-      role: 'writer', promptTemplate: '写一段:{{用户输入}}',
+      id: 'writer', name: '写手', promptTemplate: '写一段:{{用户输入}}',
       providerId: pid, modelId: 'mock-model', outputVar: 'generated_paragraph',
+      customVars: '[]', sortOrder: 0,
       createdAt: Utils.now(), updatedAt: Utils.now(),
     });
 
-    // 配置评审员
+    // 配置评审员 (V2: id key)
     await DB.put(DB.STORES.ROLE_CONFIGS, {
-      role: 'reviewer', promptTemplate: '评审:{{当前段落}}',
+      id: 'reviewer', name: '评审员', promptTemplate: '评审:{{当前段落}}',
       providerId: pid, modelId: 'mock-model', outputVar: 'ai_review',
+      customVars: '[]', sortOrder: 1,
       createdAt: Utils.now(), updatedAt: Utils.now(),
     });
 
-    // 配置概要师
+    // 配置概要师 (V2: id key)
     await DB.put(DB.STORES.ROLE_CONFIGS, {
-      role: 'summarizer', promptTemplate: '概要:{{章节内容}}',
+      id: 'summarizer', name: '概要师', promptTemplate: '概要:{{章节内容}}',
       providerId: pid, modelId: 'mock-model', outputVar: 'generated_summary',
+      customVars: '[]', sortOrder: 2,
       createdAt: Utils.now(), updatedAt: Utils.now(),
     });
 
@@ -1575,11 +1591,13 @@ describe('Export/Import — 数据往返测试', () => {
     };
     await DB.put(DB.STORES.AI_MODELS, testData.model);
 
-    // 职能配置
+    // 职能配置 (V2: id key)
     testData.roleConfig = {
-      role: 'writer', promptTemplate: '写作:{{用户输入}}',
+      id: 'test-role-writer', name: '写手',
+      promptTemplate: '写作:{{用户输入}}',
       providerId: 'test-prov-1', modelId: 'test-model-1',
       outputVar: 'generated_paragraph',
+      customVars: '[]', sortOrder: 0,
       createdAt: Utils.now(), updatedAt: Utils.now(),
     };
     await DB.put(DB.STORES.ROLE_CONFIGS, testData.roleConfig);
@@ -1678,8 +1696,9 @@ describe('Export/Import — 数据往返测试', () => {
   });
 
   it('验证导入数据完整性 — 职能配置', async () => {
-    const config = await DB.getById(DB.STORES.ROLE_CONFIGS, 'writer');
+    const config = await DB.getById(DB.STORES.ROLE_CONFIGS, 'test-role-writer');
     assertNotNull(config);
+    assertEqual(config.name, '写手');
     assert(config.promptTemplate.includes('{{用户输入}}'), '模板应保留');
     assertEqual(config.outputVar, 'generated_paragraph');
   });
@@ -1758,16 +1777,18 @@ describe('E2E — 创建类目 → 配置 AI → 写段落 → 生成章节', ()
       sortOrder: 1, createdAt: now,
     });
 
-    // 配置职能
-    for (const role of RoleList) {
+    // V2: 配置用户自建职能
+    const roleNames = ['写手', '评审员', '概要师', '前情师'];
+    const roleIds = ['e2e-writer', 'e2e-reviewer', 'e2e-summarizer', 'e2e-recap'];
+    const roleOutputs = ['generated_paragraph', 'ai_review', 'generated_summary', 'generated_recap'];
+    for (let i = 0; i < roleNames.length; i++) {
       await DB.put(DB.STORES.ROLE_CONFIGS, {
-        role: role.value,
-        promptTemplate: `${role.label}:{{用户输入}}`,
+        id: roleIds[i],
+        name: roleNames[i],
+        promptTemplate: `${roleNames[i]}:{{用户输入}}`,
         providerId: 'e2e-prov', modelId: 'e2e-model',
-        outputVar: role.value === 'writer' ? 'generated_paragraph' :
-                   role.value === 'reviewer' ? 'ai_review' :
-                   role.value === 'summarizer' ? 'generated_summary' :
-                   'generated_recap',
+        outputVar: roleOutputs[i],
+        customVars: '[]', sortOrder: i,
         createdAt: now, updatedAt: now,
       });
     }
@@ -1781,13 +1802,13 @@ describe('E2E — 创建类目 → 配置 AI → 写段落 → 生成章节', ()
     await DB.put(DB.STORES.FLOW_CONFIGS, {
       id: Utils.generateId(), name: 'E2E生成段落',
       trigger: 'generate_paragraph', enabled: true, blocking: true,
-      steps: JSON.stringify([['writer', 'reviewer'], ['summarizer']]),
+      steps: JSON.stringify([['e2e-writer', 'e2e-reviewer'], ['e2e-summarizer']]),
       sortOrder: 1, createdAt: now, updatedAt: now,
     });
     await DB.put(DB.STORES.FLOW_CONFIGS, {
       id: Utils.generateId(), name: 'E2E生成章节',
       trigger: 'generate_chapter', enabled: true, blocking: true,
-      steps: JSON.stringify([['summarizer']]),
+      steps: JSON.stringify([['e2e-summarizer']]),
       sortOrder: 2, createdAt: now, updatedAt: now,
     });
 

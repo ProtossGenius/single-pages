@@ -1,25 +1,55 @@
-/* ===== 职能配置对话框 ===== */
+/* ===== 职能配置对话框 (V2: 用户自建职能) ===== */
 const RoleConfigUI = {
   _overlay: null,
-  _selectedRole: null,
+  _selectedRoleId: null,
 
   async show() {
     const body = Utils.createElement('div', { className: 'modal-two-col' });
 
-    // 左侧：固定职能列表
+    // 左侧：动态职能列表
     const listCol = Utils.createElement('div', { className: 'modal-list-col' });
     const listItems = Utils.createElement('div', { className: 'modal-list-items' });
 
-    for (const role of RoleList) {
+    // V2: 从数据库动态加载用户创建的职能
+    const roles = await DB.getAll(DB.STORES.ROLE_CONFIGS);
+    roles.sort((a, b) => (a.sortOrder || 0) - (b.sortOrder || 0));
+
+    for (const role of roles) {
       const item = Utils.createElement('div', {
-        className: 'modal-list-item' + (role.value === (this._selectedRole || RoleList[0].value) ? ' selected' : ''),
-        textContent: role.label,
-        dataset: { role: role.value },
-        onClick: () => this._selectRole(role.value, listItems, formCol),
+        className: 'modal-list-item' + (role.id === this._selectedRoleId ? ' selected' : ''),
+        textContent: role.name || '未命名',
+        dataset: { roleId: role.id },
+        onClick: () => this._selectRole(role.id, listItems, formCol),
       });
       listItems.appendChild(item);
     }
     listCol.appendChild(listItems);
+
+    // V2: 添加新职能按钮
+    const addBtn = Utils.createElement('button', {
+      className: 'btn btn-sm btn-secondary',
+      textContent: '+ 添加',
+      style: { margin: '8px', width: 'calc(100% - 16px)' },
+      onClick: async () => {
+        const newRole = {
+          id: Utils.generateId(),
+          name: '新职能',
+          promptTemplate: '',
+          providerId: '',
+          modelId: '',
+          outputVar: '',
+          customVars: '[]',
+          sortOrder: roles.length,
+          createdAt: Utils.now(),
+          updatedAt: Utils.now(),
+        };
+        await DB.put(DB.STORES.ROLE_CONFIGS, newRole);
+        this._selectedRoleId = newRole.id;
+        Modal.close(this._overlay);
+        await this.show();
+      },
+    });
+    listCol.appendChild(addBtn);
 
     // 右侧表单
     const formCol = Utils.createElement('div', { className: 'modal-form-col' });
@@ -33,46 +63,41 @@ const RoleConfigUI = {
       className: 'modal-wide',
     });
 
-    // 默认选中第一个
-    const initialRole = this._selectedRole || RoleList[0].value;
-    this._selectedRole = initialRole;
-    await this._showForm(initialRole, formCol, listItems);
+    // 默认选中第一个（如有）
+    if (roles.length > 0) {
+      const initialId = this._selectedRoleId || roles[0].id;
+      this._selectedRoleId = initialId;
+      await this._showForm(initialId, formCol, listItems);
+    } else {
+      formCol.innerHTML = '<div style="padding:24px;color:var(--text-muted)">暂无职能配置，请点击左侧「+ 添加」创建</div>';
+    }
   },
 
-  async _selectRole(roleValue, listItems, formCol) {
-    this._selectedRole = roleValue;
+  async _selectRole(roleId, listItems, formCol) {
+    this._selectedRoleId = roleId;
     for (const item of listItems.children) {
-      item.classList.toggle('selected', item.dataset.role === roleValue);
+      item.classList.toggle('selected', item.dataset.roleId === roleId);
     }
-    await this._showForm(roleValue, formCol, listItems);
+    await this._showForm(roleId, formCol, listItems);
   },
 
-  async _showForm(roleValue, formCol, listItems) {
-    const roleMeta = getRoleByValue(roleValue);
-    let config = await DB.getById(DB.STORES.ROLE_CONFIGS, roleValue);
-    if (!config) {
-      config = {
-        role: roleValue,
-        promptTemplate: '',
-        providerId: '',
-        modelId: '',
-        outputVar: '',
-        createdAt: Utils.now(),
-        updatedAt: Utils.now(),
-      };
-    }
+  async _showForm(roleId, formCol, listItems) {
+    let config = await DB.getById(DB.STORES.ROLE_CONFIGS, roleId);
+    if (!config) return;
 
     formCol.innerHTML = '';
 
-    // 职能标题
-    formCol.appendChild(Utils.createElement('div', {
-      textContent: `职能: ${roleMeta.label}`,
-      style: { fontSize: '15px', fontWeight: '600', marginBottom: '4px' },
+    // V2: 可编辑职能名称
+    formCol.appendChild(Utils.createElement('label', {
+      textContent: '职能名称',
+      style: { display: 'block', marginBottom: '4px', fontSize: '13px', fontWeight: '600', color: 'var(--text-secondary)' },
     }));
-    formCol.appendChild(Utils.createElement('div', {
-      textContent: roleMeta.description,
-      style: { fontSize: '12px', color: 'var(--text-muted)', marginBottom: '16px' },
-    }));
+    const nameInput = Utils.createElement('input', {
+      type: 'text',
+      value: config.name || '',
+      style: { width: '100%', padding: '6px 10px', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', marginBottom: '12px', boxSizing: 'border-box', fontSize: '13px' },
+    });
+    formCol.appendChild(nameInput);
 
     // 供应商选择
     const providers = await DB.getAll(DB.STORES.AI_PROVIDERS);
@@ -173,18 +198,36 @@ const RoleConfigUI = {
     }
     formCol.appendChild(outputSelect);
 
-    // 保存按钮
-    const btnRow = Utils.createElement('div', { style: { display: 'flex', justifyContent: 'flex-end' } });
+    // V2: 保存 + 删除按钮行
+    const btnRow = Utils.createElement('div', { style: { display: 'flex', justifyContent: 'flex-end', gap: '8px' } });
+    btnRow.appendChild(Utils.createElement('button', {
+      className: 'btn btn-danger',
+      textContent: '删除职能',
+      onClick: async () => {
+        if (!confirm(`确定删除职能「${config.name || '未命名'}」？`)) return;
+        await DB.delete(DB.STORES.ROLE_CONFIGS, roleId);
+        this._selectedRoleId = null;
+        Modal.close(this._overlay);
+        await this.show();
+      },
+    }));
     btnRow.appendChild(Utils.createElement('button', {
       className: 'btn btn-primary',
       textContent: '保存',
       onClick: async () => {
+        config.name = nameInput.value.trim() || '未命名';
         config.promptTemplate = textarea.value;
         config.providerId = providerSelect.value;
         config.modelId = modelSelect.value;
         config.outputVar = outputSelect.value;
         config.updatedAt = Utils.now();
         await DB.put(DB.STORES.ROLE_CONFIGS, config);
+        // Update sidebar list item text
+        for (const item of listItems.children) {
+          if (item.dataset.roleId === roleId) {
+            item.textContent = config.name;
+          }
+        }
         Utils.showToast('职能配置已保存');
       },
     }));

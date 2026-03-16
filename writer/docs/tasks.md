@@ -32,7 +32,7 @@
 | P5 | AI 执行引擎 | ✅ 完成 |
 | P6 | 文件导入/导出 | ✅ 完成 |
 | P7 | 集成与端到端测试 | ✅ 完成 |
-| **P8** | **V2: 数据库与枚举升级** | ⬜ |
+| **P8** | **V2: 数据库与枚举升级** | ✅ |
 | **P9** | **V2: 书籍管理与角色系统重构** | ⬜ |
 | **P10** | **V2: 左侧边栏重构与动态内容区** | ⬜ |
 | **P11** | **V2: AI 配置增强** | ⬜ |
@@ -317,12 +317,12 @@
 
 ### 任务清单
 
-- [ ] **T8.1** 更新 `enums.js`
+- [x] **T8.1** 更新 `enums.js`
   - 移除固定的 RoleEnum (writer/reviewer/summarizer/recap_writer)
   - 新增 IntelligenceLevelEnum (high/medium/basic)
   - 保留 VariableEnum, TriggerEnum, CategoryTypeEnum, ChapterStatus, AITaskStatus
 
-- [ ] **T8.2** 升级 `db.js` — DB_VERSION 1 → 2
+- [x] **T8.2** 升级 `db.js` — DB_VERSION 1 → 2
   - 新建 ObjectStore: `books` (keyPath: 'id')
   - 新建 ObjectStore: `ai_logs` (keyPath: 'id', 索引: idx_createdAt, idx_status)
   - 重建 `role_configs` (keyPath 从 'role' 改为 'id')
@@ -331,28 +331,28 @@
   - 新增 STORES 常量: BOOKS, AI_LOGS
   - 处理 V1→V2 数据迁移逻辑
 
-- [ ] **T8.3** 更新 `store.js`
+- [x] **T8.3** 更新 `store.js`
   - 新增 state: currentBookId, sidebarTab, outlineText, styleTags
   - 移除 chatTab
   - chapterOutline 语义不变（V2 改名为情节概述仅是 UI 层显示）
 
-- [ ] **T8.4** 更新 `events.js`
+- [x] **T8.4** 更新 `events.js`
   - 新增事件: BOOK_CHANGED, BOOK_CREATED, BOOK_DELETED, SIDEBAR_TAB_CHANGED, LOG_RECORDED
 
-- [ ] **T8.5** 菜单重命名
+- [x] **T8.5** 菜单重命名
   - "导入..." → "导入工作区..."
   - "导出..." → "导出工作区..."
   - 新增菜单项: "导出模板...", "导入模板...", "日志管理", "提示词优化"
 
-- [ ] **T8.6** 编写 P8 测试用例并运行
+- [x] **T8.6** 编写 P8 测试用例并运行
   - 测试新枚举 IntelligenceLevelEnum
   - 测试 DB v2 新表 (books, ai_logs) CRUD
   - 测试 role_configs 新主键 (UUID) CRUD
   - 测试新 Store 状态字段
   - 测试新事件
-  - 运行测试，确认全部通过
+  - 运行测试，确认全部通过 (120/120)
 
-- [ ] **T8.7** Git commit: "feat(writer): P8 V2 数据库与枚举升级"
+- [x] **T8.7** Git commit: "feat(writer): P8 V2 数据库与枚举升级"
 
 ---
 

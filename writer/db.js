@@ -2,7 +2,7 @@
 
 const DB = (() => {
   const DB_NAME = 'WriterDB';
-  const DB_VERSION = 1;
+  const DB_VERSION = 2;
   let db = null;
 
   const STORES = {
@@ -16,6 +16,8 @@ const DB = (() => {
     FLOW_CONFIGS:       'flow_configs',
     RECAP_DATA:         'recap_data',
     APP_SETTINGS:       'app_settings',
+    BOOKS:              'books',
+    AI_LOGS:            'ai_logs',
   };
 
   const ALL_STORE_NAMES = Object.values(STORES);
@@ -26,6 +28,9 @@ const DB = (() => {
 
       request.onupgradeneeded = (event) => {
         const database = event.target.result;
+        const oldVersion = event.oldVersion;
+
+        // === V1 stores (created from scratch or already exist) ===
 
         // categories
         if (!database.objectStoreNames.contains(STORES.CATEGORIES)) {
@@ -33,6 +38,7 @@ const DB = (() => {
           store.createIndex('idx_parentId', 'parentId', { unique: false });
           store.createIndex('idx_type', 'type', { unique: false });
           store.createIndex('idx_updatedAt', 'updatedAt', { unique: false });
+          store.createIndex('idx_bookId', 'bookId', { unique: false });
         }
 
         // chapters
@@ -40,6 +46,7 @@ const DB = (() => {
           const store = database.createObjectStore(STORES.CHAPTERS, { keyPath: 'id', autoIncrement: true });
           store.createIndex('idx_status', 'status', { unique: false });
           store.createIndex('idx_sortOrder', 'sortOrder', { unique: false });
+          store.createIndex('idx_bookId', 'bookId', { unique: false });
         }
 
         // paragraphs
@@ -67,9 +74,13 @@ const DB = (() => {
           store.createIndex('idx_providerId', 'providerId', { unique: false });
         }
 
-        // role_configs
+        // role_configs — V2: keyPath is 'id' (UUID), not 'role'
+        if (oldVersion < 2 && database.objectStoreNames.contains(STORES.ROLE_CONFIGS)) {
+          // V1→V2 migration: delete old store and recreate with new keyPath
+          database.deleteObjectStore(STORES.ROLE_CONFIGS);
+        }
         if (!database.objectStoreNames.contains(STORES.ROLE_CONFIGS)) {
-          database.createObjectStore(STORES.ROLE_CONFIGS, { keyPath: 'role' });
+          database.createObjectStore(STORES.ROLE_CONFIGS, { keyPath: 'id' });
         }
 
         // flow_configs
@@ -86,6 +97,35 @@ const DB = (() => {
         // app_settings
         if (!database.objectStoreNames.contains(STORES.APP_SETTINGS)) {
           database.createObjectStore(STORES.APP_SETTINGS, { keyPath: 'key' });
+        }
+
+        // === V2 new stores ===
+
+        // books
+        if (!database.objectStoreNames.contains(STORES.BOOKS)) {
+          database.createObjectStore(STORES.BOOKS, { keyPath: 'id' });
+        }
+
+        // ai_logs
+        if (!database.objectStoreNames.contains(STORES.AI_LOGS)) {
+          const store = database.createObjectStore(STORES.AI_LOGS, { keyPath: 'id' });
+          store.createIndex('idx_createdAt', 'createdAt', { unique: false });
+          store.createIndex('idx_status', 'status', { unique: false });
+        }
+
+        // === V1→V2 migration: add indexes to existing stores ===
+        if (oldVersion >= 1 && oldVersion < 2) {
+          const tx = event.target.transaction;
+          // Add idx_bookId to categories if missing
+          const catStore = tx.objectStore(STORES.CATEGORIES);
+          if (!catStore.indexNames.contains('idx_bookId')) {
+            catStore.createIndex('idx_bookId', 'bookId', { unique: false });
+          }
+          // Add idx_bookId to chapters if missing
+          const chapStore = tx.objectStore(STORES.CHAPTERS);
+          if (!chapStore.indexNames.contains('idx_bookId')) {
+            chapStore.createIndex('idx_bookId', 'bookId', { unique: false });
+          }
         }
       };
 

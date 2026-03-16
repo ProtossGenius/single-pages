@@ -2,6 +2,12 @@
 
 const Store = (() => {
   const state = {
+    // V2: 书籍相关
+    currentBookId: null,
+
+    // V2: 侧边栏
+    sidebarTab: 'categories',
+
     // 类目相关
     selectedCategoryId: null,
     categoryTree: [],
@@ -11,11 +17,12 @@ const Store = (() => {
     currentParagraphId: null,
     paragraphs: [],
 
-    // 聊天框
-    chatTab: 'outline',
+    // 聊天框 (V2: 移除 chatTab，改为可折叠)
     chapterOutline: '',
     followUpSummary: '',
     boundSettings: [],
+    outlineText: '',
+    styleTags: [],
 
     // AI 运行状态
     aiRunning: false,
@@ -32,9 +39,13 @@ const Store = (() => {
   return {
     /** 初始化状态（从数据库加载最后编辑的章节等） */
     async init() {
-      const setting = await DB.getById(DB.STORES.APP_SETTINGS, 'current_chapter_id');
-      if (setting && setting.value) {
-        state.currentChapterId = JSON.parse(setting.value);
+      const chapterSetting = await DB.getById(DB.STORES.APP_SETTINGS, 'current_chapter_id');
+      if (chapterSetting && chapterSetting.value) {
+        state.currentChapterId = JSON.parse(chapterSetting.value);
+      }
+      const bookSetting = await DB.getById(DB.STORES.APP_SETTINGS, 'current_book_id');
+      if (bookSetting && bookSetting.value) {
+        state.currentBookId = JSON.parse(bookSetting.value);
       }
     },
 
@@ -77,9 +88,35 @@ const Store = (() => {
       EventBus.emit(Events.PARAGRAPH_SELECTED, { id });
     },
 
-    /** 设置聊天框 tab */
+    /** 设置聊天框 tab — V2: 保留为兼容方法(no-op) */
     setChatTab(tab) {
-      state.chatTab = tab;
+      // V2: Tab 结构已移除，改为可折叠区块
+    },
+
+    /** V2: 设置当前书籍 */
+    async setCurrentBook(bookId) {
+      state.currentBookId = bookId;
+      await DB.put(DB.STORES.APP_SETTINGS, {
+        key: 'current_book_id',
+        value: JSON.stringify(bookId),
+      });
+      EventBus.emit(Events.BOOK_CHANGED, { bookId });
+    },
+
+    /** V2: 设置侧边栏 Tab */
+    setSidebarTab(tab) {
+      state.sidebarTab = tab;
+      EventBus.emit(Events.SIDEBAR_TAB_CHANGED, { tab });
+    },
+
+    /** V2: 设置大纲文本 */
+    setOutlineText(text) {
+      state.outlineText = text;
+    },
+
+    /** V2: 设置风格标签 */
+    setStyleTags(tags) {
+      state.styleTags = tags;
     },
 
     /** 设置章节概述 */

@@ -14,7 +14,7 @@ const puppeteer = require('/tmp/node_modules/puppeteer-core');
   });
   page.on('pageerror', err => console.log('PAGE ERROR:', err.message));
 
-  await page.goto('http://localhost:8765/test.html', { waitUntil: 'networkidle0', timeout: 15000 });
+  await page.goto('http://localhost:8765/writer/test.html', { waitUntil: 'networkidle0', timeout: 15000 });
 
   // Wait for tests to complete
   await page.waitForFunction(() => {
