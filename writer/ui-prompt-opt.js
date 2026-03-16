@@ -193,16 +193,49 @@ ${currentPrompt}`;
     }
 
     // Section: 高级 AI 生成
-    container.appendChild(this._sectionDivider('高级 AI 生成'));
+    container.appendChild(this._sectionDivider('内容生成'));
     const genResultBox = Utils.createElement('div', {
       style: 'min-height:60px;padding:8px 12px;border:1px solid var(--border);border-radius:var(--radius-sm);margin-bottom:8px;font-size:13px;white-space:pre-wrap;background:var(--bg-card);color:var(--text-muted);',
     });
-    genResultBox.textContent = this._advancedGenResult || '(点击下方按钮使用高级AI生成内容)';
+    genResultBox.textContent = this._advancedGenResult || '(点击下方按钮生成内容)';
     container.appendChild(genResultBox);
 
+    const genBtnRow = Utils.createElement('div', { style: 'display:flex;gap:8px;margin-bottom:20px;' });
+
+    // 用原始模型生成
+    const genOrigBtn = Utils.createElement('button', {
+      className: 'btn btn-secondary', textContent: '用原始模型生成',
+    });
+    genOrigBtn.addEventListener('click', async () => {
+      if (!this._selectedLog) {
+        Utils.showToast('请先展开一条日志', 'warning');
+        return;
+      }
+      if (!role.providerId || !role.modelId) {
+        Utils.showToast('该职能未配置模型', 'warning');
+        return;
+      }
+      genOrigBtn.disabled = true;
+      genOrigBtn.textContent = '生成中...';
+      try {
+        const latestPrompt = this._buildLatestPrompt(role, this._selectedLog);
+        const res = await AIService.call(role.providerId, role.modelId, latestPrompt, { timeout: 60000 });
+        this._advancedGenResult = res.text || '';
+        genResultBox.textContent = this._advancedGenResult || '(空回复)';
+        genResultBox.style.color = 'var(--text-primary)';
+      } catch (err) {
+        genResultBox.textContent = '生成失败: ' + err.message;
+        genResultBox.style.color = 'var(--danger)';
+      } finally {
+        genOrigBtn.disabled = false;
+        genOrigBtn.textContent = '用原始模型生成';
+      }
+    });
+    genBtnRow.appendChild(genOrigBtn);
+
+    // 用高级AI生成
     const genBtn = Utils.createElement('button', {
-      className: 'btn btn-secondary', textContent: '用高级AI生成内容',
-      style: 'margin-bottom:20px;',
+      className: 'btn btn-secondary', textContent: '用高级AI生成',
     });
     genBtn.addEventListener('click', async () => {
       if (!this._selectedLog) {
@@ -218,7 +251,8 @@ ${currentPrompt}`;
       genBtn.disabled = true;
       genBtn.textContent = '生成中...';
       try {
-        const res = await AIService.call(pId, mId, this._selectedLog.prompt, { timeout: 60000 });
+        const latestPrompt = this._buildLatestPrompt(role, this._selectedLog);
+        const res = await AIService.call(pId, mId, latestPrompt, { timeout: 60000 });
         this._advancedGenResult = res.text || '';
         genResultBox.textContent = this._advancedGenResult || '(空回复)';
         genResultBox.style.color = 'var(--text-primary)';
@@ -227,10 +261,11 @@ ${currentPrompt}`;
         genResultBox.style.color = 'var(--danger)';
       } finally {
         genBtn.disabled = false;
-        genBtn.textContent = '用高级AI生成内容';
+        genBtn.textContent = '用高级AI生成';
       }
     });
-    container.appendChild(genBtn);
+    genBtnRow.appendChild(genBtn);
+    container.appendChild(genBtnRow);
 
     // Section: 优化职能提示词
     container.appendChild(this._sectionDivider('优化职能提示词'));
@@ -331,12 +366,19 @@ ${currentPrompt}`;
           const match = text.match(/\{[\s\S]*\}/);
           parsed = match ? JSON.parse(match[0]) : JSON.parse(text);
         } catch {
-          // 非 JSON 格式，直接显示
+          // 非 JSON 格式，直接显示为可编辑
           resultBox.innerHTML = '';
           resultBox.style.color = 'var(--text-primary)';
-          resultBox.textContent = text;
+          const promptEditArea = Utils.createElement('textarea', {
+            className: 'form-textarea',
+            style: 'font-size:12px;font-family:var(--font-mono);min-height:120px;',
+          });
+          promptEditArea.value = text;
           newPromptText = text;
+          promptEditArea.addEventListener('input', () => { newPromptText = promptEditArea.value; });
+          resultBox.appendChild(promptEditArea);
           applyBtn.style.display = '';
+          userOpinion.value = '';
           return;
         }
 
@@ -347,13 +389,16 @@ ${currentPrompt}`;
         resultBox.style.color = 'var(--text-primary)';
 
         resultBox.appendChild(Utils.createElement('div', {
-          textContent: '新提示词:',
+          textContent: '新提示词 (可编辑):',
           style: 'font-weight:600;margin-bottom:4px;font-size:13px;',
         }));
-        resultBox.appendChild(Utils.createElement('pre', {
-          textContent: newPromptText,
-          style: 'white-space:pre-wrap;font-size:12px;background:var(--bg-secondary);padding:8px;border-radius:var(--radius-sm);margin-bottom:8px;max-height:200px;overflow-y:auto;',
-        }));
+        const promptEditArea = Utils.createElement('textarea', {
+          className: 'form-textarea',
+          style: 'font-size:12px;font-family:var(--font-mono);min-height:120px;margin-bottom:8px;',
+        });
+        promptEditArea.value = newPromptText;
+        promptEditArea.addEventListener('input', () => { newPromptText = promptEditArea.value; });
+        resultBox.appendChild(promptEditArea);
         resultBox.appendChild(Utils.createElement('div', {
           textContent: `模型差距评分: ${score}/10`,
           style: 'font-size:13px;color:var(--text-secondary);',
@@ -371,6 +416,7 @@ ${currentPrompt}`;
         }
 
         applyBtn.style.display = '';
+        userOpinion.value = '';
       } catch (err) {
         resultBox.textContent = '优化失败: ' + err.message;
         resultBox.style.color = 'var(--danger)';
@@ -424,22 +470,23 @@ ${currentPrompt}`;
     detail.appendChild(this._detailBlock('变量展开后的提示词:', log.prompt || ''));
 
     // 变量值
-    if (role.promptTemplate) {
-      const vars = this._extractVarValues(role.promptTemplate, log.prompt);
-      if (vars.length > 0) {
-        detail.appendChild(Utils.createElement('div', {
-          textContent: '变量值:',
-          style: 'font-weight:600;margin-bottom:4px;margin-top:8px;',
+    const logVars = (log.variables && Array.isArray(log.variables) && log.variables.length > 0)
+      ? log.variables
+      : (role.promptTemplate ? this._extractVarValues(role.promptTemplate, log.prompt) : []);
+    if (logVars.length > 0) {
+      detail.appendChild(Utils.createElement('div', {
+        textContent: '变量值:',
+        style: 'font-weight:600;margin-bottom:4px;margin-top:8px;',
+      }));
+      const varTable = Utils.createElement('div', { style: 'background:var(--bg-secondary);padding:6px;border-radius:var(--radius-sm);margin-bottom:8px;' });
+      for (const { name, value } of logVars) {
+        const display = typeof value === 'string' ? value : JSON.stringify(value);
+        varTable.appendChild(Utils.createElement('div', {
+          textContent: `${name} = "${display.slice(0, 100)}${display.length > 100 ? '...' : ''}"`,
+          style: 'margin-bottom:2px;',
         }));
-        const varTable = Utils.createElement('div', { style: 'background:var(--bg-secondary);padding:6px;border-radius:var(--radius-sm);margin-bottom:8px;' });
-        for (const { name, value } of vars) {
-          varTable.appendChild(Utils.createElement('div', {
-            textContent: `${name} = "${value.slice(0, 100)}${value.length > 100 ? '...' : ''}"`,
-            style: 'margin-bottom:2px;',
-          }));
-        }
-        detail.appendChild(varTable);
       }
+      detail.appendChild(varTable);
     }
 
     // 原始输出
@@ -506,6 +553,27 @@ ${currentPrompt}`;
       vars.push({ name: varNames[i], value });
     }
     return vars;
+  },
+
+  /** 使用最新提示词模板 + 日志中的变量值构建提示词 */
+  _buildLatestPrompt(role, log) {
+    if (!log || !role.promptTemplate) return log ? log.prompt : '';
+    // 尝试从日志的 variables 字段获取变量值
+    if (log.variables && Array.isArray(log.variables) && log.variables.length > 0) {
+      let prompt = role.promptTemplate;
+      for (const v of log.variables) {
+        prompt = prompt.replace(new RegExp(`\\{\\{${v.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\}\\}`, 'g'), v.value);
+      }
+      return prompt;
+    }
+    // 回退: 从旧日志提取变量值
+    const vars = this._extractVarValues(role.promptTemplate, log.prompt);
+    if (vars.length === 0) return log.prompt;
+    let prompt = role.promptTemplate;
+    for (const v of vars) {
+      prompt = prompt.replace(new RegExp(`\\{\\{${v.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\}\\}`, 'g'), v.value);
+    }
+    return prompt;
   },
 
   /** 填充优化提示词模板 */

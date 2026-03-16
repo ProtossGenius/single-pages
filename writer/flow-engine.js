@@ -74,6 +74,10 @@ const FlowEngine = (() => {
           const stepStart = Date.now();
           _emitProgress();
 
+          const roleNames = _status.steps[si].roles.map(r => r.displayName).join(', ');
+          const nextStep = si + 1 < steps.length ? `步骤 ${si + 2}` : '(无)';
+          console.log(`[FlowEngine] 流程「${flow.name}」 当前: 步骤 ${si + 1}/${steps.length} [${roleNames}]  下一步: ${nextStep}`);
+
           // 并行执行同一步骤中的所有职能
           await Promise.all(step.map((roleId, ri) =>
             _executeRole(roleId, context, si, ri)
@@ -123,12 +127,14 @@ const FlowEngine = (() => {
       statusRole.maxRetry = provider ? (provider.retryCount || 3) : 3;
 
       // 替换变量占位符
+      const variables = _extractVariables(config.promptTemplate || '', context);
       const prompt = _replaceVariables(config.promptTemplate || '', context);
 
       // 调用 AI
       const result = await AIService.call(config.providerId, config.modelId, prompt, {
         roleId: roleId,
         roleName: config.name || roleId,
+        variables: variables,
       });
 
       statusRole.failCount = result.failCount || 0;
@@ -138,6 +144,7 @@ const FlowEngine = (() => {
       // 写入输出变量
       if (config.outputVar && result.text) {
         context[config.outputVar] = result.text;
+        console.log(`[FlowEngine] 职能「${config.name}」完成, 输出变量: ${config.outputVar} (${result.text.length}字)`);
       }
 
       // 写入自定义输出变量
@@ -158,6 +165,28 @@ const FlowEngine = (() => {
     }
 
     _emitProgress();
+  }
+
+  /**
+   * 提取模板中的变量名及其在上下文中的值
+   */
+  function _extractVariables(template, context) {
+    const vars = [];
+    const regex = /\{\{([^}]+)\}\}/g;
+    let match;
+    while ((match = regex.exec(template)) !== null) {
+      const label = match[1];
+      let value = '';
+      if (label.startsWith('自定义:')) {
+        const varName = label.slice(4);
+        value = (context._customVars && context._customVars[varName]) || '';
+      } else {
+        const variable = VariableList.find(v => v.label === label);
+        if (variable) value = context[variable.value] || '';
+      }
+      vars.push({ name: label, value: value });
+    }
+    return vars;
   }
 
   /**

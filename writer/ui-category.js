@@ -20,6 +20,9 @@ const CategoryUI = (() => {
     EventBus.on(Events.DATA_IMPORTED, () => refresh());
     EventBus.on(Events.BOOK_CHANGED, () => refresh());
 
+    // 侧边栏添加类目按钮
+    EventBus.on('sidebar:add-root-category', () => addCategory(null));
+
     // 全局点击关闭右键菜单
     document.addEventListener('click', () => hideContextMenu());
 

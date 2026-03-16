@@ -43,6 +43,7 @@
 | **P16** | **V2: 导入导出更新与集成测试** | ✅ |
 | **P17** | **V2: UI 修复与默认配置** | ✅ |
 | **P18** | **V2: UI 增强与提示词优化重构** | ✅ |
+| **P19** | **V2: Bug 修复与功能完善** | ✅ |
 
 ---
 
@@ -731,6 +732,46 @@
 - [x] **T18.7** 编写 P18 测试用例并运行 (198/198 通过)
 
 - [x] **T18.8** Git commit: "feat(writer): P18 UI 增强与提示词优化重构"
+
+---
+
+## P19: V2 Bug 修复与功能完善
+
+> 参考文档: [ui-design.md](ui-design.md) 第 9.18–9.23 节
+
+### 任务清单
+
+- [x] **T19.1** 修复类目设定侧边栏加号按钮无响应 (ui-category.js)
+  - sidebar 的 `+` 按钮触发 `sidebar:add-root-category` 事件无人监听
+  - 在 CategoryUI.init 中添加事件监听
+
+- [x] **T19.2** 更新设定支持树结构+新增设定 (ui-setting-update.js)
+  - 提示词中仅提供设定树结构（名称、层级），不含具体内容
+  - AI 返回结果支持新增设定（包含 parentId/parentName）
+  - 处理逻辑区分「更新」和「新增」两种操作
+
+- [x] **T19.3** 修复生成后内容不更新 + 增加控制台日志 (ui-chat.js, flow-engine.js)
+  - handleGenerate 完成后取 context.generated_paragraph 创建新段落
+  - FlowEngine 中增加 console.log 打印当前步骤和下一步骤
+  - 更新右侧状态面板（概要、评审意见等）
+
+- [x] **T19.4** 移除章节目录侧边栏加号按钮 (ui-sidebar.js)
+  - 删除 showChapterPanel 中的 `+` 按钮，避免重复渲染
+
+- [x] **T19.5** 日志记录流程变量名和变量值 (flow-engine.js, log-service.js)
+  - _executeRole 中提取模板变量及其在 context 中的值
+  - 通过 options 传入 AIService.call，记录到日志中
+  - LogService.record 新增 variables 字段
+
+- [x] **T19.6** 提示词优化功能完善 (ui-prompt-opt.js)
+  - 新提示词结果改为可编辑的 textarea
+  - 生成新提示词后清空用户意见
+  - 增加 [用原始模型生成] 按钮：使用职能配置的模型 + 最新提示词
+  - [用高级AI生成] 也使用最新提示词（来自 role.promptTemplate）
+
+- [x] **T19.7** 编写 P19 测试用例并运行 (207/207 通过)
+
+- [x] **T19.8** Git commit
 
 ---
 

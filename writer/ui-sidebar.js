@@ -92,13 +92,6 @@ const SidebarUI = (() => {
     panelContainer.innerHTML = '';
     const header = Utils.createElement('div', { className: 'panel-header' }, [
       Utils.createElement('span', { className: 'panel-title', textContent: '章节目录' }),
-      Utils.createElement('button', {
-        className: 'btn-icon', title: '添加章节', textContent: '+',
-        onClick: async () => {
-          await Store.createNewChapter();
-          showChapterPanel();
-        },
-      }),
     ]);
     panelContainer.appendChild(header);
 

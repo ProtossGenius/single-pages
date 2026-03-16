@@ -305,7 +305,19 @@ const ChatUI = (() => {
   async function handleGenerate() {
     try {
       const context = await collectContext();
-      await FlowEngine.execute('generate_paragraph', context);
+      const result = await FlowEngine.execute('generate_paragraph', context);
+
+      // 将生成的段落添加到编辑器
+      if (result.generated_paragraph) {
+        await EditorUI.addParagraph(result.generated_paragraph);
+      }
+
+      // 更新右侧状态面板
+      const updates = {};
+      if (result.generated_summary) updates.chapterSummary = result.generated_summary;
+      if (result.ai_review) updates.aiReviewNotes = result.ai_review;
+      if (result.generated_recap) updates.recapText = result.generated_recap;
+      if (Object.keys(updates).length > 0) Store.updateStatusPanel(updates);
     } catch (err) {
       Utils.showToast('生成失败: ' + err.message, 'error');
     }
@@ -314,7 +326,14 @@ const ChatUI = (() => {
   async function handleGenerateChapter() {
     try {
       const context = await collectContext();
-      await FlowEngine.execute('generate_chapter', context);
+      const result = await FlowEngine.execute('generate_chapter', context);
+
+      // 更新右侧状态面板
+      const updates = {};
+      if (result.generated_summary) updates.chapterSummary = result.generated_summary;
+      if (result.ai_review) updates.aiReviewNotes = result.ai_review;
+      if (result.generated_recap) updates.recapText = result.generated_recap;
+      if (Object.keys(updates).length > 0) Store.updateStatusPanel(updates);
     } catch (err) {
       Utils.showToast('生成失败: ' + err.message, 'error');
     }
