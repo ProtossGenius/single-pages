@@ -193,13 +193,18 @@ const AIConfigUI = {
       const row = Utils.createElement('div', {
         style: { display: 'flex', alignItems: 'center', padding: '6px 10px', borderBottom: '1px solid var(--border-light)', gap: '6px' },
       });
+
+      // 状态图标
+      const statusIcon = this._createStatusIcon(m);
+      row.appendChild(statusIcon);
+
       row.appendChild(Utils.createElement('span', { textContent: m.name, style: { fontSize: '13px', flex: '1' } }));
       row.appendChild(Utils.createElement('span', { textContent: levelText, style: { fontSize: '11px', color: 'var(--text-muted)' } }));
       row.appendChild(Utils.createElement('button', {
         className: 'btn-icon',
         textContent: '测试',
         style: { fontSize: '12px', cursor: 'pointer', background: 'none', border: 'none', color: 'var(--accent)' },
-        onClick: () => this._toggleModelTest(providerId, m.id, wrapper),
+        onClick: () => this._toggleModelTest(providerId, m.id, wrapper, container),
       }));
       row.appendChild(Utils.createElement('button', {
         className: 'btn-icon',
@@ -222,7 +227,35 @@ const AIConfigUI = {
     }
   },
 
-  _toggleModelTest(providerId, modelId, wrapper) {
+  _createStatusIcon(model) {
+    let icon, color, title;
+    const status = model.lastTestStatus;
+    if (status === 'success') {
+      icon = '✅';
+      color = 'var(--success)';
+      title = `上次测试成功 (${Utils.formatTime(model.lastTestTime)})`;
+    } else if (status === 'failed') {
+      icon = '❗';
+      color = 'var(--danger)';
+      title = `上次测试失败: ${model.lastTestError || '未知错误'}`;
+    } else {
+      icon = '❓';
+      color = 'var(--warning)';
+      title = '此模型尚未测试';
+    }
+    const el = Utils.createElement('span', {
+      textContent: icon,
+      title,
+      style: { fontSize: '14px', cursor: 'pointer', flexShrink: '0' },
+    });
+    el.addEventListener('click', (e) => {
+      e.stopPropagation();
+      Utils.showToast(title, status === 'success' ? 'success' : status === 'failed' ? 'error' : 'warning');
+    });
+    return el;
+  },
+
+  _toggleModelTest(providerId, modelId, wrapper, container) {
     const existing = wrapper.querySelector('.model-test-area');
     if (existing) { existing.remove(); return; }
 
@@ -234,6 +267,7 @@ const AIConfigUI = {
     const inputRow = Utils.createElement('div', { style: 'display:flex;gap:6px;margin-bottom:6px;' });
     const questionInput = Utils.createElement('input', {
       type: 'text', placeholder: '输入测试问题...',
+      value: '天空为什么是蓝色的',
       style: 'flex:1;padding:4px 8px;border:1px solid var(--border);border-radius:var(--radius-sm);font-size:12px;',
     });
     const sendBtn = Utils.createElement('button', {
@@ -262,27 +296,40 @@ const AIConfigUI = {
           resultDiv.textContent = res.text;
           resultDiv.style.color = 'var(--success)';
           resultDiv.style.border = 'none';
+          // 更新模型测试状态
+          await this._updateModelTestStatus(modelId, 'success', null);
         } else {
-          // Empty answer — show full response in red box
           resultDiv.textContent = JSON.stringify(res, null, 2);
           resultDiv.style.color = 'var(--danger)';
           resultDiv.style.border = '1px solid var(--danger)';
           resultDiv.style.padding = '6px';
           resultDiv.style.borderRadius = 'var(--radius-sm)';
           resultDiv.style.background = 'var(--bg-card)';
+          await this._updateModelTestStatus(modelId, 'failed', '回答为空');
         }
       } catch (err) {
-        // Error — show full error in red box
         resultDiv.textContent = err.message;
         resultDiv.style.color = 'var(--danger)';
         resultDiv.style.border = '1px solid var(--danger)';
         resultDiv.style.padding = '6px';
         resultDiv.style.borderRadius = 'var(--radius-sm)';
         resultDiv.style.background = 'var(--bg-card)';
+        await this._updateModelTestStatus(modelId, 'failed', err.message);
       }
+      // 刷新模型列表以更新状态图标
+      if (container) await this._renderModels(providerId, container);
     });
 
     wrapper.appendChild(area);
+  },
+
+  async _updateModelTestStatus(modelId, status, error) {
+    const model = await DB.getById(DB.STORES.AI_MODELS, modelId);
+    if (!model) return;
+    model.lastTestStatus = status;
+    model.lastTestTime = Utils.now();
+    model.lastTestError = error || '';
+    await DB.put(DB.STORES.AI_MODELS, model);
   },
 
   async _addProvider(listItems, formCol) {

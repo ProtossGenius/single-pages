@@ -2795,5 +2795,57 @@ describe('P17 — 默认流程配置', () => {
   });
 });
 
+// ========== P18: UI 增强与提示词优化重构 ==========
+describe('P18 — 模型状态指示器', () => {
+  it('新模型默认无测试状态', async () => {
+    await DB.clearAll();
+    const id = Utils.generateId();
+    await DB.put(DB.STORES.AI_MODELS, {
+      id, providerId: 'p1', name: 'test-model',
+      intelligenceLevel: 'medium', sortOrder: 1, createdAt: Utils.now(),
+    });
+    const model = await DB.getById(DB.STORES.AI_MODELS, id);
+    assert(!model.lastTestStatus, '新模型无 lastTestStatus');
+    assert(!model.lastTestTime, '新模型无 lastTestTime');
+  });
+
+  it('更新测试状态为 success', async () => {
+    const models = await DB.getAll(DB.STORES.AI_MODELS);
+    const m = models[0];
+    m.lastTestStatus = 'success';
+    m.lastTestTime = Utils.now();
+    m.lastTestError = '';
+    await DB.put(DB.STORES.AI_MODELS, m);
+    const updated = await DB.getById(DB.STORES.AI_MODELS, m.id);
+    assertEqual(updated.lastTestStatus, 'success');
+    assert(updated.lastTestTime > 0, '应有测试时间');
+  });
+
+  it('更新测试状态为 failed', async () => {
+    const models = await DB.getAll(DB.STORES.AI_MODELS);
+    const m = models[0];
+    m.lastTestStatus = 'failed';
+    m.lastTestError = 'HTTP 401: Unauthorized';
+    await DB.put(DB.STORES.AI_MODELS, m);
+    const updated = await DB.getById(DB.STORES.AI_MODELS, m.id);
+    assertEqual(updated.lastTestStatus, 'failed');
+    assertEqual(updated.lastTestError, 'HTTP 401: Unauthorized');
+  });
+
+  it('_createStatusIcon 返回正确图标', () => {
+    const successIcon = AIConfigUI._createStatusIcon({ lastTestStatus: 'success', lastTestTime: Date.now() });
+    assertEqual(successIcon.textContent, '✅');
+    const failedIcon = AIConfigUI._createStatusIcon({ lastTestStatus: 'failed', lastTestError: 'err' });
+    assertEqual(failedIcon.textContent, '❗');
+    const unknownIcon = AIConfigUI._createStatusIcon({});
+    assertEqual(unknownIcon.textContent, '❓');
+  });
+
+  it('清理 P18.1 测试数据', async () => {
+    await DB.clearAll();
+    assert(true);
+  });
+});
+
 // ---- 运行测试 ----
 TestRunner.run();
