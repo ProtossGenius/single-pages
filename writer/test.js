@@ -1621,11 +1621,11 @@ describe('Export/Import — 数据往返测试', () => {
     const tables = [
       'categories', 'chapters', 'paragraphs', 'paragraph_bindings',
       'ai_providers', 'ai_models', 'role_configs', 'flow_configs',
-      'recap_data', 'app_settings',
+      'recap_data', 'app_settings', 'books', 'ai_logs',
     ];
 
     const data = {};
-    const manifest = { version: '1.0', exportedAt: Utils.now(), appVersion: '1.0.0', tables: {} };
+    const manifest = { version: '2.0', exportedAt: Utils.now(), appVersion: '2.0.0', tables: {} };
 
     for (const table of tables) {
       const records = await DB.getAll(table);
@@ -1659,12 +1659,12 @@ describe('Export/Import — 数据往返测试', () => {
     const manifestFile = zip.file('manifest.json');
     assertNotNull(manifestFile);
     const manifest = JSON.parse(await manifestFile.async('text'));
-    assertEqual(manifest.version, '1.0');
+    assertEqual(manifest.version, '2.0');
 
     const tables = [
       'ai_providers', 'ai_models', 'role_configs', 'flow_configs',
       'categories', 'chapters', 'paragraphs', 'paragraph_bindings',
-      'recap_data', 'app_settings',
+      'recap_data', 'app_settings', 'books', 'ai_logs',
     ];
 
     for (const table of tables) {
@@ -1878,7 +1878,7 @@ describe('E2E — 完整导出导入往返', () => {
     const tables = [
       'categories', 'chapters', 'paragraphs', 'paragraph_bindings',
       'ai_providers', 'ai_models', 'role_configs', 'flow_configs',
-      'recap_data', 'app_settings',
+      'recap_data', 'app_settings', 'books', 'ai_logs',
     ];
 
     const exportData = {};
@@ -1888,7 +1888,7 @@ describe('E2E — 完整导出导入往返', () => {
 
     const zip = new JSZip();
     zip.file('manifest.json', JSON.stringify({
-      version: '1.0', exportedAt: Utils.now(), appVersion: '1.0.0',
+      version: '2.0', exportedAt: Utils.now(), appVersion: '2.0.0',
       tables: Object.fromEntries(tables.map(t => [t, exportData[t].length])),
     }));
     for (const t of tables) {
@@ -2513,6 +2513,172 @@ describe('P15 — 提示词优化', () => {
   });
 
   it('清理 P15 测试数据', async () => {
+    await DB.clearAll();
+    assert(true);
+  });
+});
+
+// ========== P16: V2 导入导出 & 集成测试 ==========
+describe('P16 — V2 导出格式', () => {
+  it('V2 导出包含 books 和 ai_logs', async () => {
+    await DB.clearAll();
+    // Setup V2 data
+    await DB.put(DB.STORES.BOOKS, { id: 'b1', name: '测试书', description: '描述', createdAt: Utils.now(), updatedAt: Utils.now() });
+    await DB.put(DB.STORES.AI_PROVIDERS, { id: 'p1', name: 'P', endpoint: 'http://test', apiKey: 'k', retryCount: 3 });
+    await DB.put(DB.STORES.AI_MODELS, { id: 'm1', name: 'M', providerId: 'p1', intelligenceLevel: 'high', sortOrder: 0 });
+    await LogService.record({ providerId: 'p1', providerName: 'P', modelId: 'm1', modelName: 'M', prompt: 'q', response: 'a', duration: 100, status: 'success' });
+
+    // Manually build V2 export (same logic as ExportService.exportAll but without progress modal)
+    const tables = [
+      'categories', 'chapters', 'paragraphs', 'paragraph_bindings',
+      'ai_providers', 'ai_models', 'role_configs', 'flow_configs',
+      'recap_data', 'app_settings', 'books', 'ai_logs',
+    ];
+    const data = {};
+    const manifest = { version: '2.0', exportedAt: Utils.now(), appVersion: '2.0.0', tables: {} };
+    for (const t of tables) {
+      data[t] = await DB.getAll(t);
+      manifest.tables[t] = data[t].length;
+    }
+    assertEqual(manifest.version, '2.0');
+    assertEqual(manifest.tables.books, 1);
+    assertEqual(manifest.tables.ai_logs, 1);
+
+    // Build ZIP
+    const zip = new JSZip();
+    zip.file('manifest.json', JSON.stringify(manifest, null, 2));
+    for (const t of tables) {
+      zip.file(`${t}.json`, JSON.stringify(data[t], null, 2));
+    }
+    const blob = await zip.generateAsync({ type: 'blob' });
+
+    // Clear and import
+    await DB.clearAll();
+    const importZip = await JSZip.loadAsync(blob);
+    for (const t of tables) {
+      const f = importZip.file(`${t}.json`);
+      if (f) {
+        const records = JSON.parse(await f.async('text'));
+        if (records.length > 0) await DB.putAll(t, records);
+      }
+    }
+
+    // Verify
+    const books = await DB.getAll(DB.STORES.BOOKS);
+    assertEqual(books.length, 1);
+    assertEqual(books[0].name, '测试书');
+
+    const logs = await DB.getAll(DB.STORES.AI_LOGS);
+    assertEqual(logs.length, 1);
+    assertEqual(logs[0].status, 'success');
+  });
+});
+
+describe('P16 — V1 兼容导入', () => {
+  it('V1 格式导入后创建默认书籍', async () => {
+    await DB.clearAll();
+    // Build a V1-style ZIP (no books, no ai_logs)
+    const v1Tables = ['ai_providers', 'ai_models', 'role_configs', 'flow_configs', 'categories', 'chapters', 'paragraphs', 'paragraph_bindings', 'recap_data', 'app_settings'];
+    const zip = new JSZip();
+    zip.file('manifest.json', JSON.stringify({ version: '1.0', exportedAt: Utils.now(), appVersion: '1.0.0', tables: {} }));
+    for (const t of v1Tables) {
+      zip.file(`${t}.json`, '[]');
+    }
+    const blob = await zip.generateAsync({ type: 'blob' });
+
+    // Simulate import (simplified — just import the tables)
+    const importZip = await JSZip.loadAsync(blob);
+    const allTables = [...v1Tables, 'books', 'ai_logs'];
+    for (const t of allTables) {
+      const f = importZip.file(`${t}.json`);
+      if (f) {
+        const records = JSON.parse(await f.async('text'));
+        if (records.length > 0) await DB.putAll(t, records);
+      }
+    }
+
+    // V1 compat: create default book if none
+    const books = await DB.getAll(DB.STORES.BOOKS);
+    if (books.length === 0) {
+      await DB.put(DB.STORES.BOOKS, { id: Utils.generateId(), name: '默认书籍', description: '', createdAt: Utils.now(), updatedAt: Utils.now() });
+    }
+    const booksAfter = await DB.getAll(DB.STORES.BOOKS);
+    assertEqual(booksAfter.length, 1);
+    assertEqual(booksAfter[0].name, '默认书籍');
+  });
+});
+
+describe('P16 — V2 E2E 完整流程', () => {
+  let _origCall;
+  it('V2 E2E: 书籍+类目+职能+流程+生成', async () => {
+    await DB.clearAll();
+    // Create book
+    await DB.put(DB.STORES.BOOKS, { id: 'e2e-book', name: 'V2测试书', description: '', createdAt: Utils.now(), updatedAt: Utils.now() });
+    Store.setCurrentBook('e2e-book');
+
+    // Create category
+    const now = Utils.now();
+    await DB.put(DB.STORES.CATEGORIES, {
+      id: 'e2e-v2-cat', parentId: null, type: 'character', name: 'V2角色',
+      description: '', attributes: '性格: 温柔', bookId: 'e2e-book',
+      sortOrder: 1, version: 1, createdAt: now, updatedAt: now,
+    });
+    const cats = await DB.getAll(DB.STORES.CATEGORIES);
+    assert(cats.length >= 1, '应创建类目');
+
+    // Create provider + model
+    await DB.put(DB.STORES.AI_PROVIDERS, { id: 'e2e-p', name: 'E2E-Provider', endpoint: 'http://test', apiKey: 'k', retryCount: 3 });
+    await DB.put(DB.STORES.AI_MODELS, { id: 'e2e-m', name: 'E2E-Model', providerId: 'e2e-p', intelligenceLevel: 'high', sortOrder: 0 });
+
+    // Create role
+    await DB.put(DB.STORES.ROLE_CONFIGS, {
+      id: 'e2e-role', name: 'V2写手', promptTemplate: '写{{用户输入}}',
+      outputVar: 'draft', customVars: JSON.stringify([{ name: '风格', isOutput: true }]),
+      providerId: 'e2e-p', modelId: 'e2e-m',
+      sortOrder: 0, createdAt: Utils.now(), updatedAt: Utils.now(),
+    });
+
+    // Create flow
+    await DB.put(DB.STORES.FLOW_CONFIGS, {
+      id: 'e2e-flow', name: 'V2生成流', trigger: 'generate_paragraph',
+      enabled: true, blocking: false, steps: JSON.stringify([['e2e-role']]),
+      sortOrder: 0, createdAt: Utils.now(), updatedAt: Utils.now(),
+    });
+
+    // Create chapter + paragraph
+    const chapterId = await Store.createNewChapter();
+    assert(chapterId > 0, '应创建章节');
+
+    // Mock AI
+    _origCall = AIService.call;
+    AIService.call = async () => ({ text: 'V2生成内容', failCount: 0 });
+
+    const context = { user_input: 'V2测试输入' };
+    const result = await FlowEngine.execute('generate_paragraph', context);
+    assertEqual(result.draft, 'V2生成内容');
+    assert(!!result._customVars['风格'], '自定义变量应有输出');
+  });
+
+  it('V2 E2E: 模板往返', async () => {
+    // Export template
+    const tpl = await TemplateService.exportTemplate();
+    assertEqual(tpl.roles.length, 1);
+    assertEqual(tpl.roles[0].name, 'V2写手');
+    assertEqual(tpl.flows[0].steps[0][0], 'V2写手');
+
+    // Import template
+    const bindings = [{ roleName: 'V2写手', providerId: 'e2e-p', modelId: 'e2e-m' }];
+    const importResult = await TemplateService.importTemplate(tpl, bindings);
+    assertEqual(importResult.roleCount, 1);
+    assertEqual(importResult.flowCount, 1);
+
+    // Verify new role created (now 2 total)
+    const roles = await DB.getAll(DB.STORES.ROLE_CONFIGS);
+    assertEqual(roles.length, 2);
+  });
+
+  it('清理 P16 测试数据', async () => {
+    AIService.call = _origCall;
     await DB.clearAll();
     assert(true);
   });

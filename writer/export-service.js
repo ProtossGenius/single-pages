@@ -8,11 +8,11 @@ const ExportService = {
       const tables = [
         'categories', 'chapters', 'paragraphs', 'paragraph_bindings',
         'ai_providers', 'ai_models', 'role_configs', 'flow_configs',
-        'recap_data', 'app_settings',
+        'recap_data', 'app_settings', 'books', 'ai_logs',
       ];
 
       const data = {};
-      const manifest = { version: '1.0', exportedAt: Utils.now(), appVersion: '1.0.0', tables: {} };
+      const manifest = { version: '2.0', exportedAt: Utils.now(), appVersion: '2.0.0', tables: {} };
 
       // 读取数据 (0% - 70%)
       for (let i = 0; i < tables.length; i++) {

@@ -95,7 +95,7 @@ const ImportService = {
       const tables = [
         'ai_providers', 'ai_models', 'role_configs', 'flow_configs',
         'categories', 'chapters', 'paragraphs', 'paragraph_bindings',
-        'recap_data', 'app_settings',
+        'recap_data', 'app_settings', 'books', 'ai_logs',
       ];
 
       // 清空现有数据
@@ -116,6 +116,18 @@ const ImportService = {
       }
 
       progress.update(98, '刷新界面...');
+
+      // V1 compatibility: create default book if no books imported
+      const books = await DB.getAll(DB.STORES.BOOKS);
+      if (books.length === 0) {
+        await DB.put(DB.STORES.BOOKS, {
+          id: Utils.generateId(),
+          name: '默认书籍',
+          description: '',
+          createdAt: Utils.now(),
+          updatedAt: Utils.now(),
+        });
+      }
 
       // 重新初始化 Store
       await Store.init();
