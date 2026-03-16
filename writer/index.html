@@ -14,8 +14,14 @@
 
     <!-- 主内容区域 -->
     <div id="main-content" class="main-content">
-      <!-- 左侧：类目管理器 -->
-      <div id="category-panel" class="panel panel-category">
+      <!-- VSCode 风格图标导航栏 -->
+      <div id="icon-sidebar" class="icon-sidebar"></div>
+
+      <!-- 侧边面板 (内容由 SidebarUI 动态切换) -->
+      <div id="sidebar-panel" class="panel sidebar-panel"></div>
+
+      <!-- 左侧：类目管理器 (由 sidebar 切换控制) -->
+      <div id="category-panel" class="panel panel-category" style="display:none;">
         <div class="panel-header">
           <span class="panel-title">类目管理器</span>
           <button id="btn-add-root-category" class="btn-icon" title="添加大类">+</button>
@@ -134,6 +140,7 @@
   <script src="ui-role-config.js"></script>
   <script src="ui-flow-config.js"></script>
   <script src="ui-book.js"></script>
+  <script src="ui-sidebar.js"></script>
 
   <!-- 入口 -->
   <script src="app.js"></script>

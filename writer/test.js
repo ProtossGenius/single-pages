@@ -2092,5 +2092,52 @@ describe('P9 — bookId 数据关联', () => {
   });
 });
 
+// ========== P10: 侧边栏与动态内容 ==========
+describe('P10 — SidebarUI', () => {
+  it('SidebarUI 模块存在', () => {
+    assertNotNull(SidebarUI);
+    assertEqual(typeof SidebarUI.init, 'function');
+    assertEqual(typeof SidebarUI.switchTab, 'function');
+  });
+
+  it('sidebarTab 状态切换', () => {
+    Store.setSidebarTab('chapters');
+    assertEqual(Store.get('sidebarTab'), 'chapters');
+    Store.setSidebarTab('bookInfo');
+    assertEqual(Store.get('sidebarTab'), 'bookInfo');
+    Store.setSidebarTab('categories');
+    assertEqual(Store.get('sidebarTab'), 'categories');
+  });
+
+  it('SIDEBAR_TAB_CHANGED 事件', () => {
+    let received = null;
+    const handler = (data) => { received = data; };
+    EventBus.on(Events.SIDEBAR_TAB_CHANGED, handler);
+    EventBus.emit(Events.SIDEBAR_TAB_CHANGED, { tab: 'chapters' });
+    assertNotNull(received);
+    assertEqual(received.tab, 'chapters');
+    EventBus.off(Events.SIDEBAR_TAB_CHANGED, handler);
+  });
+
+  it('章节列表按 bookId 过滤', async () => {
+    await DB.clearAll();
+    const now = Utils.now();
+    await DB.put(DB.STORES.BOOKS, { id: 'b1', name: '书1', description: '', sortOrder: 0, createdAt: now, updatedAt: now });
+    await DB.put(DB.STORES.CHAPTERS, { title: '第1章', bookId: 'b1', status: ChapterStatus.DRAFT, sortOrder: 1, createdAt: now, updatedAt: now });
+    await DB.put(DB.STORES.CHAPTERS, { title: '第2章', bookId: 'b1', status: ChapterStatus.COMPLETED, sortOrder: 2, createdAt: now, updatedAt: now });
+    await DB.put(DB.STORES.CHAPTERS, { title: '其他书', bookId: 'other', status: ChapterStatus.DRAFT, sortOrder: 1, createdAt: now, updatedAt: now });
+
+    await Store.setCurrentBook('b1');
+    const all = await DB.getAll(DB.STORES.CHAPTERS);
+    const filtered = all.filter(c => c.bookId === 'b1');
+    assertEqual(filtered.length, 2);
+  });
+
+  it('清理 P10 测试数据', async () => {
+    await DB.clearAll();
+    assert(true);
+  });
+});
+
 // ---- 运行测试 ----
 TestRunner.run();

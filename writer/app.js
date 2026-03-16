@@ -15,6 +15,11 @@ async function main() {
     EditorUI.init(document.getElementById('editor-panel'));
     ChatUI.init(document.getElementById('chat-panel'));
     StatusUI.init(document.getElementById('status-panel'));
+    SidebarUI.init(
+      document.getElementById('icon-sidebar'),
+      document.getElementById('sidebar-panel'),
+      document.getElementById('main-content')
+    );
 
     // 4. 加载最后编辑的章节
     await Store.loadLastChapter();

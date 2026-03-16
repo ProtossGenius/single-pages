@@ -120,6 +120,86 @@ html, body {
   overflow: hidden;
 }
 
+/* ===== VSCode 风格图标侧边栏 ===== */
+.icon-sidebar {
+  width: 48px;
+  min-width: 48px;
+  background: var(--bg-secondary);
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding-top: 4px;
+  gap: 2px;
+  flex-shrink: 0;
+}
+
+.sidebar-icon-btn {
+  width: 40px;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 18px;
+  background: none;
+  border: none;
+  border-left: 3px solid transparent;
+  cursor: pointer;
+  border-radius: 0;
+  transition: background var(--transition);
+}
+
+.sidebar-icon-btn:hover {
+  background: var(--accent-soft);
+}
+
+.sidebar-icon-btn.active {
+  border-left-color: var(--accent);
+  background: var(--bg-card);
+}
+
+.sidebar-panel {
+  width: 260px;
+  min-width: 200px;
+  max-width: 400px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* ===== 章节目录列表 ===== */
+.chapter-list-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  cursor: pointer;
+  font-size: 13px;
+  border-radius: var(--radius-sm);
+  margin: 1px 4px;
+}
+
+.chapter-list-item:hover {
+  background: var(--bg-secondary);
+}
+
+.chapter-list-item.active {
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.chapter-icon {
+  flex-shrink: 0;
+}
+
+.chapter-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* ===== 面板通用样式 ===== */
 .panel {
   display: flex;
