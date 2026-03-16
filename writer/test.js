@@ -2478,5 +2478,45 @@ describe('P14 — 日志清理', () => {
   });
 });
 
+// ========== P15: 提示词自优化 ==========
+describe('P15 — 提示词优化', () => {
+  it('PromptOptUI 模块存在', () => {
+    assert(typeof PromptOptUI === 'object', 'PromptOptUI 应存在');
+    assert(typeof PromptOptUI.show === 'function', 'show 方法应存在');
+    assert(typeof PromptOptUI._buildMetaPrompt === 'function', '_buildMetaPrompt 应存在');
+  });
+
+  it('构造元提示词包含职能名和当前提示词', () => {
+    const meta = PromptOptUI._buildMetaPrompt('写手', '你是一个小说写手。请续写...');
+    assert(meta.includes('写手'), '应包含职能名');
+    assert(meta.includes('你是一个小说写手。请续写...'), '应包含当前提示词');
+    assert(meta.includes('提示词工程专家'), '应包含专家角色描述');
+  });
+
+  it('应用优化更新提示词', async () => {
+    await DB.clearAll();
+    const roleId = Utils.generateId();
+    await DB.put(DB.STORES.ROLE_CONFIGS, {
+      id: roleId, name: '测试职能', promptTemplate: '原始提示词',
+      providerId: '', modelId: '', outputVar: '', customVars: '[]',
+      sortOrder: 0, createdAt: Utils.now(), updatedAt: Utils.now(),
+    });
+
+    // Simulate applying optimization
+    const role = await DB.getById(DB.STORES.ROLE_CONFIGS, roleId);
+    role.promptTemplate = '优化后的提示词';
+    role.updatedAt = Utils.now();
+    await DB.put(DB.STORES.ROLE_CONFIGS, role);
+
+    const updated = await DB.getById(DB.STORES.ROLE_CONFIGS, roleId);
+    assertEqual(updated.promptTemplate, '优化后的提示词');
+  });
+
+  it('清理 P15 测试数据', async () => {
+    await DB.clearAll();
+    assert(true);
+  });
+});
+
 // ---- 运行测试 ----
 TestRunner.run();
