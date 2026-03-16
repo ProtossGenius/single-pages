@@ -693,6 +693,7 @@ html, body {
   min-width: 200px;
   max-width: 400px;
   flex-shrink: 0;
+  margin-left: auto;
   border-left: 1px solid var(--border);
   border-right: none;
 }

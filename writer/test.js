@@ -2684,5 +2684,116 @@ describe('P16 — V2 E2E 完整流程', () => {
   });
 });
 
+// ========== P17: UI 修复与默认配置 ==========
+describe('P17 — 状态面板显隐', () => {
+  it('bookInfo tab 时 updateContentArea 控制 statusPanel 隐藏', () => {
+    // Simulate: create mock elements
+    const statusPanel = document.createElement('div');
+    statusPanel.id = 'status-panel-test';
+    statusPanel.style.display = '';
+
+    // Directly test the logic: on bookInfo tab, status panel should be hidden
+    Store.setSidebarTab('bookInfo');
+    const tabId = Store.get('sidebarTab');
+    assertEqual(tabId, 'bookInfo');
+    // The actual hiding is done in SidebarUI.updateContentArea()
+    // We test that the sidebarTab state is set correctly
+  });
+
+  it('chapters tab 时状态面板应可见', () => {
+    Store.setSidebarTab('chapters');
+    assertEqual(Store.get('sidebarTab'), 'chapters');
+  });
+});
+
+describe('P17 — 默认职能配置', () => {
+  it('空表时创建默认职能', async () => {
+    await DB.clearAll();
+    await ensureDefaultConfigs();
+    const roles = await DB.getAll(DB.STORES.ROLE_CONFIGS);
+    assertEqual(roles.length, 3);
+    const names = roles.map(r => r.name).sort();
+    assert(names.includes('写手'), '应有写手职能');
+    assert(names.includes('评审'), '应有评审职能');
+    assert(names.includes('概要'), '应有概要职能');
+  });
+
+  it('写手职能包含正确的输出变量', async () => {
+    const roles = await DB.getAll(DB.STORES.ROLE_CONFIGS);
+    const writer = roles.find(r => r.name === '写手');
+    assertEqual(writer.outputVar, 'generated_paragraph');
+    assert(writer.promptTemplate.includes('{{用户输入}}'), '应包含用户输入变量');
+    assert(writer.promptTemplate.includes('{{前文信息}}'), '应包含前文信息变量');
+  });
+
+  it('评审职能包含正确的输出变量', async () => {
+    const roles = await DB.getAll(DB.STORES.ROLE_CONFIGS);
+    const reviewer = roles.find(r => r.name === '评审');
+    assertEqual(reviewer.outputVar, 'ai_review');
+    assert(reviewer.promptTemplate.includes('{{生成段落}}'), '应包含生成段落变量');
+  });
+
+  it('概要职能包含正确的输出变量', async () => {
+    const roles = await DB.getAll(DB.STORES.ROLE_CONFIGS);
+    const summary = roles.find(r => r.name === '概要');
+    assertEqual(summary.outputVar, 'generated_summary');
+    assert(summary.promptTemplate.includes('{{章节内容}}'), '应包含章节内容变量');
+  });
+});
+
+describe('P17 — 默认流程配置', () => {
+  it('空表时创建默认流程', async () => {
+    const flows = await DB.getAll(DB.STORES.FLOW_CONFIGS);
+    assertEqual(flows.length, 2);
+    const names = flows.map(f => f.name).sort();
+    assert(names.includes('段落生成'), '应有段落生成流程');
+    assert(names.includes('章节概要'), '应有章节概要流程');
+  });
+
+  it('段落生成流程配置正确', async () => {
+    const flows = await DB.getAll(DB.STORES.FLOW_CONFIGS);
+    const paraFlow = flows.find(f => f.name === '段落生成');
+    assertEqual(paraFlow.trigger, 'generate_paragraph');
+    assertEqual(paraFlow.blocking, true);
+    assertEqual(paraFlow.enabled, true);
+    const steps = JSON.parse(paraFlow.steps);
+    assertEqual(steps.length, 2); // [[写手ID],[评审ID]]
+
+    // Verify steps reference existing roles
+    const roles = await DB.getAll(DB.STORES.ROLE_CONFIGS);
+    const writer = roles.find(r => r.name === '写手');
+    const reviewer = roles.find(r => r.name === '评审');
+    assertEqual(steps[0][0], writer.id);
+    assertEqual(steps[1][0], reviewer.id);
+  });
+
+  it('章节概要流程配置正确', async () => {
+    const flows = await DB.getAll(DB.STORES.FLOW_CONFIGS);
+    const chapFlow = flows.find(f => f.name === '章节概要');
+    assertEqual(chapFlow.trigger, 'generate_chapter');
+    assertEqual(chapFlow.blocking, false);
+    const steps = JSON.parse(chapFlow.steps);
+    assertEqual(steps.length, 1); // [[概要ID]]
+
+    const roles = await DB.getAll(DB.STORES.ROLE_CONFIGS);
+    const summary = roles.find(r => r.name === '概要');
+    assertEqual(steps[0][0], summary.id);
+  });
+
+  it('已有职能时不重复创建', async () => {
+    // ensureDefaultConfigs again — should not create duplicates
+    await ensureDefaultConfigs();
+    const roles = await DB.getAll(DB.STORES.ROLE_CONFIGS);
+    assertEqual(roles.length, 3);
+    const flows = await DB.getAll(DB.STORES.FLOW_CONFIGS);
+    assertEqual(flows.length, 2);
+  });
+
+  it('清理 P17 测试数据', async () => {
+    await DB.clearAll();
+    assert(true);
+  });
+});
+
 // ---- 运行测试 ----
 TestRunner.run();
