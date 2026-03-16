@@ -2209,5 +2209,47 @@ describe('P11 — AI 响应解析', () => {
   });
 });
 
+// ========== P12: 聊天框重构 ==========
+describe('P12 — 风格标签与大纲处理', () => {
+  it('风格标签增删', () => {
+    Store.setStyleTags(['悬疑', '热血']);
+    const tags = Store.get('styleTags');
+    assertEqual(tags.length, 2);
+    assertEqual(tags[0], '悬疑');
+    assertEqual(tags[1], '热血');
+    Store.setStyleTags([]);
+    assertEqual(Store.get('styleTags').length, 0);
+  });
+
+  it('大纲分行处理', () => {
+    const text = '第一幕：少年离家\n第二幕：途经森林\n\n第三幕：获得传承';
+    const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
+    assertEqual(lines.length, 3);
+    assertEqual(lines[0], '第一幕：少年离家');
+    assertEqual(lines[2], '第三幕：获得传承');
+  });
+
+  it('collectContext 包含风格标签', async () => {
+    await DB.clearAll();
+    Store.setStyleTags(['悬疑', '日常']);
+    Store.setChapterOutline('测试概述');
+    const ctx = await ChatUI.collectContext();
+    assert(ctx.bound_settings.includes('风格: 悬疑, 日常'), '应包含风格标签');
+    assertEqual(ctx.user_input, '测试概述');
+    Store.setStyleTags([]);
+  });
+
+  it('collectContext 无风格标签时不包含风格行', async () => {
+    Store.setStyleTags([]);
+    const ctx = await ChatUI.collectContext();
+    assert(!ctx.bound_settings.includes('风格:'), '不应包含风格前缀');
+  });
+
+  it('清理 P12 测试数据', async () => {
+    await DB.clearAll();
+    assert(true);
+  });
+});
+
 // ---- 运行测试 ----
 TestRunner.run();

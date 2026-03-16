@@ -1,4 +1,4 @@
-/* ===== 聊天框 UI ===== */
+/* ===== 聊天框 UI (V2: 可折叠区块) ===== */
 
 const ChatUI = (() => {
   let container = null;
@@ -6,11 +6,14 @@ const ChatUI = (() => {
   function init(containerEl) {
     container = containerEl;
 
-    // Tab 切换
-    const tabs = container.querySelectorAll('.chat-tab');
-    tabs.forEach(tab => {
-      tab.addEventListener('click', () => {
-        switchTab(tab.dataset.tab);
+    // V2: 可折叠区块切换
+    container.querySelectorAll('.chat-section-title').forEach(title => {
+      title.addEventListener('click', () => {
+        const section = title.parentElement;
+        const body = section.querySelector('.chat-section-body');
+        const expanded = section.classList.toggle('expanded');
+        body.style.display = expanded ? '' : 'none';
+        title.textContent = (expanded ? '▼ ' : '▶ ') + title.textContent.replace(/^[▼▶]\s*/, '');
       });
     });
 
@@ -43,21 +46,29 @@ const ChatUI = (() => {
 
     // 按钮事件
     const generateBtn = document.getElementById('btn-generate');
-    if (generateBtn) {
-      generateBtn.addEventListener('click', handleGenerate);
-    }
+    if (generateBtn) generateBtn.addEventListener('click', handleGenerate);
 
     const generateChapterBtn = document.getElementById('btn-generate-chapter');
-    if (generateChapterBtn) {
-      generateChapterBtn.addEventListener('click', handleGenerateChapter);
-    }
+    if (generateChapterBtn) generateChapterBtn.addEventListener('click', handleGenerateChapter);
+
+    // V2: 直接添加按钮
+    const directAddBtn = document.getElementById('btn-direct-add');
+    if (directAddBtn) directAddBtn.addEventListener('click', handleDirectAdd);
+
+    // V2: 批量生成按钮
+    const batchBtn = document.getElementById('btn-batch-generate');
+    if (batchBtn) batchBtn.addEventListener('click', handleBatchGenerate);
+
+    // V2: 风格标签
+    const addTagBtn = document.getElementById('btn-add-style-tag');
+    if (addTagBtn) addTagBtn.addEventListener('click', addStyleTag);
+    renderStyleTags();
 
     // 监听绑定设定添加
     EventBus.on(Events.BINDING_ADD_REQUEST, ({ categoryId }) => {
       Store.addBoundSetting(categoryId);
       refreshBindings();
     });
-
     EventBus.on(Events.BINDING_ADDED, () => refreshBindings());
     EventBus.on(Events.BINDING_REMOVED, () => refreshBindings());
 
@@ -66,29 +77,93 @@ const ChatUI = (() => {
     EventBus.on(Events.AI_TASK_COMPLETED, () => updateButtons());
     EventBus.on(Events.AI_TASK_FAILED, () => updateButtons());
     EventBus.on(Events.AI_TASK_PROGRESS, updateStatusBar);
-
-    // 监听类目选中 → 在绑定设定 Tab 激活时可直接绑定
-    EventBus.on(Events.CATEGORY_SELECTED, ({ id }) => {
-      if (id && Store.get('chatTab') === 'bindings') {
-        Store.addBoundSetting(id);
-        refreshBindings();
-      }
-    });
   }
 
-  function switchTab(tabName) {
-    Store.setChatTab(tabName);
+  // V2: 风格标签管理
+  function renderStyleTags() {
+    const container = document.getElementById('style-tags-container');
+    if (!container) return;
+    container.innerHTML = '';
+    const tags = Store.get('styleTags') || [];
+    for (const tag of tags) {
+      const el = Utils.createElement('span', { className: 'style-tag' }, [
+        document.createTextNode(tag),
+        Utils.createElement('span', {
+          className: 'style-tag-remove', textContent: '×',
+          onClick: () => { removeStyleTag(tag); },
+        }),
+      ]);
+      container.appendChild(el);
+    }
+  }
 
-    // 更新 tab 按钮
-    container.querySelectorAll('.chat-tab').forEach(t => {
-      t.classList.toggle('active', t.dataset.tab === tabName);
-    });
+  function addStyleTag() {
+    const name = prompt('输入风格标签:');
+    if (!name || !name.trim()) return;
+    const tags = Store.get('styleTags') || [];
+    if (!tags.includes(name.trim())) {
+      tags.push(name.trim());
+      Store.setStyleTags(tags);
+    }
+    renderStyleTags();
+  }
 
-    // 更新内容区
-    container.querySelectorAll('.tab-content').forEach(tc => {
-      const id = tc.id.replace('tab-', '');
-      tc.classList.toggle('active', id === tabName);
+  function removeStyleTag(tag) {
+    const tags = (Store.get('styleTags') || []).filter(t => t !== tag);
+    Store.setStyleTags(tags);
+    renderStyleTags();
+  }
+
+  // V2: 直接添加 — 将情节概述文本作为新段落
+  async function handleDirectAdd() {
+    const outlineInput = document.getElementById('input-outline');
+    const text = outlineInput ? outlineInput.value.trim() : '';
+    if (!text) { Utils.showToast('请先输入情节概述', 'warning'); return; }
+
+    const chapterId = Store.get('currentChapterId');
+    if (!chapterId) { Utils.showToast('请先选择一个章节', 'warning'); return; }
+
+    const paragraphs = Store.get('paragraphs') || [];
+    await DB.put(DB.STORES.PARAGRAPHS, {
+      id: Utils.generateId(),
+      chapterId,
+      content: text,
+      sortOrder: paragraphs.length + 1,
+      recapBrief: '',
+      followUp: '',
+      createdAt: Utils.now(),
+      updatedAt: Utils.now(),
     });
+    outlineInput.value = '';
+    Store.setChapterOutline('');
+    EventBus.emit(Events.PARAGRAPH_ADDED);
+    Utils.showToast('段落已添加');
+  }
+
+  // V2: 批量生成 — 逐行处理大纲
+  async function handleBatchGenerate() {
+    const importInput = document.getElementById('input-outline-import');
+    const text = importInput ? importInput.value.trim() : '';
+    if (!text) { Utils.showToast('请先输入大纲', 'warning'); return; }
+
+    const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
+    if (lines.length === 0) return;
+
+    Utils.showToast(`开始批量生成 ${lines.length} 个段落...`);
+
+    for (let i = 0; i < lines.length; i++) {
+      try {
+        Store.setChapterOutline(lines[i]);
+        const context = await collectContext();
+        await FlowEngine.execute('generate_paragraph', context);
+      } catch (err) {
+        Utils.showToast(`第 ${i + 1} 行失败: ${err.message}`, 'error');
+        break;
+      }
+    }
+
+    importInput.value = '';
+    Utils.showToast('批量生成完成');
   }
 
   async function refreshBindings() {
@@ -149,8 +224,12 @@ const ChatUI = (() => {
 
     const genBtn = document.getElementById('btn-generate');
     const genChapBtn = document.getElementById('btn-generate-chapter');
+    const directBtn = document.getElementById('btn-direct-add');
+    const batchBtn = document.getElementById('btn-batch-generate');
     if (genBtn) genBtn.disabled = disabled;
     if (genChapBtn) genChapBtn.disabled = disabled;
+    if (directBtn) directBtn.disabled = disabled;
+    if (batchBtn) batchBtn.disabled = disabled;
   }
 
   function updateStatusBar(status) {
@@ -207,16 +286,11 @@ const ChatUI = (() => {
   }
 
   async function handleGenerate() {
-    // 由 FlowEngine 处理（P5 实现）
     try {
       const context = await collectContext();
       await FlowEngine.execute('generate_paragraph', context);
     } catch (err) {
-      if (err.message.includes('not implemented')) {
-        Utils.showToast('AI 引擎尚未实现，将在 P5 阶段完成', 'warning');
-      } else {
-        Utils.showToast('生成失败: ' + err.message, 'error');
-      }
+      Utils.showToast('生成失败: ' + err.message, 'error');
     }
   }
 
@@ -225,11 +299,7 @@ const ChatUI = (() => {
       const context = await collectContext();
       await FlowEngine.execute('generate_chapter', context);
     } catch (err) {
-      if (err.message.includes('not implemented')) {
-        Utils.showToast('AI 引擎尚未实现，将在 P5 阶段完成', 'warning');
-      } else {
-        Utils.showToast('生成失败: ' + err.message, 'error');
-      }
+      Utils.showToast('生成失败: ' + err.message, 'error');
     }
   }
 
@@ -254,12 +324,16 @@ const ChatUI = (() => {
     const paragraphs = Store.get('paragraphs') || [];
     const chapterContent = paragraphs.map(p => p.content).filter(Boolean).join('\n\n');
 
+    // V2: 风格标签作为额外上下文
+    const styleTags = Store.get('styleTags') || [];
+    const styleContext = styleTags.length > 0 ? `风格: ${styleTags.join(', ')}` : '';
+
     return {
       context_before: Store.get('recapText') || '',
       user_input: Store.get('chapterOutline') || '',
       chapter_outline: Store.get('chapterOutline') || '',
       follow_up: Store.get('followUpSummary') || '',
-      bound_settings: boundText,
+      bound_settings: boundText + (styleContext ? '\n' + styleContext : ''),
       current_paragraph: '',
       chapter_content: chapterContent,
       ai_review: Store.get('aiReviewNotes') || '',
@@ -269,5 +343,8 @@ const ChatUI = (() => {
     };
   }
 
-  return { init, refreshBindings, updateButtons, switchTab };
+  // Keep switchTab as no-op for backward compatibility
+  function switchTab() {}
+
+  return { init, refreshBindings, updateButtons, switchTab, renderStyleTags, collectContext };
 })();

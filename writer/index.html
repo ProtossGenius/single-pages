@@ -53,28 +53,48 @@
             <div class="ai-status-detail"></div>
           </div>
 
-          <!-- 输入区域 -->
-          <div class="chat-tabs">
-            <button class="chat-tab active" data-tab="outline">章节概述</button>
-            <button class="chat-tab" data-tab="followUp">后续概要</button>
-            <button class="chat-tab" data-tab="bindings">绑定设定</button>
-          </div>
-          <div class="chat-input-area">
-            <div id="tab-outline" class="tab-content active">
-              <textarea id="input-outline" class="chat-textarea" placeholder="输入章节概述..."></textarea>
+          <!-- V2: 可折叠区块 -->
+          <div class="chat-sections">
+            <div class="chat-section expanded" data-section="outline">
+              <div class="chat-section-title">▼ 情节概述</div>
+              <div class="chat-section-body">
+                <textarea id="input-outline" class="chat-textarea" placeholder="输入情节概述..."></textarea>
+              </div>
             </div>
-            <div id="tab-followUp" class="tab-content">
-              <textarea id="input-followUp" class="chat-textarea" placeholder="输入后续概要..."></textarea>
+            <div class="chat-section" data-section="followUp">
+              <div class="chat-section-title">▶ 后续概要</div>
+              <div class="chat-section-body" style="display:none;">
+                <textarea id="input-followUp" class="chat-textarea" placeholder="输入后续概要..."></textarea>
+              </div>
             </div>
-            <div id="tab-bindings" class="tab-content">
-              <div id="binding-list" class="binding-list">
-                <p class="hint-text">在左侧类目管理器中点击项目以添加绑定</p>
+            <div class="chat-section" data-section="bindings">
+              <div class="chat-section-title">▶ 绑定设定</div>
+              <div class="chat-section-body" style="display:none;">
+                <div id="binding-list" class="binding-list">
+                  <p class="hint-text">在左侧类目管理器中点击项目以添加绑定</p>
+                </div>
+              </div>
+            </div>
+            <div class="chat-section" data-section="outlineImport">
+              <div class="chat-section-title">▶ 大纲导入</div>
+              <div class="chat-section-body" style="display:none;">
+                <textarea id="input-outline-import" class="chat-textarea" placeholder="粘贴大纲，每行一个情节..."></textarea>
+                <div style="font-size:12px;color:var(--text-muted);margin:4px 0;">每行作为独立情节概述处理</div>
+                <button id="btn-batch-generate" class="btn btn-sm btn-secondary">开始批量生成</button>
               </div>
             </div>
           </div>
 
+          <!-- V2: 风格标签 -->
+          <div class="chat-style-tags">
+            <span class="style-tags-label">风格标签:</span>
+            <div id="style-tags-container" class="style-tags-list"></div>
+            <button id="btn-add-style-tag" class="btn-icon" title="添加标签">+</button>
+          </div>
+
           <!-- 操作按钮 -->
           <div class="chat-actions">
+            <button id="btn-direct-add" class="btn btn-secondary">直接添加</button>
             <button id="btn-generate" class="btn btn-primary">开始生成</button>
             <button id="btn-generate-chapter" class="btn btn-secondary">生成章节</button>
           </div>
