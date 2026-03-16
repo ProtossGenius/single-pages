@@ -108,12 +108,18 @@ const AIConfigUI = {
     await this._renderModels(id, modelList);
 
     // 添加模型行
-    const addModelRow = Utils.createElement('div', { style: { display: 'flex', gap: '6px', marginBottom: '16px' } });
+    const addModelRow = Utils.createElement('div', { style: { display: 'flex', gap: '6px', marginBottom: '16px', flexWrap: 'wrap' } });
     const modelInput = Utils.createElement('input', {
       type: 'text',
       placeholder: '模型名称',
-      style: { flex: '1', padding: '6px 10px', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', fontSize: '13px' },
+      style: { flex: '1', minWidth: '120px', padding: '6px 10px', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', fontSize: '13px' },
     });
+    const levelSelect = Utils.createElement('select', {
+      style: { padding: '6px 10px', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', fontSize: '13px' },
+    });
+    for (const lv of IntelligenceLevelList) {
+      levelSelect.appendChild(Utils.createElement('option', { value: lv.value, textContent: lv.label }));
+    }
     const addModelBtn = Utils.createElement('button', {
       className: 'btn btn-sm btn-secondary',
       textContent: '添加',
@@ -125,6 +131,7 @@ const AIConfigUI = {
           id: Utils.generateId(),
           providerId: id,
           name,
+          intelligenceLevel: levelSelect.value,
           sortOrder: models.length + 1,
           createdAt: Utils.now(),
         });
@@ -133,8 +140,18 @@ const AIConfigUI = {
       },
     });
     addModelRow.appendChild(modelInput);
+    addModelRow.appendChild(levelSelect);
     addModelRow.appendChild(addModelBtn);
     formCol.appendChild(addModelRow);
+
+    // API 测试按钮
+    const testBtn = Utils.createElement('button', {
+      className: 'btn btn-sm btn-secondary',
+      textContent: '测试 API',
+      style: { marginBottom: '12px' },
+      onClick: () => this._showTestPanel(provider, formCol),
+    });
+    formCol.appendChild(testBtn);
 
     // 按钮行
     const btnRow = Utils.createElement('div', { style: { display: 'flex', justifyContent: 'flex-end', gap: '8px' } });
@@ -177,10 +194,13 @@ const AIConfigUI = {
     models.sort((a, b) => (a.sortOrder || 0) - (b.sortOrder || 0));
     container.innerHTML = '';
     for (const m of models) {
+      const levelInfo = getIntelligenceLevelByValue(m.intelligenceLevel);
+      const levelText = levelInfo ? levelInfo.label : '';
       const row = Utils.createElement('div', {
         style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '6px 10px', borderBottom: '1px solid var(--border-light)' },
       }, [
-        Utils.createElement('span', { textContent: m.name, style: { fontSize: '13px' } }),
+        Utils.createElement('span', { textContent: m.name, style: { fontSize: '13px', flex: '1' } }),
+        Utils.createElement('span', { textContent: levelText, style: { fontSize: '11px', color: 'var(--text-muted)', marginRight: '8px' } }),
         Utils.createElement('button', {
           className: 'btn-icon',
           textContent: '删除',
@@ -217,5 +237,56 @@ const AIConfigUI = {
     });
     this._selectedId = id;
     await this._loadList(listItems, formCol);
+  },
+
+  async _showTestPanel(provider, formCol) {
+    // Remove existing test panel if any
+    const existing = formCol.querySelector('.api-test-panel');
+    if (existing) { existing.remove(); return; }
+
+    const panel = Utils.createElement('div', { className: 'api-test-panel', style: 'border:1px solid var(--border);border-radius:var(--radius);padding:12px;margin-bottom:12px;' });
+
+    // Model selector
+    const models = await DB.getByIndex(DB.STORES.AI_MODELS, 'idx_providerId', provider.id);
+    const modelSelect = Utils.createElement('select', { style: 'width:100%;padding:6px;margin-bottom:8px;border:1px solid var(--border);border-radius:var(--radius-sm);font-size:13px;' });
+    for (const m of models) {
+      modelSelect.appendChild(Utils.createElement('option', { value: m.id, textContent: m.name }));
+    }
+
+    const questionInput = Utils.createElement('textarea', {
+      rows: 2, placeholder: '输入测试问题...',
+      style: 'width:100%;padding:6px;margin-bottom:8px;border:1px solid var(--border);border-radius:var(--radius-sm);font-size:13px;',
+    });
+
+    const resultDiv = Utils.createElement('div', { style: 'max-height:150px;overflow-y:auto;font-size:13px;margin-bottom:8px;white-space:pre-wrap;' });
+
+    const sendBtn = Utils.createElement('button', {
+      className: 'btn btn-sm btn-primary', textContent: '发送',
+      onClick: async () => {
+        const mid = modelSelect.value;
+        const question = questionInput.value.trim();
+        if (!mid || !question) return;
+        resultDiv.textContent = '请求中...';
+        resultDiv.style.color = 'var(--text-secondary)';
+        try {
+          const res = await AIService.call(provider.id, mid, question, { timeout: 30000 });
+          resultDiv.textContent = res.text || '(空回复)';
+          resultDiv.style.color = 'var(--success)';
+        } catch (err) {
+          resultDiv.textContent = err.message;
+          resultDiv.style.color = 'var(--danger)';
+        }
+      },
+    });
+
+    panel.appendChild(Utils.createElement('div', { textContent: 'API 测试', style: 'font-weight:600;margin-bottom:8px;font-size:13px;' }));
+    panel.appendChild(modelSelect);
+    panel.appendChild(questionInput);
+    panel.appendChild(sendBtn);
+    panel.appendChild(resultDiv);
+
+    // Insert before the button row
+    const btnRow = formCol.querySelector('div:last-child');
+    formCol.insertBefore(panel, btnRow);
   },
 };

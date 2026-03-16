@@ -76,10 +76,7 @@ const AIService = {
       }
 
       const data = await response.json();
-      if (data.choices && data.choices[0] && data.choices[0].message) {
-        return data.choices[0].message.content || '';
-      }
-      throw new Error('意外的 API 响应格式');
+      return this.parseResponse(data);
     } catch (err) {
       if (err.name === 'AbortError') {
         throw new Error(`请求超时 (${timeout / 1000}s)`);
@@ -88,5 +85,20 @@ const AIService = {
     } finally {
       clearTimeout(timer);
     }
+  },
+
+  /**
+   * 解析 AI 响应 — 支持 OpenAI 和 Ollama 格式
+   */
+  parseResponse(data) {
+    // OpenAI format: choices[0].message.content
+    if (data.choices && data.choices[0] && data.choices[0].message) {
+      return data.choices[0].message.content || '';
+    }
+    // Ollama format: message.content (no choices array)
+    if (data.message && data.message.content !== undefined) {
+      return data.message.content || '';
+    }
+    throw new Error('意外的 API 响应格式');
   },
 };

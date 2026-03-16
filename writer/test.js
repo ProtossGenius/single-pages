@@ -2139,5 +2139,75 @@ describe('P10 — SidebarUI', () => {
   });
 });
 
+// ========== P11: AI 配置增强 ==========
+describe('P11 — 模型智能等级', () => {
+  it('保存模型含智能等级', async () => {
+    await DB.clearAll();
+    const now = Utils.now();
+    await DB.put(DB.STORES.AI_PROVIDERS, {
+      id: 'p11-prov', name: 'P11 Provider', apiUrl: 'https://api.test.com/v1',
+      apiKey: 'sk-test', retryCount: 3, sortOrder: 1, createdAt: now, updatedAt: now,
+    });
+    await DB.put(DB.STORES.AI_MODELS, {
+      id: 'p11-model-1', providerId: 'p11-prov', name: 'gpt-4',
+      intelligenceLevel: 'high', sortOrder: 1, createdAt: now,
+    });
+    const model = await DB.getById(DB.STORES.AI_MODELS, 'p11-model-1');
+    assertEqual(model.intelligenceLevel, 'high');
+  });
+
+  it('智能等级枚举查询', () => {
+    const high = getIntelligenceLevelByValue('high');
+    assertNotNull(high);
+    assertEqual(high.label, '高级');
+    const basic = getIntelligenceLevelByValue('basic');
+    assertEqual(basic.label, '基础');
+  });
+});
+
+describe('P11 — AI 响应解析', () => {
+  it('解析 OpenAI 标准响应', () => {
+    const openaiResp = {
+      choices: [{ message: { content: 'Hello from OpenAI' } }],
+    };
+    const text = AIService.parseResponse(openaiResp);
+    assertEqual(text, 'Hello from OpenAI');
+  });
+
+  it('解析 Ollama 响应', () => {
+    const ollamaResp = {
+      message: { content: 'Hello from Ollama' },
+    };
+    const text = AIService.parseResponse(ollamaResp);
+    assertEqual(text, 'Hello from Ollama');
+  });
+
+  it('未知格式抛出错误', () => {
+    let thrown = false;
+    try {
+      AIService.parseResponse({ result: 'unknown' });
+    } catch (e) {
+      thrown = true;
+      assert(e.message.includes('意外的'), '应提示意外格式');
+    }
+    assert(thrown, '应抛出错误');
+  });
+
+  it('OpenAI 空内容返回空字符串', () => {
+    const resp = { choices: [{ message: { content: '' } }] };
+    assertEqual(AIService.parseResponse(resp), '');
+  });
+
+  it('Ollama 空内容返回空字符串', () => {
+    const resp = { message: { content: '' } };
+    assertEqual(AIService.parseResponse(resp), '');
+  });
+
+  it('清理 P11 测试数据', async () => {
+    await DB.clearAll();
+    assert(true);
+  });
+});
+
 // ---- 运行测试 ----
 TestRunner.run();

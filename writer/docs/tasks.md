@@ -35,7 +35,7 @@
 | **P8** | **V2: 数据库与枚举升级** | ✅ |
 | **P9** | **V2: 书籍管理与角色系统重构** | ✅ |
 | **P10** | **V2: 左侧边栏重构与动态内容区** | ✅ |
-| **P11** | **V2: AI 配置增强** | ⬜ |
+| **P11** | **V2: AI 配置增强** | ✅ |
 | **P12** | **V2: 聊天框重构与大纲导入** | ⬜ |
 | **P13** | **V2: 模板导入导出与自定义变量** | ⬜ |
 | **P14** | **V2: 日志管理系统** | ⬜ |
@@ -448,28 +448,28 @@
 
 ### 任务清单
 
-- [ ] **T11.1** 更新 `ui-ai-config.js` — 模型智能等级
+- [x] **T11.1** 更新 `ui-ai-config.js` — 模型智能等级
   - 模型添加时新增智能等级下拉选择 (高级/中级/基础)
   - 模型列表显示智能等级
   - 保存模型时保存 intelligenceLevel
 
-- [ ] **T11.2** 更新 `ui-ai-config.js` — API 测试按钮
+- [x] **T11.2** 更新 `ui-ai-config.js` — API 测试按钮
   - 新增 [测试API] 按钮
   - 弹出测试面板: 模型选择、问题输入、发送、预览回复、错误显示(红色)
   - 参考: [ui-design.md](ui-design.md) 第9.6节
 
-- [ ] **T11.3** 更新 `ai-service.js` — Ollama 支持
+- [x] **T11.3** 更新 `ai-service.js` — Ollama 支持
   - 检测响应格式：标准 OpenAI (choices[0].message.content) vs Ollama (message.content)
   - 自动适配两种响应结构
-  - 参考: [flow-design.md](flow-design.md) 第9.1节
+  - 抽取 parseResponse() 方法便于测试
 
-- [ ] **T11.4** 编写 P11 测试用例并运行
+- [x] **T11.4** 编写 P11 测试用例并运行
   - 测试智能等级保存/加载
   - 测试 Ollama 响应解析
   - 测试 OpenAI 响应解析
-  - 运行测试，确认全部通过
+  - 运行测试，确认全部通过 (143/143)
 
-- [ ] **T11.5** Git commit: "feat(writer): P11 AI 配置增强"
+- [x] **T11.5** Git commit: "feat(writer): P11 AI 配置增强"
 
 ---
 
