@@ -1,7 +1,7 @@
 # AI 小说写作工具 — 工作任务文档
 
-> 版本: 1.0  
-> 最后更新: 2026-03-15  
+> 版本: 2.0  
+> 最后更新: 2026-03-16  
 > **本文档是项目开发的唯一进度追踪入口，恢复工作时从此文档开始。**
 
 ---
@@ -32,6 +32,15 @@
 | P5 | AI 执行引擎 | ✅ 完成 |
 | P6 | 文件导入/导出 | ✅ 完成 |
 | P7 | 集成与端到端测试 | ✅ 完成 |
+| **P8** | **V2: 数据库与枚举升级** | ⬜ |
+| **P9** | **V2: 书籍管理与角色系统重构** | ⬜ |
+| **P10** | **V2: 左侧边栏重构与动态内容区** | ⬜ |
+| **P11** | **V2: AI 配置增强** | ⬜ |
+| **P12** | **V2: 聊天框重构与大纲导入** | ⬜ |
+| **P13** | **V2: 模板导入导出与自定义变量** | ⬜ |
+| **P14** | **V2: 日志管理系统** | ⬜ |
+| **P15** | **V2: AI 提示词自优化** | ⬜ |
+| **P16** | **V2: 导入导出更新与集成测试** | ⬜ |
 
 ---
 
@@ -299,6 +308,354 @@
   - 进行必要的样式修复
 
 - [x] **T7.4** Git commit: "feat(writer): P7 集成测试与完善"
+
+---
+
+## P8: V2 数据库与枚举升级
+
+> 参考文档: [data-design.md](data-design.md) 第2-4、6节, [architecture.md](architecture.md)
+
+### 任务清单
+
+- [ ] **T8.1** 更新 `enums.js`
+  - 移除固定的 RoleEnum (writer/reviewer/summarizer/recap_writer)
+  - 新增 IntelligenceLevelEnum (high/medium/basic)
+  - 保留 VariableEnum, TriggerEnum, CategoryTypeEnum, ChapterStatus, AITaskStatus
+
+- [ ] **T8.2** 升级 `db.js` — DB_VERSION 1 → 2
+  - 新建 ObjectStore: `books` (keyPath: 'id')
+  - 新建 ObjectStore: `ai_logs` (keyPath: 'id', 索引: idx_createdAt, idx_status)
+  - 重建 `role_configs` (keyPath 从 'role' 改为 'id')
+  - 为 `categories` 添加 `idx_bookId` 索引
+  - 为 `chapters` 添加 `idx_bookId` 索引
+  - 新增 STORES 常量: BOOKS, AI_LOGS
+  - 处理 V1→V2 数据迁移逻辑
+
+- [ ] **T8.3** 更新 `store.js`
+  - 新增 state: currentBookId, sidebarTab, outlineText, styleTags
+  - 移除 chatTab
+  - chapterOutline 语义不变（V2 改名为情节概述仅是 UI 层显示）
+
+- [ ] **T8.4** 更新 `events.js`
+  - 新增事件: BOOK_CHANGED, BOOK_CREATED, BOOK_DELETED, SIDEBAR_TAB_CHANGED, LOG_RECORDED
+
+- [ ] **T8.5** 菜单重命名
+  - "导入..." → "导入工作区..."
+  - "导出..." → "导出工作区..."
+  - 新增菜单项: "导出模板...", "导入模板...", "日志管理", "提示词优化"
+
+- [ ] **T8.6** 编写 P8 测试用例并运行
+  - 测试新枚举 IntelligenceLevelEnum
+  - 测试 DB v2 新表 (books, ai_logs) CRUD
+  - 测试 role_configs 新主键 (UUID) CRUD
+  - 测试新 Store 状态字段
+  - 测试新事件
+  - 运行测试，确认全部通过
+
+- [ ] **T8.7** Git commit: "feat(writer): P8 V2 数据库与枚举升级"
+
+---
+
+## P9: V2 书籍管理与角色系统重构
+
+> 参考文档: [requirements.md](requirements.md) 第7.1、7.6节, [ui-design.md](ui-design.md) 第9.4节
+
+### 任务清单
+
+- [ ] **T9.1** 创建 `ui-book.js` 书籍管理对话框
+  - 书籍列表展示
+  - 新建书籍（书名、简介）
+  - 编辑书籍信息
+  - 删除书籍
+  - 切换当前编辑书籍
+  - 参考: [ui-design.md](ui-design.md) 第9.4节
+
+- [ ] **T9.2** 重构 `ui-role-config.js` — 用户自建职能
+  - 移除固定 RoleEnum 列表
+  - 左侧改为动态列表，支持 [+ 添加] 新建职能
+  - 职能名称可编辑
+  - 新增 [删除职能] 按钮
+  - role_configs 主键改用 UUID
+  - 参考: [ui-design.md](ui-design.md) 第9.7节
+
+- [ ] **T9.3** 更新 `ui-flow-config.js` — 步骤引用 UUID
+  - 流程步骤中的职能引用从枚举值改为 UUID
+  - 职能选择下拉列表动态加载用户已创建的职能
+
+- [ ] **T9.4** 更新 `flow-engine.js` — 职能 UUID 查找
+  - _executeRole 使用 UUID 查找 role_configs
+  - 状态对象使用 roleId + displayName
+
+- [ ] **T9.5** 书籍数据关联
+  - 创建章节时自动关联当前 bookId
+  - 创建类目时自动关联当前 bookId
+  - 章节列表按 bookId 过滤
+  - 类目树按 bookId 过滤
+
+- [ ] **T9.6** 编写 P9 测试用例并运行
+  - 测试书籍 CRUD
+  - 测试用户自建职能 CRUD
+  - 测试流程引用 UUID
+  - 测试数据按 bookId 过滤
+  - 运行测试，确认全部通过
+
+- [ ] **T9.7** Git commit: "feat(writer): P9 书籍管理与角色系统重构"
+
+---
+
+## P10: V2 左侧边栏重构与动态内容区
+
+> 参考文档: [requirements.md](requirements.md) 第7.2节, [ui-design.md](ui-design.md) 第9.1-9.5节
+
+### 任务清单
+
+- [ ] **T10.1** 创建 `ui-sidebar.js` — 图标导航栏
+  - 左侧 48px 图标栏，含三个 Tab 按钮
+  - Tab 1: 类目设定 (📋)
+  - Tab 2: 章节目录 (📁)
+  - Tab 3: 书籍信息 (📖)
+  - Tab 切换事件
+  - 参考: [ui-design.md](ui-design.md) 第9.1节
+
+- [ ] **T10.2** 实现章节目录面板
+  - 显示当前书籍的章节列表
+  - 已完成章节 ✅，当前编辑 📝
+  - 点击切换章节
+  - [+] 添加新章节
+  - 参考: [ui-design.md](ui-design.md) 第9.2节
+
+- [ ] **T10.3** 实现书籍信息面板
+  - 书名、简介编辑
+  - 章节数、总字数统计
+  - [保存] [切换书籍] 按钮
+  - 参考: [ui-design.md](ui-design.md) 第9.3节
+
+- [ ] **T10.4** 重构 `index.html` 布局
+  - 新增图标导航栏 DOM
+  - 侧边面板区域
+  - 动态内容区
+  - 更新 CSS
+
+- [ ] **T10.5** 实现动态内容区
+  - 类目设定 → 选中项显示详情编辑
+  - 章节目录 → 选中章显示段落编辑器
+  - 书籍信息 → 显示书籍元信息编辑
+  - 参考: [ui-design.md](ui-design.md) 第9.5节
+
+- [ ] **T10.6** 编写 P10 测试用例并运行
+  - 测试侧边栏 Tab 切换
+  - 测试章节列表过滤
+  - 测试动态内容区切换
+  - 运行测试，确认全部通过
+
+- [ ] **T10.7** Git commit: "feat(writer): P10 左侧边栏重构与动态内容区"
+
+---
+
+## P11: V2 AI 配置增强
+
+> 参考文档: [requirements.md](requirements.md) 第7.4-7.5节, [ui-design.md](ui-design.md) 第9.6节
+
+### 任务清单
+
+- [ ] **T11.1** 更新 `ui-ai-config.js` — 模型智能等级
+  - 模型添加时新增智能等级下拉选择 (高级/中级/基础)
+  - 模型列表显示智能等级
+  - 保存模型时保存 intelligenceLevel
+
+- [ ] **T11.2** 更新 `ui-ai-config.js` — API 测试按钮
+  - 新增 [测试API] 按钮
+  - 弹出测试面板: 模型选择、问题输入、发送、预览回复、错误显示(红色)
+  - 参考: [ui-design.md](ui-design.md) 第9.6节
+
+- [ ] **T11.3** 更新 `ai-service.js` — Ollama 支持
+  - 检测响应格式：标准 OpenAI (choices[0].message.content) vs Ollama (message.content)
+  - 自动适配两种响应结构
+  - 参考: [flow-design.md](flow-design.md) 第9.1节
+
+- [ ] **T11.4** 编写 P11 测试用例并运行
+  - 测试智能等级保存/加载
+  - 测试 Ollama 响应解析
+  - 测试 OpenAI 响应解析
+  - 运行测试，确认全部通过
+
+- [ ] **T11.5** Git commit: "feat(writer): P11 AI 配置增强"
+
+---
+
+## P12: V2 聊天框重构与大纲导入
+
+> 参考文档: [requirements.md](requirements.md) 第7.8-7.9节, [ui-design.md](ui-design.md) 第9.8节
+
+### 任务清单
+
+- [ ] **T12.1** 重构 `ui-chat.js` — 移除 Tab，改为可折叠区块
+  - 移除 Tab 切换结构
+  - 改为垂直可折叠区块: 情节概述、后续概要、绑定设定、大纲导入
+  - 每个区块点击标题折叠/展开
+  - "章节概述" → "情节概述" 重命名
+
+- [ ] **T12.2** 新增 "直接添加" 按钮
+  - 将情节概述文本直接作为新段落添加
+  - 不经过 AI 处理
+
+- [ ] **T12.3** 新增风格标签区域
+  - 标签以 tag 形式显示
+  - 支持手动添加 [+] 和删除 [×]
+  - 标签作为额外上下文传递给 AI（更新上下文收集逻辑）
+
+- [ ] **T12.4** 新增大纲导入区块
+  - 可折叠的大纲导入区域
+  - 文本框支持粘贴长文本
+  - [开始批量生成] 按钮
+  - 逐行处理逻辑
+  - 参考: [flow-design.md](flow-design.md) 第9.3节
+
+- [ ] **T12.5** 编写 P12 测试用例并运行
+  - 测试可折叠区块展开/折叠
+  - 测试直接添加创建段落
+  - 测试风格标签增删
+  - 测试大纲分行处理
+  - 运行测试，确认全部通过
+
+- [ ] **T12.6** Git commit: "feat(writer): P12 聊天框重构与大纲导入"
+
+---
+
+## P13: V2 模板导入导出与自定义变量
+
+> 参考文档: [requirements.md](requirements.md) 第7.7、7.10节, [data-design.md](data-design.md) 第5.4节
+
+### 任务清单
+
+- [ ] **T13.1** 创建 `template-service.js` — 模板导入导出服务
+  - 导出: 读取 role_configs + flow_configs，查询模型智能等级，生成 JSON
+  - 导入: 解析 JSON，按智能等级匹配本地模型，生成新 UUID，写入数据
+  - 参考: [flow-design.md](flow-design.md) 第9.7节
+
+- [ ] **T13.2** 创建 `ui-template.js` — 模板对话框
+  - 导出模板对话框
+  - 导入模板对话框（含模型匹配预览、手动选择）
+  - 参考: [ui-design.md](ui-design.md) 第9.11节
+
+- [ ] **T13.3** 自定义变量定义 UI
+  - 在 ui-role-config.js 中新增自定义变量区域
+  - 变量名 + isOutput 开关
+  - 添加/删除自定义变量
+  - 提示词中可用 {{自定义:变量名}} 引用
+
+- [ ] **T13.4** 自定义变量流程引擎支持
+  - flow-engine.js 识别 {{自定义:变量名}} 格式
+  - 流程执行时维护自定义变量上下文
+  - 执行前进行依赖检查
+  - 参考: [flow-design.md](flow-design.md) 第9.2节
+
+- [ ] **T13.5** 编写 P13 测试用例并运行
+  - 测试模板导出 JSON 格式
+  - 测试模板导入匹配逻辑
+  - 测试自定义变量定义 CRUD
+  - 测试自定义变量依赖检查
+  - 测试自定义变量在流程中的传递
+  - 运行测试，确认全部通过
+
+- [ ] **T13.6** Git commit: "feat(writer): P13 模板导入导出与自定义变量"
+
+---
+
+## P14: V2 日志管理系统
+
+> 参考文档: [requirements.md](requirements.md) 第7.11节, [ui-design.md](ui-design.md) 第9.9节
+
+### 任务清单
+
+- [ ] **T14.1** 创建 `log-service.js` — 日志管理服务
+  - 记录日志: 写入 ai_logs 表
+  - 查询日志: 按时间倒序、按状态筛选
+  - 自动清理: 按天数和条数限制
+  - 导出日志: 生成 JSON 文件
+
+- [ ] **T14.2** 更新 `ai-service.js` — 自动日志记录
+  - 每次 AI 调用完成后记录日志
+  - 记录: 供应商名、模型名、提示词、回复、耗时、状态、错误
+
+- [ ] **T14.3** 创建 `ui-log.js` — 日志管理对话框
+  - 日志列表（时间倒序）
+  - 筛选: 全部/成功/失败
+  - 日期筛选
+  - 日志详情展开（查看完整提示词和回复）
+  - [导出] [清理] 按钮
+  - 自动清理设置
+  - 参考: [ui-design.md](ui-design.md) 第9.9节
+
+- [ ] **T14.4** 编写 P14 测试用例并运行
+  - 测试日志记录
+  - 测试日志查询和筛选
+  - 测试自动清理逻辑
+  - 运行测试，确认全部通过
+
+- [ ] **T14.5** Git commit: "feat(writer): P14 日志管理系统"
+
+---
+
+## P15: V2 AI 提示词自优化
+
+> 参考文档: [requirements.md](requirements.md) 第7.12节, [ui-design.md](ui-design.md) 第9.10节
+
+### 任务清单
+
+- [ ] **T15.1** 创建 `ui-prompt-opt.js` — 提示词优化对话框
+  - 职能选择下拉
+  - 优化模型选择（建议高级模型）
+  - 当前提示词展示
+  - [开始优化] 按钮
+  - 优化建议展示
+  - [对比查看] 原始 vs 优化
+  - [应用优化] / [取消] 按钮
+  - 参考: [ui-design.md](ui-design.md) 第9.10节
+
+- [ ] **T15.2** 实现优化逻辑
+  - 构造元提示词（提示词工程专家角色）
+  - 调用高级模型生成优化建议
+  - 应用优化时更新 role_configs.promptTemplate
+  - 参考: [flow-design.md](flow-design.md) 第9.6节
+
+- [ ] **T15.3** 编写 P15 测试用例并运行
+  - 测试优化对话框打开/关闭
+  - 测试 Mock AI 返回优化建议
+  - 测试应用优化更新提示词
+  - 运行测试，确认全部通过
+
+- [ ] **T15.4** Git commit: "feat(writer): P15 AI 提示词自优化"
+
+---
+
+## P16: V2 导入导出更新与集成测试
+
+> 参考文档: [data-design.md](data-design.md) 第5节, [flow-design.md](flow-design.md) 第5-6节
+
+### 任务清单
+
+- [ ] **T16.1** 更新 `export-service.js`
+  - 导出 V2 新表: books, ai_logs (可选)
+  - manifest.json version 改为 "2.0"
+
+- [ ] **T16.2** 更新 `import-service.js`
+  - 导入 V2 新表: books, ai_logs
+  - 兼容 V1 格式导入（无 books 表时创建默认书籍）
+  - manifest version 检查
+
+- [ ] **T16.3** 更新现有测试适配 V2 变更
+  - 修改依赖 RoleEnum 的测试
+  - 修改 role_configs 主键相关测试
+  - 确保旧测试在 V2 架构下仍然通过
+
+- [ ] **T16.4** V2 端到端测试
+  - 测试: 创建书籍 → 创建类目 → 配置职能 → 配置流程 → 编写段落 → 生成章节
+  - 测试: V2 全量导出 → 清空 → 导入 → 验证恢复
+  - 测试: 模板导出 → 导入 → 验证职能和流程配置匹配
+  - 运行全部测试，确认通过
+
+- [ ] **T16.5** Git commit: "feat(writer): P16 V2 导入导出与集成测试"
 
 ---
 

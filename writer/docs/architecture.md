@@ -1,7 +1,7 @@
 # AI 小说写作工具 — 架构设计文档
 
-> 版本: 1.0  
-> 最后更新: 2026-03-15  
+> 版本: 2.0  
+> 最后更新: 2026-03-16  
 > 关联文档: [需求文档](requirements.md) | [数据设计](data-design.md) | [流程设计](flow-design.md)
 
 ---
@@ -34,23 +34,30 @@ writer/
 ├── events.js                   // 全局事件总线
 │
 ├── ui-menu.js                  // 菜单栏 UI
+├── ui-sidebar.js               // V2: 左侧图标导航栏+侧边面板
 ├── ui-category.js              // 类目管理器 UI (树形视图)
-├── ui-detail.js                // 详情面板 UI
+├── ui-detail.js                // 详情面板 UI (V2: 内容区中显示)
 ├── ui-editor.js                // 小说编写区 UI (章节名+段落)
-├── ui-chat.js                  // 聊天框 UI (状态栏+输入+按钮)
+├── ui-chat.js                  // 聊天框 UI (V2: 可折叠区块)
 ├── ui-status.js                // 当前状态面板 UI
 ├── ui-modal.js                 // 模态对话框通用组件
 ├── ui-ai-config.js             // AI 配置对话框 (供应商管理)
-├── ui-role-config.js           // 职能配置对话框
+├── ui-role-config.js           // 职能配置对话框 (V2: 用户自建)
 ├── ui-flow-config.js           // 流程配置对话框
+├── ui-book.js                  // V2: 书籍管理对话框
+├── ui-log.js                   // V2: 日志管理对话框
+├── ui-prompt-opt.js            // V2: 提示词优化对话框
+├── ui-template.js              // V2: 模板导入/导出对话框
 │
-├── ai-service.js               // AI 调用服务层
-├── flow-engine.js              // 流程执行引擎
+├── ai-service.js               // AI 调用服务层 (V2: Ollama支持)
+├── flow-engine.js              // 流程执行引擎 (V2: 自定义变量)
 ├── recap-engine.js             // 前情提要生成引擎
-├── export-service.js           // 导出服务
-├── import-service.js           // 导入服务
+├── export-service.js           // 导出服务 (V2: 含书籍/日志)
+├── import-service.js           // 导入服务 (V2: 含书籍/日志)
+├── log-service.js              // V2: 日志管理服务
+├── template-service.js         // V2: 模板导入/导出服务
 │
-├── enums.js                    // 枚举定义
+├── enums.js                    // 枚举定义 (V2: +IntelligenceLevel, -RoleEnum)
 ├── utils.js                    // 工具函数
 │
 ├── docs/                       // 设计文档
@@ -152,6 +159,12 @@ const DB = {
 ```javascript
 // 状态结构
 const AppState = {
+  // V2: 书籍相关
+  currentBookId: null,            // V2: 当前编辑的书籍 ID
+  
+  // V2: 侧边栏相关
+  sidebarTab: 'categories',       // V2: 'categories' | 'chapters' | 'bookInfo'
+  
   // 类目相关
   selectedCategoryId: null,       // 当前选中的类目 ID
   categoryTree: [],               // 类目树形数据缓存
@@ -161,11 +174,12 @@ const AppState = {
   currentParagraphId: null,       // 当前选中的段落 ID
   paragraphs: [],                 // 当前章节的段落列表
   
-  // 聊天框
-  chatTab: 'outline',             // 'outline' | 'followUp' | 'bindings'
-  chapterOutline: '',             // 章节概述输入
+  // 聊天框 (V2: 移除 chatTab, 改为可折叠)
+  chapterOutline: '',             // 情节概述输入 (V2: 原名 章节概述)
   followUpSummary: '',            // 后续概要输入
   boundSettings: [],              // 绑定的设定 ID 列表
+  outlineText: '',                // V2: 大纲导入文本
+  styleTags: [],                  // V2: 风格标签列表
   
   // AI 运行状态
   aiRunning: false,               // 是否有 AI 任务运行中
@@ -208,6 +222,17 @@ const Events = {
   // 文件操作
   DATA_IMPORTED:        'data:imported',
   DATA_EXPORTED:        'data:exported',
+  
+  // V2: 书籍事件
+  BOOK_CHANGED:         'book:changed',
+  BOOK_CREATED:         'book:created',
+  BOOK_DELETED:         'book:deleted',
+  
+  // V2: 侧边栏事件
+  SIDEBAR_TAB_CHANGED:  'sidebar:tabChanged',
+  
+  // V2: 日志事件
+  LOG_RECORDED:         'log:recorded',
 }
 ```
 
@@ -354,19 +379,26 @@ app.js
 ├── ui-menu.js (→ events.js, ui-modal.js)
 │   ├── ui-ai-config.js (→ db.js, events.js, ui-modal.js)
 │   ├── ui-role-config.js (→ db.js, events.js, enums.js, ui-modal.js)
-│   └── ui-flow-config.js (→ db.js, events.js, enums.js, ui-modal.js)
+│   ├── ui-flow-config.js (→ db.js, events.js, enums.js, ui-modal.js)
+│   ├── ui-book.js (→ db.js, events.js, ui-modal.js)             // V2
+│   ├── ui-log.js (→ db.js, log-service.js, ui-modal.js)         // V2
+│   ├── ui-prompt-opt.js (→ db.js, ai-service.js, ui-modal.js)   // V2
+│   └── ui-template.js (→ template-service.js, ui-modal.js)      // V2
 │
+├── ui-sidebar.js (→ events.js, store.js)                         // V2
 ├── ui-category.js (→ db.js, events.js, store.js)
 ├── ui-detail.js (→ db.js, events.js, store.js)
 ├── ui-editor.js (→ db.js, events.js, store.js)
 ├── ui-chat.js (→ events.js, store.js, flow-engine.js)
 ├── ui-status.js (→ events.js, store.js)
 │
-├── ai-service.js (→ db.js)
+├── ai-service.js (→ db.js, log-service.js)
 ├── flow-engine.js (→ ai-service.js, db.js, events.js, enums.js)
 ├── recap-engine.js (→ ai-service.js, db.js)
 ├── export-service.js (→ db.js, vendor/jszip)
-└── import-service.js (→ db.js, vendor/jszip)
+├── import-service.js (→ db.js, vendor/jszip)
+├── log-service.js (→ db.js)                                      // V2
+└── template-service.js (→ db.js)                                  // V2
 ```
 
 ---
@@ -385,15 +417,18 @@ app.js
 <script src="store.js"></script>
 
 <!-- 服务层 -->
+<script src="log-service.js"></script>       <!-- V2: 在 ai-service 之前 -->
 <script src="ai-service.js"></script>
 <script src="flow-engine.js"></script>
 <script src="recap-engine.js"></script>
 <script src="export-service.js"></script>
 <script src="import-service.js"></script>
+<script src="template-service.js"></script>  <!-- V2 -->
 
 <!-- UI 层 -->
 <script src="ui-modal.js"></script>
 <script src="ui-menu.js"></script>
+<script src="ui-sidebar.js"></script>        <!-- V2 -->
 <script src="ui-category.js"></script>
 <script src="ui-detail.js"></script>
 <script src="ui-editor.js"></script>
@@ -402,8 +437,12 @@ app.js
 <script src="ui-ai-config.js"></script>
 <script src="ui-role-config.js"></script>
 <script src="ui-flow-config.js"></script>
+<script src="ui-book.js"></script>           <!-- V2 -->
+<script src="ui-log.js"></script>            <!-- V2 -->
+<script src="ui-prompt-opt.js"></script>     <!-- V2 -->
+<script src="ui-template.js"></script>       <!-- V2 -->
 
-<!-- 入口 -->
+<!-- 应用入口 -->
 <script src="app.js"></script>
 ```
 
