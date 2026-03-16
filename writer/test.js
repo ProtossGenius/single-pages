@@ -2884,5 +2884,60 @@ describe('P18 — 设定更新与 diff', () => {
   });
 });
 
+describe('P18 — 提示词优化重构', () => {
+  it('PromptOptUI.show 和 hide 存在', () => {
+    assert(typeof PromptOptUI.show === 'function', 'show 应是函数');
+    assert(typeof PromptOptUI.hide === 'function', 'hide 应是函数');
+  });
+
+  it('_extractVarValues 提取变量值', () => {
+    const template = '你是写手。章节概述:{{章节概述}}\n绑定:{{绑定设定}}';
+    const actual = '你是写手。章节概述:张三练剑\n绑定:人物:张三';
+    const vars = PromptOptUI._extractVarValues(template, actual);
+    assertEqual(vars.length, 2);
+    assertEqual(vars[0].name, '章节概述');
+    assertEqual(vars[0].value, '张三练剑');
+    assertEqual(vars[1].name, '绑定设定');
+    assertEqual(vars[1].value, '人物:张三');
+  });
+
+  it('_fillOptTemplate 填充优化模板', () => {
+    PromptOptUI._selectedLog = { prompt: '展开后', response: '原始输出' };
+    PromptOptUI._advancedGenResult = '高级输出';
+    const role = { promptTemplate: '变量版模板' };
+    const result = PromptOptUI._fillOptTemplate(
+      '{{原始提示词_变量版}} | {{原始提示词_展开版}} | {{原始输出}} | {{高级AI输出}} | {{用户意见}}',
+      role, '我的意见'
+    );
+    assert(result.includes('变量版模板'), '应包含变量版');
+    assert(result.includes('展开后'), '应包含展开版');
+    assert(result.includes('原始输出'), '应包含原始输出');
+    assert(result.includes('高级输出'), '应包含高级AI输出');
+    assert(result.includes('我的意见'), '应包含用户意见');
+    PromptOptUI._selectedLog = null;
+    PromptOptUI._advancedGenResult = '';
+  });
+
+  it('日志记录包含 roleId 字段', async () => {
+    await DB.clearAll();
+    await LogService.record({
+      providerId: 'p1', providerName: 'Test',
+      modelId: 'm1', modelName: 'model-1',
+      roleId: 'role-abc', roleName: '写手',
+      prompt: 'test', response: 'ok',
+      duration: 100, status: 'success',
+    });
+    const logs = await DB.getAll(DB.STORES.AI_LOGS);
+    assertEqual(logs.length, 1);
+    assertEqual(logs[0].roleId, 'role-abc');
+    assertEqual(logs[0].roleName, '写手');
+  });
+
+  it('清理 P18.6 测试数据', async () => {
+    await DB.clearAll();
+    assert(true);
+  });
+});
+
 // ---- 运行测试 ----
 TestRunner.run();

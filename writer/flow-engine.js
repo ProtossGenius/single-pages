@@ -126,7 +126,10 @@ const FlowEngine = (() => {
       const prompt = _replaceVariables(config.promptTemplate || '', context);
 
       // 调用 AI
-      const result = await AIService.call(config.providerId, config.modelId, prompt);
+      const result = await AIService.call(config.providerId, config.modelId, prompt, {
+        roleId: roleId,
+        roleName: config.name || roleId,
+      });
 
       statusRole.failCount = result.failCount || 0;
       statusRole.duration = Date.now() - roleStart;

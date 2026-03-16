@@ -10,6 +10,8 @@ const LogService = {
       providerName: entry.providerName || '',
       modelId: entry.modelId || '',
       modelName: entry.modelName || '',
+      roleId: entry.roleId || '',
+      roleName: entry.roleName || '',
       prompt: entry.prompt || '',
       response: entry.response || '',
       duration: entry.duration || 0,

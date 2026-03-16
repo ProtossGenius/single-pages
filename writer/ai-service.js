@@ -24,6 +24,7 @@ const AIService = {
       LogService.record({
         providerId, providerName: provider.name,
         modelId, modelName: model.name,
+        roleId: options.roleId || '', roleName: options.roleName || '',
         prompt, response: result.text,
         duration: Date.now() - start,
         status: 'success',
@@ -34,6 +35,7 @@ const AIService = {
       LogService.record({
         providerId, providerName: provider.name,
         modelId, modelName: model.name,
+        roleId: options.roleId || '', roleName: options.roleName || '',
         prompt, response: '',
         duration: Date.now() - start,
         status: 'failed', error: err.message,
