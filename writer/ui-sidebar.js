@@ -223,18 +223,23 @@ const SidebarUI = (() => {
 
     if (tabId === 'categories') {
       if (categoryPanel) categoryPanel.style.display = 'none';
-      if (detailPanel) detailPanel.style.display = '';
+      if (detailPanel) {
+        detailPanel.style.display = '';
+        detailPanel.style.flex = '1';
+        detailPanel.style.width = '';
+        detailPanel.style.minWidth = '';
+      }
       if (editorPanel) editorPanel.style.display = 'none';
       if (statusPanel) statusPanel.style.display = '';
     } else if (tabId === 'chapters') {
       if (categoryPanel) categoryPanel.style.display = 'none';
-      if (detailPanel) detailPanel.style.display = 'none';
+      if (detailPanel) { detailPanel.style.display = 'none'; detailPanel.style.flex = ''; }
       if (editorPanel) editorPanel.style.display = '';
       if (statusPanel) statusPanel.style.display = '';
     } else if (tabId === 'bookInfo') {
       // Book info is in sidebar panel; hide other content and status panel
       if (categoryPanel) categoryPanel.style.display = 'none';
-      if (detailPanel) detailPanel.style.display = 'none';
+      if (detailPanel) { detailPanel.style.display = 'none'; detailPanel.style.flex = ''; }
       if (editorPanel) editorPanel.style.display = 'none';
       if (statusPanel) statusPanel.style.display = 'none';
     }
