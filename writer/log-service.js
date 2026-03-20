@@ -47,10 +47,13 @@ const LogService = {
 
   /**
    * 自动清理 — 按天数和条数限制
+   * @param {Object} [options]
+   * @param {number} [options.maxDays] - 保留天数
+   * @param {number} [options.maxCount] - 最大条数
    */
-  async cleanup() {
-    const maxDays = (await DB.getById(DB.STORES.APP_SETTINGS, 'log_max_days'))?.value || 30;
-    const maxCount = (await DB.getById(DB.STORES.APP_SETTINGS, 'log_max_count'))?.value || 1000;
+  async cleanup(options = {}) {
+    const maxDays = options.maxDays ?? (await DB.getById(DB.STORES.APP_SETTINGS, 'log_max_days'))?.value ?? 30;
+    const maxCount = options.maxCount ?? (await DB.getById(DB.STORES.APP_SETTINGS, 'log_max_count'))?.value ?? 1000;
 
     const logs = await DB.getAll(DB.STORES.AI_LOGS);
     logs.sort((a, b) => b.createdAt - a.createdAt);
@@ -64,8 +67,13 @@ const LogService = {
       }
     }
 
-    for (const id of toDelete) {
-      await DB.delete(DB.STORES.AI_LOGS, id);
+    if (toDelete.length > 0) {
+      await DB.transaction(DB.STORES.AI_LOGS, 'readwrite', (stores) => {
+        const store = stores[DB.STORES.AI_LOGS];
+        for (const id of toDelete) {
+          store.delete(id);
+        }
+      });
     }
     return toDelete.length;
   },

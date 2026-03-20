@@ -56,7 +56,10 @@
           <!-- V2: 可折叠区块 -->
           <div class="chat-sections">
             <div class="chat-section expanded" data-section="outline">
-              <div class="chat-section-title">▼ 情节概述</div>
+              <div class="chat-section-title" style="display:flex;align-items:center;">
+                <span style="flex:1;">▼ 情节概述</span>
+                <span id="btn-clear-outline" class="btn-icon" title="清空并取消编辑" style="display:none;font-size:14px;cursor:pointer;">✕</span>
+              </div>
               <div class="chat-section-body">
                 <textarea id="input-outline" class="chat-textarea" placeholder="输入情节概述..."></textarea>
               </div>
@@ -99,8 +102,9 @@
           <div class="chat-actions">
             <button id="btn-direct-add" class="btn btn-secondary">直接添加</button>
             <button id="btn-update-settings" class="btn btn-secondary">更新设定</button>
+            <button id="btn-regenerate" class="btn btn-secondary" style="display:none;">重新生成</button>
             <button id="btn-generate" class="btn btn-primary">开始生成</button>
-            <button id="btn-generate-chapter" class="btn btn-secondary">生成章节</button>
+            <button id="btn-generate-chapter" class="btn btn-secondary">生成并结束本章</button>
           </div>
         </div>
       </div>

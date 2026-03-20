@@ -154,7 +154,7 @@ describe('Enums', () => {
   });
 
   it('VariableEnum 包含所有变量', () => {
-    assertEqual(VariableList.length, 11);
+    assertEqual(VariableList.length, 12);
   });
 
   it('InputVariables 和 OutputVariables 筛选正确', () => {
@@ -3015,6 +3015,217 @@ describe('P19 — Bug 修复与功能完善', () => {
   });
 
   it('清理 P19 测试数据', async () => {
+    await DB.clearAll();
+    assert(true);
+  });
+});
+
+describe('P20 — 日志清理修复', () => {
+  it('LogService.cleanup 接受可选参数', async () => {
+    await DB.clearAll();
+    // 创建 5 条日志
+    for (let i = 0; i < 5; i++) {
+      await LogService.record({
+        providerId: 'p1', providerName: 'Test',
+        modelId: 'm1', modelName: 'model-1',
+        roleId: 'r1', roleName: '写手',
+        prompt: 'test', response: 'ok',
+        duration: 100, status: 'success',
+      });
+    }
+    const before = await DB.getAll(DB.STORES.AI_LOGS);
+    assertEqual(before.length, 5);
+
+    // 仅保留 2 条
+    const deleted = await LogService.cleanup({ maxDays: 365, maxCount: 2 });
+    assertEqual(deleted, 3);
+    const after = await DB.getAll(DB.STORES.AI_LOGS);
+    assertEqual(after.length, 2);
+  });
+
+  it('LogService.cleanup 按天数清理', async () => {
+    await DB.clearAll();
+    // 创建一条老日志
+    const oldLog = {
+      id: Utils.generateId(),
+      providerId: 'p1', providerName: 'Test',
+      modelId: 'm1', modelName: 'model-1',
+      roleId: 'r1', roleName: '写手',
+      prompt: 'old', response: 'old reply',
+      duration: 100, status: 'success',
+      createdAt: Date.now() - 100 * 86400000, // 100 天前
+    };
+    await DB.put(DB.STORES.AI_LOGS, oldLog);
+
+    // 创建一条新日志
+    await LogService.record({
+      providerId: 'p1', providerName: 'Test',
+      modelId: 'm1', modelName: 'model-1',
+      prompt: 'new', response: 'new reply',
+      duration: 50, status: 'success',
+    });
+
+    const deleted = await LogService.cleanup({ maxDays: 30, maxCount: 1000 });
+    assertEqual(deleted, 1);
+    const remaining = await DB.getAll(DB.STORES.AI_LOGS);
+    assertEqual(remaining.length, 1);
+    assertEqual(remaining[0].response, 'new reply');
+  });
+
+  it('清理 P20.1 测试数据', async () => {
+    await DB.clearAll();
+    assert(true);
+  });
+});
+
+describe('P20 — 章节位置变量', () => {
+  it('VariableEnum 包含 CHAPTER_POSITION', () => {
+    assert(VariableEnum.CHAPTER_POSITION, 'CHAPTER_POSITION 应存在');
+    assertEqual(VariableEnum.CHAPTER_POSITION.value, 'chapter_position');
+    assertEqual(VariableEnum.CHAPTER_POSITION.label, '章节位置');
+    assert(VariableEnum.CHAPTER_POSITION.isInput, '应是输入变量');
+  });
+
+  it('collectContext 返回 chapter_position', async () => {
+    await DB.clearAll();
+    const ctx = await ChatUI.collectContext();
+    assert('chapter_position' in ctx, 'context 应包含 chapter_position');
+  });
+
+  it('chapter_position 无段落时为 开头', async () => {
+    Store.set('paragraphs', []);
+    const ctx = await ChatUI.collectContext();
+    assertEqual(ctx.chapter_position, '开头');
+  });
+
+  it('chapter_position 有段落时为 中间', async () => {
+    Store.set('paragraphs', [{ content: '第一段' }]);
+    const ctx = await ChatUI.collectContext();
+    assertEqual(ctx.chapter_position, '中间');
+    Store.set('paragraphs', []);
+  });
+
+  it('FlowEngine._replaceVariables 替换章节位置', () => {
+    const template = '当前位置:{{章节位置}}';
+    const ctx = { chapter_position: '开头' };
+    const result = FlowEngine._replaceVariables(template, ctx);
+    assertEqual(result, '当前位置:开头');
+  });
+
+  it('index.html 按钮文本为 生成并结束本章', () => {
+    const btn = document.getElementById('btn-generate-chapter');
+    assert(btn, '按钮应存在');
+    assertEqual(btn.textContent, '生成并结束本章');
+  });
+
+  it('清理 P20.2 测试数据', async () => {
+    await DB.clearAll();
+    assert(true);
+  });
+});
+
+describe('P20 — 最后一段编辑与重新生成', () => {
+  it('重新生成按钮存在', () => {
+    const btn = document.getElementById('btn-regenerate');
+    assert(btn, '重新生成按钮应存在');
+  });
+
+  it('情节概述 X 清空按钮存在', () => {
+    const btn = document.getElementById('btn-clear-outline');
+    assert(btn, '清空按钮应存在');
+  });
+
+  it('enterEditLastParagraphMode 更改按钮文本', () => {
+    ChatUI.enterEditLastParagraphMode('测试内容');
+    const genBtn = document.getElementById('btn-generate');
+    assertEqual(genBtn.textContent, '更新最后一段');
+    const clearBtn = document.getElementById('btn-clear-outline');
+    assertEqual(clearBtn.style.display, '');
+
+    // 清理
+    ChatUI.exitEditLastParagraphMode();
+    assertEqual(genBtn.textContent, '开始生成');
+    assertEqual(clearBtn.style.display, 'none');
+  });
+
+  it('enterEditLastParagraphMode 填充情节概述', () => {
+    ChatUI.enterEditLastParagraphMode('最后一段的内容');
+    const outlineInput = document.getElementById('input-outline');
+    assertEqual(outlineInput.value, '最后一段的内容');
+
+    ChatUI.exitEditLastParagraphMode();
+    assertEqual(outlineInput.value, '');
+  });
+
+  it('清理 P20.3 测试数据', async () => {
+    await DB.clearAll();
+    assert(true);
+  });
+});
+
+describe('P20 — 提示词优化重构', () => {
+  it('PromptOptUI.show 和 hide 存在', () => {
+    assert(typeof PromptOptUI.show === 'function', 'show 应是函数');
+    assert(typeof PromptOptUI.hide === 'function', 'hide 应是函数');
+  });
+
+  it('_extractVarValues 仍能提取变量值', () => {
+    const template = '你是写手。章节概述:{{章节概述}}\n绑定:{{绑定设定}}';
+    const actual = '你是写手。章节概述:张三练剑\n绑定:人物:张三';
+    const vars = PromptOptUI._extractVarValues(template, actual);
+    assertEqual(vars.length, 2);
+    assertEqual(vars[0].name, '章节概述');
+    assertEqual(vars[0].value, '张三练剑');
+    assertEqual(vars[1].name, '绑定设定');
+    assertEqual(vars[1].value, '人物:张三');
+  });
+
+  it('_fillOptTemplate 填充优化模板', () => {
+    PromptOptUI._selectedLog = { prompt: '展开后', response: '原始输出' };
+    PromptOptUI._advancedGenResult = '高级输出';
+    PromptOptUI._origGenResult = '原始模型输出';
+    const role = { promptTemplate: '变量版模板' };
+    const result = PromptOptUI._fillOptTemplate(
+      '{{原始提示词_变量版}} | {{原始提示词_展开版}} | {{原始输出}} | {{高级AI输出}} | {{用户意见}}',
+      role, '我的意见'
+    );
+    assert(result.includes('变量版模板'), '应包含变量版');
+    assert(result.includes('展开后'), '应包含展开版');
+    assert(result.includes('原始模型输出'), '应包含原始输出 (来自 _origGenResult)');
+    assert(result.includes('高级输出'), '应包含高级AI输出');
+    assert(result.includes('我的意见'), '应包含用户意见');
+    PromptOptUI._selectedLog = null;
+    PromptOptUI._advancedGenResult = '';
+    PromptOptUI._origGenResult = '';
+  });
+
+  it('_defaultOptTemplate 包含双评分和变量注明', () => {
+    const tpl = PromptOptUI._defaultOptTemplate;
+    assert(tpl.includes('originalScore'), '应包含 originalScore');
+    assert(tpl.includes('advancedScore'), '应包含 advancedScore');
+    assert(tpl.includes('注明'), '应包含变量注明规则');
+    assert(tpl.includes('章节位置'), '应包含章节位置变量');
+  });
+
+  it('_buildLatestPrompt 使用最新模板和日志变量', () => {
+    const role = { promptTemplate: '你是{{角色名}}，请写{{章节概述}}' };
+    const log = {
+      prompt: '你是张三，请写测试内容',
+      variables: [{ name: '角色名', value: '张三' }, { name: '章节概述', value: '测试内容' }],
+    };
+    const result = PromptOptUI._buildLatestPrompt(role, log);
+    assertEqual(result, '你是张三，请写测试内容');
+  });
+
+  it('_buildLatestPrompt 回退到 extractVarValues', () => {
+    const role = { promptTemplate: '前文:{{前文信息}}\n概述:{{章节概述}}' };
+    const log = { prompt: '前文:过去发生了\n概述:现在的事' };
+    const result = PromptOptUI._buildLatestPrompt(role, log);
+    assert(result.includes('过去发生了'), '应包含前文');
+    assert(result.includes('现在的事'), '应包含概述');
+  });
+
+  it('清理 P20 测试数据', async () => {
     await DB.clearAll();
     assert(true);
   });

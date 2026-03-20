@@ -44,6 +44,7 @@
 | **P17** | **V2: UI 修复与默认配置** | ✅ |
 | **P18** | **V2: UI 增强与提示词优化重构** | ✅ |
 | **P19** | **V2: Bug 修复与功能完善** | ✅ |
+| **P20** | **V2: 功能增强与提示词优化重构** | ✅ |
 
 ---
 
@@ -772,6 +773,45 @@
 - [x] **T19.7** 编写 P19 测试用例并运行 (207/207 通过)
 
 - [x] **T19.8** Git commit
+
+---
+
+## P20: V2 功能增强与提示词优化重构
+
+> 参考文档: [ui-design.md](ui-design.md) 第 9.24–9.28 节
+
+### 任务清单
+
+- [x] **T20.1** 修复日志清理无效果 (log-service.js, ui-log.js)
+  - cleanup() 接受可选 { maxDays, maxCount } 参数
+  - 使用 DB.transaction 单一事务批量删除
+  - UI 清理按钮传递当前输入值
+
+- [x] **T20.2** 章节位置变量 (enums.js, ui-chat.js, index.html)
+  - VariableEnum 新增 CHAPTER_POSITION
+  - collectContext 自动填充: 无段落=开头, 默认=中间
+  - handleGenerateChapter 设置 chapter_position=结尾
+  - 按钮文本「生成章节」→「生成并结束本章」
+
+- [x] **T20.3** 最后一段编辑与重新生成 (ui-chat.js, ui-editor.js, index.html)
+  - [重新生成] 按钮: 删除最后一段后重新生成
+  - 点击最后一段 → 复制到情节概述, 按钮变「更新最后一段」
+  - 情节概述 ✕ 按钮: 清空+退出编辑模式
+  - EditorUI 最后一段点击触发编辑模式
+
+- [x] **T20.4** 提示词优化: 每步独立模型 + 变量注明 (ui-prompt-opt.js)
+  - 三步各有独立模型选择器 (原始/高级/优化)
+  - 首选自动填充后续空选择器
+  - 优化模板增加变量注明规则
+
+- [x] **T20.5** 提示词优化: 布局重构 + 双评分 (ui-prompt-opt.js)
+  - 左侧: 职能选择 + 日志列表 (紧凑)
+  - 右侧: 日志详情 + 内容生成 + 优化
+  - 双评分: originalScore + advancedScore
+
+- [x] **T20.6** 编写 P20 测试用例并运行 (229/229 通过)
+
+- [x] **T20.7** Git commit
 
 ---
 

@@ -63,11 +63,11 @@ const EditorUI = (() => {
 
     for (let i = 0; i < paragraphs.length; i++) {
       const p = paragraphs[i];
-      listEl.appendChild(await renderParagraph(p, i + 1));
+      listEl.appendChild(await renderParagraph(p, i + 1, i === paragraphs.length - 1));
     }
   }
 
-  async function renderParagraph(para, index) {
+  async function renderParagraph(para, index, isLast) {
     const selectedId = Store.get('currentParagraphId');
     const item = Utils.createElement('div', {
       className: `paragraph-item${para.id === selectedId ? ' selected' : ''}`,
@@ -85,10 +85,13 @@ const EditorUI = (() => {
       enterEditMode(content, para);
     });
 
-    // 点击选中
+    // 点击选中；最后一段点击进入编辑最后一段模式
     item.addEventListener('click', (e) => {
       if (content.getAttribute('contenteditable') === 'true') return;
       Store.selectParagraph(para.id);
+      if (isLast && para.content) {
+        ChatUI.enterEditLastParagraphMode(para.content);
+      }
       refreshParagraphs();
     });
 

@@ -26,6 +26,7 @@ const VariableEnum = Object.freeze({
   GENERATED_PARAGRAPH: { value: 'generated_paragraph',  label: '生成段落',   isInput: false, isOutput: true,  blocking: true  },
   GENERATED_SUMMARY:   { value: 'generated_summary',    label: '生成概要',   isInput: false, isOutput: true,  blocking: true  },
   GENERATED_RECAP:     { value: 'generated_recap',      label: '生成提要',   isInput: false, isOutput: true,  blocking: false },
+  CHAPTER_POSITION:    { value: 'chapter_position',     label: '章节位置',   isInput: true,  isOutput: false, blocking: false },
 });
 
 const VariableList = Object.values(VariableEnum);

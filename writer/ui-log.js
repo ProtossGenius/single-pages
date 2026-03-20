@@ -91,7 +91,10 @@ const LogUI = {
     });
 
     cleanBtn.addEventListener('click', async () => {
-      const count = await LogService.cleanup();
+      const count = await LogService.cleanup({
+        maxDays: parseInt(daysInput.value) || 30,
+        maxCount: parseInt(countInput.value) || 1000,
+      });
       Utils.showToast(`已清理 ${count} 条日志`);
       await loadList();
     });

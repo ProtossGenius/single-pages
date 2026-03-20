@@ -2,18 +2,23 @@
 
 const ChatUI = (() => {
   let container = null;
+  let _editingLastParagraph = false;
 
   function init(containerEl) {
     container = containerEl;
 
     // V2: 可折叠区块切换
     container.querySelectorAll('.chat-section-title').forEach(title => {
-      title.addEventListener('click', () => {
+      title.addEventListener('click', (e) => {
+        // 忽略 X 清空按钮的点击
+        if (e.target.id === 'btn-clear-outline') return;
         const section = title.parentElement;
         const body = section.querySelector('.chat-section-body');
         const expanded = section.classList.toggle('expanded');
         body.style.display = expanded ? '' : 'none';
-        title.textContent = (expanded ? '▼ ' : '▶ ') + title.textContent.replace(/^[▼▶]\s*/, '');
+        const textTarget = title.querySelector('span') || title;
+        const currentText = textTarget.textContent.replace(/^[▼▶]\s*/, '');
+        textTarget.textContent = (expanded ? '▼ ' : '▶ ') + currentText;
       });
     });
 
@@ -61,6 +66,17 @@ const ChatUI = (() => {
       if (typeof SettingUpdateUI !== 'undefined') SettingUpdateUI.start();
     });
 
+    // P20: 重新生成按钮
+    const regenBtn = document.getElementById('btn-regenerate');
+    if (regenBtn) regenBtn.addEventListener('click', handleRegenerate);
+
+    // P20: 情节概述 X 清空按钮
+    const clearOutlineBtn = document.getElementById('btn-clear-outline');
+    if (clearOutlineBtn) clearOutlineBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      exitEditLastParagraphMode();
+    });
+
     // V2: 批量生成按钮
     const batchBtn = document.getElementById('btn-batch-generate');
     if (batchBtn) batchBtn.addEventListener('click', handleBatchGenerate);
@@ -92,6 +108,10 @@ const ChatUI = (() => {
     EventBus.on(Events.AI_TASK_COMPLETED, () => updateButtons());
     EventBus.on(Events.AI_TASK_FAILED, () => updateButtons());
     EventBus.on(Events.AI_TASK_PROGRESS, updateStatusBar);
+
+    // 段落变化时更新重新生成按钮可见性
+    EventBus.on(Events.PARAGRAPH_ADDED, () => updateButtons());
+    EventBus.on(Events.PARAGRAPH_DELETED, () => updateButtons());
   }
 
   // V2: 风格标签管理
@@ -243,10 +263,18 @@ const ChatUI = (() => {
     const genChapBtn = document.getElementById('btn-generate-chapter');
     const directBtn = document.getElementById('btn-direct-add');
     const batchBtn = document.getElementById('btn-batch-generate');
+    const regenBtn = document.getElementById('btn-regenerate');
     if (genBtn) genBtn.disabled = disabled;
     if (genChapBtn) genChapBtn.disabled = disabled;
     if (directBtn) directBtn.disabled = disabled;
     if (batchBtn) batchBtn.disabled = disabled;
+    if (regenBtn) regenBtn.disabled = disabled;
+
+    // 有段落时才显示重新生成按钮
+    const paragraphs = Store.get('paragraphs') || [];
+    if (regenBtn && !_editingLastParagraph) {
+      regenBtn.style.display = paragraphs.length > 0 ? '' : 'none';
+    }
   }
 
   function updateStatusBar(status) {
@@ -305,6 +333,18 @@ const ChatUI = (() => {
   async function handleGenerate() {
     try {
       const context = await collectContext();
+
+      if (_editingLastParagraph) {
+        // 更新最后一段模式: 删除最后一段，重新生成
+        const paragraphs = Store.get('paragraphs') || [];
+        if (paragraphs.length > 0) {
+          const lastPara = paragraphs[paragraphs.length - 1];
+          await DB.delete(DB.STORES.PARAGRAPHS, lastPara.id);
+          EventBus.emit(Events.PARAGRAPH_DELETED, { id: lastPara.id });
+        }
+        exitEditLastParagraphMode();
+      }
+
       const result = await FlowEngine.execute('generate_paragraph', context);
 
       // 将生成的段落添加到编辑器
@@ -323,9 +363,67 @@ const ChatUI = (() => {
     }
   }
 
+  /** P20: 重新生成最后一段 — 删除最后一段后重新执行生成 */
+  async function handleRegenerate() {
+    const paragraphs = Store.get('paragraphs') || [];
+    if (paragraphs.length === 0) {
+      Utils.showToast('暂无段落可重新生成', 'warning');
+      return;
+    }
+    const lastPara = paragraphs[paragraphs.length - 1];
+    await DB.delete(DB.STORES.PARAGRAPHS, lastPara.id);
+    EventBus.emit(Events.PARAGRAPH_DELETED, { id: lastPara.id });
+
+    try {
+      const context = await collectContext();
+      const result = await FlowEngine.execute('generate_paragraph', context);
+      if (result.generated_paragraph) {
+        await EditorUI.addParagraph(result.generated_paragraph);
+      }
+      const updates = {};
+      if (result.generated_summary) updates.chapterSummary = result.generated_summary;
+      if (result.ai_review) updates.aiReviewNotes = result.ai_review;
+      if (result.generated_recap) updates.recapText = result.generated_recap;
+      if (Object.keys(updates).length > 0) Store.updateStatusPanel(updates);
+    } catch (err) {
+      Utils.showToast('重新生成失败: ' + err.message, 'error');
+    }
+  }
+
+  /** P20: 进入编辑最后一段模式 */
+  function enterEditLastParagraphMode(content) {
+    _editingLastParagraph = true;
+    const outlineInput = document.getElementById('input-outline');
+    if (outlineInput) {
+      outlineInput.value = content;
+      Store.setChapterOutline(content);
+    }
+    const genBtn = document.getElementById('btn-generate');
+    if (genBtn) genBtn.textContent = '更新最后一段';
+    const clearBtn = document.getElementById('btn-clear-outline');
+    if (clearBtn) clearBtn.style.display = '';
+    const regenBtn = document.getElementById('btn-regenerate');
+    if (regenBtn) regenBtn.style.display = '';
+  }
+
+  /** P20: 退出编辑最后一段模式 */
+  function exitEditLastParagraphMode() {
+    _editingLastParagraph = false;
+    const outlineInput = document.getElementById('input-outline');
+    if (outlineInput) {
+      outlineInput.value = '';
+      Store.setChapterOutline('');
+    }
+    const genBtn = document.getElementById('btn-generate');
+    if (genBtn) genBtn.textContent = '开始生成';
+    const clearBtn = document.getElementById('btn-clear-outline');
+    if (clearBtn) clearBtn.style.display = 'none';
+  }
+
   async function handleGenerateChapter() {
     try {
       const context = await collectContext();
+      context.chapter_position = '结尾';
       const result = await FlowEngine.execute('generate_chapter', context);
 
       // 更新右侧状态面板
@@ -360,6 +458,9 @@ const ChatUI = (() => {
     const paragraphs = Store.get('paragraphs') || [];
     const chapterContent = paragraphs.map(p => p.content).filter(Boolean).join('\n\n');
 
+    // 章节位置: 无段落=开头, 默认=中间
+    const chapterPosition = paragraphs.length === 0 ? '开头' : '中间';
+
     // V2: 风格标签作为额外上下文
     const styleTags = Store.get('styleTags') || [];
     const styleContext = styleTags.length > 0 ? `风格: ${styleTags.join(', ')}` : '';
@@ -372,6 +473,7 @@ const ChatUI = (() => {
       bound_settings: boundText + (styleContext ? '\n' + styleContext : ''),
       current_paragraph: '',
       chapter_content: chapterContent,
+      chapter_position: chapterPosition,
       ai_review: Store.get('aiReviewNotes') || '',
       generated_paragraph: '',
       generated_summary: '',
@@ -382,5 +484,5 @@ const ChatUI = (() => {
   // Keep switchTab as no-op for backward compatibility
   function switchTab() {}
 
-  return { init, refreshBindings, updateButtons, switchTab, renderStyleTags, collectContext };
+  return { init, refreshBindings, updateButtons, switchTab, renderStyleTags, collectContext, enterEditLastParagraphMode, exitEditLastParagraphMode };
 })();
