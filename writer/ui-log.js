@@ -28,7 +28,7 @@ const LogUI = {
     }
 
     const exportBtn = Utils.createElement('button', { className: 'btn btn-sm btn-secondary', textContent: '导出' });
-    const cleanBtn = Utils.createElement('button', { className: 'btn btn-sm btn-danger', textContent: '清理' });
+    const cleanBtn = Utils.createElement('button', { className: 'btn btn-sm btn-danger', textContent: '清理当前筛选' });
 
     filterRow.appendChild(Utils.createElement('span', { textContent: '筛选:', style: 'font-size:13px;font-weight:600;' }));
     filterRow.appendChild(statusSelect);
@@ -91,10 +91,19 @@ const LogUI = {
     });
 
     cleanBtn.addEventListener('click', async () => {
-      const count = await LogService.cleanup({
-        maxDays: parseInt(daysInput.value) || 30,
-        maxCount: parseInt(countInput.value) || 1000,
-      });
+      const filter = {};
+      if (statusSelect.value) filter.status = statusSelect.value;
+      const days = parseInt(dateSelect.value, 10);
+      if (days > 0) filter.since = Date.now() - days * 86400000;
+
+      const logs = await LogService.query(filter);
+      if (logs.length === 0) {
+        Utils.showToast('当前筛选下没有可清理的日志', 'warning');
+        return;
+      }
+      if (!confirm(`确定清理当前筛选结果中的 ${logs.length} 条日志吗？`)) return;
+
+      const count = await LogService.cleanup({ ids: logs.map(log => log.id) });
       Utils.showToast(`已清理 ${count} 条日志`);
       await loadList();
     });

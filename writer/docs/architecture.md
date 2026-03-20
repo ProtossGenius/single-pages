@@ -10,7 +10,7 @@
 
 | 层面 | 选型 | 说明 |
 |------|------|------|
-| UI 框架 | 无框架，原生 JS | 与父项目一致 |
+| UI 框架 | 原生 JS + cash-dom | cash-dom 仅作为轻量 DOM 查询/控件控制辅助，文件本地化到 `vendor/` |
 | 样式 | 原生 CSS | CSS 变量 + 语义化类名 |
 | 数据持久化 | IndexedDB | 浏览器本地存储 |
 | 压缩/解压 | JSZip (vendor/) | 文件导入导出 |
@@ -69,6 +69,7 @@ writer/
 │   └── tasks.md
 │
 └── vendor/                     // 第三方库
+  ├── cash.min.js             // 轻量 DOM helper
     └── jszip.min.js            // JSZip 压缩库
 ```
 
@@ -129,6 +130,7 @@ EventBus.emit(event, data)
 - 用户交互处理
 - 监听事件总线更新视图
 - 每个 UI 模块管理自己的 DOM 区域
+- 允许使用本地 `vendor/cash.min.js` 简化选择器、按钮状态与显隐控制
 
 ---
 
@@ -360,9 +362,10 @@ document.addEventListener('DOMContentLoaded', main);
 
 | 库 | 版本 | 用途 | 下载方式 |
 |----|------|------|----------|
+| cash-dom | 8.x | 轻量 DOM 查询与事件绑定辅助 | 下载 min.js 到 vendor/ |
 | JSZip | 3.x | ZIP 压缩/解压 | 下载 min.js 到 vendor/ |
 
-仅需一个第三方库 (JSZip)，用于文件导入导出功能。
+第三方库必须本地化到 `writer/vendor/`。当前使用 cash-dom 处理少量 DOM 控制，JSZip 处理导入导出。
 
 ---
 
@@ -407,6 +410,7 @@ app.js
 
 ```html
 <!-- 第三方库 -->
+<script src="vendor/cash.min.js"></script>
 <script src="vendor/jszip.min.js"></script>
 
 <!-- 基础层 -->

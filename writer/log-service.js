@@ -52,8 +52,23 @@ const LogService = {
    * @param {number} [options.maxCount] - 最大条数
    */
   async cleanup(options = {}) {
-    const maxDays = options.maxDays ?? (await DB.getById(DB.STORES.APP_SETTINGS, 'log_max_days'))?.value ?? 30;
-    const maxCount = options.maxCount ?? (await DB.getById(DB.STORES.APP_SETTINGS, 'log_max_count'))?.value ?? 1000;
+    if (Array.isArray(options.ids)) {
+      const ids = [...new Set(options.ids)].filter(Boolean);
+      if (ids.length === 0) return 0;
+
+      await DB.transaction(DB.STORES.AI_LOGS, 'readwrite', (stores) => {
+        const store = stores[DB.STORES.AI_LOGS];
+        for (const id of ids) {
+          store.delete(id);
+        }
+      });
+      return ids.length;
+    }
+
+    const storedMaxDays = (await DB.getById(DB.STORES.APP_SETTINGS, 'log_max_days'))?.value;
+    const storedMaxCount = (await DB.getById(DB.STORES.APP_SETTINGS, 'log_max_count'))?.value;
+    const maxDays = Number(options.maxDays ?? storedMaxDays ?? 30);
+    const maxCount = Number(options.maxCount ?? storedMaxCount ?? 1000);
 
     const logs = await DB.getAll(DB.STORES.AI_LOGS);
     logs.sort((a, b) => b.createdAt - a.createdAt);

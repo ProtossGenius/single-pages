@@ -3,10 +3,11 @@ const SidebarUI = (() => {
   let iconBar = null;
   let panelContainer = null;
   let contentArea = null;
+  let panelRenderVersion = 0;
 
   const TABS = [
-    { id: 'categories', icon: '📋', label: '类目设定' },
     { id: 'chapters',   icon: '📁', label: '章节目录' },
+    { id: 'categories', icon: '📋', label: '类目设定' },
     { id: 'bookInfo',   icon: '📖', label: '书籍信息' },
   ];
 
@@ -42,7 +43,7 @@ const SidebarUI = (() => {
     });
 
     // 初始 tab
-    switchTab(Store.get('sidebarTab') || 'categories');
+    switchTab(Store.get('sidebarTab') || TABS[0].id);
   }
 
   function switchTab(tabId) {
@@ -59,14 +60,15 @@ const SidebarUI = (() => {
   }
 
   function refreshCurrentPanel() {
-    const tabId = Store.get('sidebarTab') || 'categories';
+    const tabId = Store.get('sidebarTab') || TABS[0].id;
+    const renderVersion = ++panelRenderVersion;
 
     if (tabId === 'categories') {
       showCategoryPanel();
     } else if (tabId === 'chapters') {
-      showChapterPanel();
+      showChapterPanel(renderVersion);
     } else if (tabId === 'bookInfo') {
-      showBookInfoPanel();
+      showBookInfoPanel(renderVersion);
     }
   }
 
@@ -88,7 +90,7 @@ const SidebarUI = (() => {
     }
   }
 
-  async function showChapterPanel() {
+  async function showChapterPanel(renderVersion) {
     panelContainer.innerHTML = '';
     const header = Utils.createElement('div', { className: 'panel-header' }, [
       Utils.createElement('span', { className: 'panel-title', textContent: '章节目录' }),
@@ -97,6 +99,9 @@ const SidebarUI = (() => {
 
     const bookId = Store.get('currentBookId') || null;
     const allChapters = await DB.getAll(DB.STORES.CHAPTERS);
+    if (renderVersion !== panelRenderVersion || (Store.get('sidebarTab') || TABS[0].id) !== 'chapters') {
+      return;
+    }
     const chapters = bookId ? allChapters.filter(c => c.bookId === bookId) : allChapters;
     chapters.sort((a, b) => (a.sortOrder || 0) - (b.sortOrder || 0));
 
@@ -110,7 +115,6 @@ const SidebarUI = (() => {
         className: 'chapter-list-item' + (isCurrent ? ' active' : ''),
         onClick: async () => {
           await Store.setCurrentChapter(ch.id);
-          showChapterPanel();
         },
       }, [
         Utils.createElement('span', { className: 'chapter-icon', textContent: icon }),
@@ -122,14 +126,14 @@ const SidebarUI = (() => {
     if (chapters.length === 0) {
       list.appendChild(Utils.createElement('p', {
         className: 'hint-text', style: 'padding:12px;',
-        textContent: '暂无章节，点击 + 创建',
+        textContent: bookId ? '当前书籍暂无章节，将在开始写作时自动创建第一章' : '请先创建或选择一本书籍',
       }));
     }
 
     panelContainer.appendChild(list);
   }
 
-  async function showBookInfoPanel() {
+  async function showBookInfoPanel(renderVersion) {
     panelContainer.innerHTML = '';
     const header = Utils.createElement('div', { className: 'panel-header' }, [
       Utils.createElement('span', { className: 'panel-title', textContent: '书籍信息' }),
@@ -152,6 +156,9 @@ const SidebarUI = (() => {
     }
 
     const book = await DB.getById(DB.STORES.BOOKS, bookId);
+    if (renderVersion !== panelRenderVersion || (Store.get('sidebarTab') || TABS[0].id) !== 'bookInfo') {
+      return;
+    }
     if (!book) return;
 
     const content = Utils.createElement('div', { style: 'padding:12px;flex:1;overflow-y:auto;' });
@@ -206,7 +213,7 @@ const SidebarUI = (() => {
 
   function updateContentArea() {
     if (!contentArea) return;
-    const tabId = Store.get('sidebarTab') || 'categories';
+    const tabId = Store.get('sidebarTab') || TABS[0].id;
 
     // Show/hide panels based on current tab
     const categoryPanel = document.getElementById('category-panel');

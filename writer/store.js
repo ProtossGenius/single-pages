@@ -1,12 +1,14 @@
 /* ===== 应用状态管理 ===== */
 
 const Store = (() => {
+  const DEFAULT_SIDEBAR_TAB = 'chapters';
+
   const state = {
     // V2: 书籍相关
     currentBookId: null,
 
     // V2: 侧边栏
-    sidebarTab: 'categories',
+    sidebarTab: DEFAULT_SIDEBAR_TAB,
 
     // 类目相关
     selectedCategoryId: null,
@@ -35,6 +37,84 @@ const Store = (() => {
     recapText: '',
     followUpText: '',
   };
+
+  async function persistSetting(key, value) {
+    await DB.put(DB.STORES.APP_SETTINGS, {
+      key,
+      value: JSON.stringify(value),
+    });
+  }
+
+  function resetBookScopedInputs() {
+    state.selectedCategoryId = null;
+    state.boundSettings = [];
+    state.chapterOutline = '';
+    state.followUpSummary = '';
+    state.currentParagraphId = null;
+  }
+
+  function clearChapterState() {
+    state.currentChapterId = null;
+    state.currentParagraphId = null;
+    state.paragraphs = [];
+    state.chapterSummary = '';
+    state.aiReviewNotes = '';
+    state.recapText = '';
+    state.followUpText = '';
+  }
+
+  async function loadChapterIntoState(chapterId, { persist = true } = {}) {
+    if (!chapterId) {
+      clearChapterState();
+      if (persist) {
+        await persistSetting('current_chapter_id', null);
+      }
+      EventBus.emit(Events.CHAPTER_CHANGED, { chapterId: null });
+      EventBus.emit(Events.STATUS_UPDATED, {
+        chapterSummary: '',
+        aiReviewNotes: '',
+        recapText: '',
+        followUpText: '',
+      });
+      return null;
+    }
+
+    const chapter = await DB.getById(DB.STORES.CHAPTERS, chapterId);
+    if (!chapter) {
+      return loadChapterIntoState(null, { persist });
+    }
+
+    const paragraphs = await DB.getByIndex(DB.STORES.PARAGRAPHS, 'idx_chapterId', chapter.id);
+    paragraphs.sort((a, b) => a.sortOrder - b.sortOrder);
+
+    state.currentChapterId = chapter.id;
+    state.currentParagraphId = null;
+    state.paragraphs = paragraphs;
+    state.chapterSummary = chapter.summary || '';
+    state.aiReviewNotes = chapter.reviewNotes || '';
+    state.recapText = chapter.recapText || '';
+    state.followUpText = chapter.followUpText || '';
+
+    if (persist) {
+      await persistSetting('current_chapter_id', chapter.id);
+    }
+
+    EventBus.emit(Events.CHAPTER_CHANGED, { chapterId: chapter.id });
+    EventBus.emit(Events.STATUS_UPDATED, {
+      chapterSummary: state.chapterSummary,
+      aiReviewNotes: state.aiReviewNotes,
+      recapText: state.recapText,
+      followUpText: state.followUpText,
+    });
+    return chapter.id;
+  }
+
+  async function getBookChapters(bookId) {
+    const chapters = await DB.getAll(DB.STORES.CHAPTERS);
+    return chapters
+      .filter(chapter => (chapter.bookId || null) === (bookId || null))
+      .sort((a, b) => (a.sortOrder || 0) - (b.sortOrder || 0));
+  }
 
   return {
     /** 初始化状态（从数据库加载最后编辑的章节等） */
@@ -74,12 +154,7 @@ const Store = (() => {
 
     /** 设置当前章节 */
     async setCurrentChapter(chapterId) {
-      state.currentChapterId = chapterId;
-      await DB.put(DB.STORES.APP_SETTINGS, {
-        key: 'current_chapter_id',
-        value: JSON.stringify(chapterId),
-      });
-      EventBus.emit(Events.CHAPTER_CHANGED, { chapterId });
+      return loadChapterIntoState(chapterId, { persist: true });
     },
 
     /** 选中段落 */
@@ -94,13 +169,19 @@ const Store = (() => {
     },
 
     /** V2: 设置当前书籍 */
-    async setCurrentBook(bookId) {
-      state.currentBookId = bookId;
-      await DB.put(DB.STORES.APP_SETTINGS, {
-        key: 'current_book_id',
-        value: JSON.stringify(bookId),
-      });
-      EventBus.emit(Events.BOOK_CHANGED, { bookId });
+    async setCurrentBook(bookId, options = {}) {
+      state.currentBookId = bookId || null;
+      resetBookScopedInputs();
+      await persistSetting('current_book_id', state.currentBookId);
+
+      if (options.syncChapter !== false) {
+        await this.syncCurrentChapterForBook({
+          createIfMissing: options.createChapterIfMissing !== false && state.currentBookId !== null,
+        });
+      }
+
+      EventBus.emit(Events.BOOK_CHANGED, { bookId: state.currentBookId });
+      return state.currentBookId;
     },
 
     /** V2: 设置侧边栏 Tab */
@@ -169,30 +250,41 @@ const Store = (() => {
 
     /** 加载最后编辑的章节 */
     async loadLastChapter() {
+      await this.syncCurrentChapterForBook({ createIfMissing: true });
+    },
+
+    /** 同步当前书籍对应的章节状态 */
+    async syncCurrentChapterForBook(options = {}) {
+      const bookId = state.currentBookId || null;
+
       if (state.currentChapterId) {
-        const chapter = await DB.getById(DB.STORES.CHAPTERS, state.currentChapterId);
-        if (chapter) {
-          const paragraphs = await DB.getByIndex(
-            DB.STORES.PARAGRAPHS, 'idx_chapterId', chapter.id
-          );
-          paragraphs.sort((a, b) => a.sortOrder - b.sortOrder);
-          state.paragraphs = paragraphs;
-          state.chapterSummary = chapter.summary || '';
-          state.aiReviewNotes = chapter.reviewNotes || '';
-          state.recapText = chapter.recapText || '';
-          EventBus.emit(Events.CHAPTER_CHANGED, { chapterId: chapter.id });
-          return;
+        const currentChapter = await DB.getById(DB.STORES.CHAPTERS, state.currentChapterId);
+        if (currentChapter && (currentChapter.bookId || null) === bookId) {
+          return loadChapterIntoState(currentChapter.id, { persist: true });
         }
       }
-      // 无已有章节，创建第一章
-      await this.createNewChapter();
+
+      const chapters = await getBookChapters(bookId);
+      if (chapters.length > 0) {
+        return loadChapterIntoState(chapters[0].id, { persist: true });
+      }
+
+      if (options.createIfMissing) {
+        return this.createNewChapter();
+      }
+
+      return loadChapterIntoState(null, { persist: true });
+    },
+
+    /** 清空当前章节与正文状态 */
+    async clearCurrentChapter() {
+      return loadChapterIntoState(null, { persist: true });
     },
 
     /** 创建新章节 */
     async createNewChapter() {
       const bookId = state.currentBookId || null;
-      const allChapters = await DB.getAll(DB.STORES.CHAPTERS);
-      const bookChapters = bookId ? allChapters.filter(c => c.bookId === bookId) : allChapters;
+      const bookChapters = await getBookChapters(bookId);
       const sortOrder = bookChapters.length + 1;
       const now = Utils.now();
       const chapter = {
@@ -208,16 +300,105 @@ const Store = (() => {
         updatedAt: now,
       };
       const id = await DB.put(DB.STORES.CHAPTERS, chapter);
-      state.currentChapterId = id;
-      state.paragraphs = [];
-      state.chapterSummary = '';
-      state.aiReviewNotes = '';
-      await DB.put(DB.STORES.APP_SETTINGS, {
-        key: 'current_chapter_id',
-        value: JSON.stringify(id),
-      });
-      EventBus.emit(Events.CHAPTER_CHANGED, { chapterId: id });
+      await loadChapterIntoState(id, { persist: true });
       return id;
+    },
+
+    /** 删除书籍并级联删除其章节、段落、绑定与回顾数据 */
+    async deleteBook(bookId) {
+      const books = await DB.getAll(DB.STORES.BOOKS);
+      const targetBook = books.find(book => book.id === bookId);
+      if (!targetBook) {
+        return {
+          deletedBooks: 0,
+          deletedCategories: 0,
+          deletedChapters: 0,
+          deletedParagraphs: 0,
+          deletedBindings: 0,
+          deletedRecaps: 0,
+        };
+      }
+
+      const categories = (await DB.getAll(DB.STORES.CATEGORIES))
+        .filter(category => (category.bookId || null) === bookId);
+      const chapters = (await DB.getAll(DB.STORES.CHAPTERS))
+        .filter(chapter => (chapter.bookId || null) === bookId);
+      const chapterIds = new Set(chapters.map(chapter => chapter.id));
+      const paragraphs = (await DB.getAll(DB.STORES.PARAGRAPHS))
+        .filter(paragraph => chapterIds.has(paragraph.chapterId));
+      const paragraphIds = new Set(paragraphs.map(paragraph => paragraph.id));
+      const bindings = (await DB.getAll(DB.STORES.PARAGRAPH_BINDINGS))
+        .filter(binding => paragraphIds.has(binding.paragraphId));
+      const recaps = (await DB.getAll(DB.STORES.RECAP_DATA))
+        .filter(recap => chapterIds.has(recap.chapterId));
+
+      await DB.transaction(
+        [
+          DB.STORES.BOOKS,
+          DB.STORES.CATEGORIES,
+          DB.STORES.CHAPTERS,
+          DB.STORES.PARAGRAPHS,
+          DB.STORES.PARAGRAPH_BINDINGS,
+          DB.STORES.RECAP_DATA,
+        ],
+        'readwrite',
+        (stores) => {
+          stores[DB.STORES.BOOKS].delete(bookId);
+          for (const category of categories) {
+            stores[DB.STORES.CATEGORIES].delete(category.id);
+          }
+          for (const chapter of chapters) {
+            stores[DB.STORES.CHAPTERS].delete(chapter.id);
+          }
+          for (const paragraph of paragraphs) {
+            stores[DB.STORES.PARAGRAPHS].delete(paragraph.id);
+          }
+          for (const binding of bindings) {
+            stores[DB.STORES.PARAGRAPH_BINDINGS].delete(binding.id);
+          }
+          for (const recap of recaps) {
+            stores[DB.STORES.RECAP_DATA].delete(recap.id);
+          }
+        }
+      );
+
+      const remainingBooks = books
+        .filter(book => book.id !== bookId)
+        .sort((a, b) => (a.sortOrder || 0) - (b.sortOrder || 0));
+
+      if (state.currentBookId === bookId) {
+        const nextBookId = remainingBooks[0]?.id || null;
+        if (nextBookId) {
+          await this.setCurrentBook(nextBookId, { createChapterIfMissing: true });
+        } else {
+          state.currentBookId = null;
+          resetBookScopedInputs();
+          await persistSetting('current_book_id', null);
+          await loadChapterIntoState(null, { persist: true });
+          EventBus.emit(Events.BOOK_CHANGED, { bookId: null });
+        }
+      } else {
+        await this.syncCurrentChapterForBook({ createIfMissing: state.currentBookId !== null });
+      }
+
+      EventBus.emit(Events.BOOK_DELETED, {
+        id: bookId,
+        deletedBooks: 1,
+        deletedCategories: categories.length,
+        deletedChapters: chapters.length,
+        deletedParagraphs: paragraphs.length,
+        deletedBindings: bindings.length,
+        deletedRecaps: recaps.length,
+      });
+
+      return {
+        deletedBooks: 1,
+        deletedCategories: categories.length,
+        deletedChapters: chapters.length,
+        deletedParagraphs: paragraphs.length,
+        deletedBindings: bindings.length,
+        deletedRecaps: recaps.length,
+      };
     },
   };
 })();

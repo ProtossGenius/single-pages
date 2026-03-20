@@ -31,12 +31,20 @@ const EditorUI = (() => {
 
   async function refresh() {
     const chapterId = Store.get('currentChapterId');
-    if (!chapterId) return;
+    const titleInput = document.getElementById('chapter-title');
+    if (!chapterId) {
+      if (titleInput) titleInput.value = '';
+      await refreshParagraphs();
+      return;
+    }
 
     const chapter = await DB.getById(DB.STORES.CHAPTERS, chapterId);
-    if (!chapter) return;
+    if (!chapter) {
+      if (titleInput) titleInput.value = '';
+      await refreshParagraphs();
+      return;
+    }
 
-    const titleInput = document.getElementById('chapter-title');
     if (titleInput) titleInput.value = chapter.title || '';
 
     await refreshParagraphs();
@@ -48,7 +56,14 @@ const EditorUI = (() => {
     listEl.innerHTML = '';
 
     const chapterId = Store.get('currentChapterId');
-    if (!chapterId) return;
+    if (!chapterId) {
+      Store.set('paragraphs', []);
+      listEl.appendChild(Utils.createElement('div', {
+        className: 'hint-text',
+        textContent: '未选择章节',
+      }));
+      return;
+    }
 
     const paragraphs = await DB.getByIndex(DB.STORES.PARAGRAPHS, 'idx_chapterId', chapterId);
     paragraphs.sort((a, b) => a.sortOrder - b.sortOrder);

@@ -3231,5 +3231,269 @@ describe('P20 — 提示词优化重构', () => {
   });
 });
 
+describe('P21 — 书籍删除级联与状态清理', () => {
+  it('删除当前书籍时级联删除章节与正文并切换到剩余书籍', async () => {
+    await DB.clearAll();
+    const now = Utils.now();
+
+    await DB.put(DB.STORES.BOOKS, { id: 'p21-book-a', name: '甲书', description: '', sortOrder: 0, createdAt: now, updatedAt: now });
+    await DB.put(DB.STORES.BOOKS, { id: 'p21-book-b', name: '乙书', description: '', sortOrder: 1, createdAt: now, updatedAt: now });
+    await DB.put(DB.STORES.CATEGORIES, {
+      id: 'p21-cat-a', parentId: null, bookId: 'p21-book-a', type: 'character',
+      name: '角色甲', description: '', attributes: '{}', sortOrder: 1, version: 1, createdAt: now, updatedAt: now,
+    });
+    await DB.put(DB.STORES.CHAPTERS, {
+      id: 9101, title: '甲书第一章', summary: 'A', content: '', recapText: '', reviewNotes: '',
+      status: ChapterStatus.DRAFT, bookId: 'p21-book-a', sortOrder: 1, createdAt: now, updatedAt: now,
+    });
+    await DB.put(DB.STORES.CHAPTERS, {
+      id: 9102, title: '乙书第一章', summary: 'B', content: '', recapText: '', reviewNotes: '',
+      status: ChapterStatus.DRAFT, bookId: 'p21-book-b', sortOrder: 1, createdAt: now, updatedAt: now,
+    });
+    await DB.put(DB.STORES.PARAGRAPHS, {
+      id: 'p21-para-a', chapterId: 9101, content: '甲书段落', sortOrder: 1,
+      recapBrief: '', followUp: '', createdAt: now, updatedAt: now,
+    });
+    await DB.put(DB.STORES.PARAGRAPHS, {
+      id: 'p21-para-b', chapterId: 9102, content: '乙书段落', sortOrder: 1,
+      recapBrief: '', followUp: '', createdAt: now, updatedAt: now,
+    });
+    await DB.put(DB.STORES.PARAGRAPH_BINDINGS, {
+      id: 'p21-bind-a', paragraphId: 'p21-para-a', categoryId: 'p21-cat-a', createdAt: now,
+    });
+    await DB.put(DB.STORES.RECAP_DATA, {
+      id: 'p21-recap-a', chapterId: 9101, content: '甲书前情', createdAt: now, updatedAt: now,
+    });
+
+    await Store.setCurrentBook('p21-book-a', { createChapterIfMissing: false });
+    assertEqual(Store.get('currentChapterId'), 9101);
+
+    const result = await Store.deleteBook('p21-book-a');
+    assertEqual(result.deletedChapters, 1);
+    assertEqual(result.deletedParagraphs, 1);
+    assertEqual(result.deletedBindings, 1);
+    assertEqual(result.deletedCategories, 1);
+    assertEqual(result.deletedRecaps, 1);
+    assertEqual(Store.get('currentBookId'), 'p21-book-b');
+    assertEqual(Store.get('currentChapterId'), 9102);
+
+    const chapters = await DB.getAll(DB.STORES.CHAPTERS);
+    const paragraphs = await DB.getAll(DB.STORES.PARAGRAPHS);
+    const bindings = await DB.getAll(DB.STORES.PARAGRAPH_BINDINGS);
+    const categories = await DB.getAll(DB.STORES.CATEGORIES);
+    const recaps = await DB.getAll(DB.STORES.RECAP_DATA);
+    assertEqual(chapters.length, 1);
+    assertEqual(paragraphs.length, 1);
+    assertEqual(bindings.length, 0);
+    assertEqual(categories.length, 0);
+    assertEqual(recaps.length, 0);
+    assertEqual(paragraphs[0].content, '乙书段落');
+  });
+
+  it('删除最后一本书时清空当前章节与正文状态', async () => {
+    await DB.clearAll();
+    const now = Utils.now();
+
+    await DB.put(DB.STORES.BOOKS, { id: 'p21-solo-book', name: '孤本', description: '', sortOrder: 0, createdAt: now, updatedAt: now });
+    await DB.put(DB.STORES.CHAPTERS, {
+      id: 9201, title: '孤本第一章', summary: '概要', content: '', recapText: '前情', reviewNotes: '评审',
+      status: ChapterStatus.DRAFT, bookId: 'p21-solo-book', sortOrder: 1, createdAt: now, updatedAt: now,
+    });
+    await DB.put(DB.STORES.PARAGRAPHS, {
+      id: 'p21-solo-para', chapterId: 9201, content: '唯一段落', sortOrder: 1,
+      recapBrief: '', followUp: '', createdAt: now, updatedAt: now,
+    });
+
+    await Store.setCurrentBook('p21-solo-book', { createChapterIfMissing: false });
+    assertEqual(Store.get('currentChapterId'), 9201);
+
+    await Store.deleteBook('p21-solo-book');
+    assertNull(Store.get('currentBookId'));
+    assertNull(Store.get('currentChapterId'));
+    assertArrayLength(Store.get('paragraphs'), 0);
+    assertEqual(Store.get('chapterSummary'), '');
+    assertEqual(Store.get('aiReviewNotes'), '');
+    assertEqual(Store.get('recapText'), '');
+  });
+});
+
+describe('P21 — 最后一段删除与上下文一致性', () => {
+  it('删除最后一段按钮存在', () => {
+    const btn = document.getElementById('btn-delete-last');
+    assert(btn, '删除最后一段按钮应存在');
+  });
+
+  it('collectContext 在排除最后一段时不包含其内容', async () => {
+    await DB.clearAll();
+    const now = Utils.now();
+    await DB.put(DB.STORES.CHAPTERS, {
+      id: 9301, title: '上下文测试', summary: '', content: '', recapText: '', reviewNotes: '',
+      status: ChapterStatus.DRAFT, bookId: null, sortOrder: 1, createdAt: now, updatedAt: now,
+    });
+    await DB.put(DB.STORES.PARAGRAPHS, {
+      id: 'p21-ctx-1', chapterId: 9301, content: '第一段', sortOrder: 1,
+      recapBrief: '', followUp: '', createdAt: now, updatedAt: now,
+    });
+    await DB.put(DB.STORES.PARAGRAPHS, {
+      id: 'p21-ctx-2', chapterId: 9301, content: '第二段', sortOrder: 2,
+      recapBrief: '', followUp: '', createdAt: now, updatedAt: now,
+    });
+    await Store.setCurrentChapter(9301);
+
+    const ctx = await ChatUI.collectContext({ excludeLastParagraph: true });
+    assertEqual(ctx.chapter_content, '第一段');
+    assertEqual(ctx.chapter_position, '中间');
+  });
+
+  it('删除最后一段会同步删除其绑定并退出编辑模式', async () => {
+    await DB.clearAll();
+    const now = Utils.now();
+    await DB.put(DB.STORES.CHAPTERS, {
+      id: 9302, title: '删除测试', summary: '', content: '', recapText: '', reviewNotes: '',
+      status: ChapterStatus.DRAFT, bookId: null, sortOrder: 1, createdAt: now, updatedAt: now,
+    });
+    await DB.put(DB.STORES.PARAGRAPHS, {
+      id: 'p21-del-1', chapterId: 9302, content: '保留段落', sortOrder: 1,
+      recapBrief: '', followUp: '', createdAt: now, updatedAt: now,
+    });
+    await DB.put(DB.STORES.PARAGRAPHS, {
+      id: 'p21-del-2', chapterId: 9302, content: '待删除段落', sortOrder: 2,
+      recapBrief: '', followUp: '', createdAt: now, updatedAt: now,
+    });
+    await DB.put(DB.STORES.PARAGRAPH_BINDINGS, {
+      id: 'p21-del-bind', paragraphId: 'p21-del-2', categoryId: 'ghost-cat', createdAt: now,
+    });
+    await Store.setCurrentChapter(9302);
+
+    ChatUI.enterEditLastParagraphMode('待删除段落');
+    await ChatUI.handleDeleteLastParagraph();
+
+    const paragraphs = await DB.getAll(DB.STORES.PARAGRAPHS);
+    const bindings = await DB.getAll(DB.STORES.PARAGRAPH_BINDINGS);
+    assertEqual(paragraphs.length, 1);
+    assertEqual(paragraphs[0].id, 'p21-del-1');
+    assertEqual(bindings.length, 0);
+    assertEqual(document.getElementById('btn-generate').textContent, '开始生成');
+    assertEqual(document.getElementById('input-outline').value, '');
+    assertEqual(document.getElementById('btn-clear-outline').style.display, 'none');
+  });
+});
+
+describe('P21 — 日志手动清理', () => {
+  it('LogService.cleanup 支持按 ID 清理当前筛选结果', async () => {
+    await DB.clearAll();
+    const log1 = await LogService.record({ providerId: 'p1', providerName: 'P', modelId: 'm1', modelName: 'M', prompt: 'a', response: 'A', duration: 10, status: 'success' });
+    const log2 = await LogService.record({ providerId: 'p1', providerName: 'P', modelId: 'm1', modelName: 'M', prompt: 'b', response: 'B', duration: 10, status: 'failed', error: 'oops' });
+    const log3 = await LogService.record({ providerId: 'p1', providerName: 'P', modelId: 'm1', modelName: 'M', prompt: 'c', response: 'C', duration: 10, status: 'success' });
+
+    const deleted = await LogService.cleanup({ ids: [log2.id, log3.id] });
+    assertEqual(deleted, 2);
+
+    const remaining = await DB.getAll(DB.STORES.AI_LOGS);
+    assertEqual(remaining.length, 1);
+    assertEqual(remaining[0].id, log1.id);
+  });
+
+  it('LogUI 清理按钮按当前筛选删除日志', async () => {
+    await DB.clearAll();
+    const originalConfirm = window.confirm;
+    window.confirm = () => true;
+
+    await LogService.record({ providerId: 'p1', providerName: 'P', modelId: 'm1', modelName: 'M', prompt: 'a', response: 'A', duration: 10, status: 'success' });
+    await LogService.record({ providerId: 'p1', providerName: 'P', modelId: 'm1', modelName: 'M', prompt: 'b', response: '', duration: 10, status: 'failed', error: 'oops' });
+    await LogService.record({ providerId: 'p1', providerName: 'P', modelId: 'm1', modelName: 'M', prompt: 'c', response: '', duration: 10, status: 'failed', error: 'oops2' });
+
+    await LogUI.show();
+    const selects = document.querySelectorAll('#modal-container select');
+    selects[0].value = 'failed';
+
+    const cleanBtn = Array.from(document.querySelectorAll('#modal-container button'))
+      .find(btn => btn.textContent === '清理当前筛选');
+    cleanBtn.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await new Promise(resolve => setTimeout(resolve, 20));
+
+    const remaining = await LogService.query();
+    assertEqual(remaining.length, 1);
+    assertEqual(remaining[0].status, 'success');
+
+    window.confirm = originalConfirm;
+    const overlay = document.querySelector('#modal-container .modal-overlay');
+    if (overlay) overlay.remove();
+  });
+});
+
+describe('P21 — SidebarUI 章节目录顺序与去重', () => {
+  it('章节目录位于左侧栏第一个入口', () => {
+    const iconBar = document.createElement('div');
+    const panel = document.createElement('div');
+    const content = document.createElement('div');
+    document.body.appendChild(iconBar);
+    document.body.appendChild(panel);
+    document.body.appendChild(content);
+
+    EventBus.offAll();
+    Store.set('sidebarTab', null);
+    SidebarUI.init(iconBar, panel, content);
+
+    const buttons = iconBar.querySelectorAll('.sidebar-icon-btn');
+    assert(buttons.length >= 1, '应渲染侧边栏按钮');
+    assertEqual(buttons[0].dataset.tab, 'chapters');
+
+    iconBar.remove();
+    panel.remove();
+    content.remove();
+  });
+
+  it('章节目录异步重入时只渲染一个列表', async () => {
+    await DB.clearAll();
+    const originalGetAll = DB.getAll;
+    const iconBar = document.createElement('div');
+    const panel = document.createElement('div');
+    const content = document.createElement('div');
+    document.body.appendChild(iconBar);
+    document.body.appendChild(panel);
+    document.body.appendChild(content);
+
+    const pending = [];
+    DB.getAll = async (storeName) => {
+      if (storeName !== DB.STORES.CHAPTERS) {
+        return originalGetAll.call(DB, storeName);
+      }
+      return new Promise(resolve => pending.push(resolve));
+    };
+
+    EventBus.offAll();
+    Store.set('currentBookId', 'p21-side-book');
+    Store.set('currentChapterId', 9401);
+    Store.set('sidebarTab', 'chapters');
+    SidebarUI.init(iconBar, panel, content);
+    EventBus.emit(Events.CHAPTER_CHANGED, { chapterId: 9401 });
+
+    const chapterData = [{
+      id: 9401,
+      title: '第一章',
+      status: ChapterStatus.DRAFT,
+      bookId: 'p21-side-book',
+      sortOrder: 1,
+    }];
+    pending[1](chapterData);
+    pending[0](chapterData);
+    await new Promise(resolve => setTimeout(resolve, 0));
+
+    assertEqual(panel.querySelectorAll('.chapter-list').length, 1);
+
+    DB.getAll = originalGetAll;
+    iconBar.remove();
+    panel.remove();
+    content.remove();
+  });
+
+  it('清理 P21 测试数据', async () => {
+    EventBus.offAll();
+    await DB.clearAll();
+    assert(true);
+  });
+});
+
 // ---- 运行测试 ----
 TestRunner.run();

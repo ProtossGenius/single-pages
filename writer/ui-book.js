@@ -149,22 +149,18 @@ const BookUI = {
     cancelBtn.addEventListener('click', () => form.remove());
 
     deleteBtn.addEventListener('click', async () => {
-      if (!confirm(`确定删除书籍"${book.name}"？相关数据不会被删除。`)) return;
-      await DB.delete(DB.STORES.BOOKS, book.id);
-      if (Store.get('currentBookId') === book.id) {
-        await Store.setCurrentBook(null);
-      }
-      EventBus.emit(Events.BOOK_DELETED, { id: book.id });
+      if (!confirm(`确定删除书籍"${book.name}"及其章节、段落和绑定数据吗？`)) return;
+      const result = await Store.deleteBook(book.id);
       this._selectedId = null;
       form.remove();
       await this._loadList(listContainer, body);
+      Utils.showToast(`已删除 ${result.deletedChapters} 章、${result.deletedParagraphs} 段内容`);
     });
   },
 
   async _openSelected() {
     if (!this._selectedId) return;
     await Store.setCurrentBook(this._selectedId);
-    EventBus.emit(Events.BOOK_CHANGED, { bookId: this._selectedId });
     if (this._overlay) {
       this._overlay.remove();
       this._overlay = null;
