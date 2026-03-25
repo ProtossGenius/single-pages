@@ -83,8 +83,10 @@ var UiVideo = (function () {
             helpers.setStatus("文件传输进行中，请稍后再发起视频通话。");
             return;
         }
+        var conv = appState.conversations[appState.currentConversationId];
+        var peerId = conv && conv.peerId ? conv.peerId : "";
         try {
-            await peerManager.startVideoCall({ showVideo: shouldShowOwnVideo(elements), requireAudio: true });
+            await peerManager.startVideoCall(peerId, { showVideo: shouldShowOwnVideo(elements), requireAudio: true });
             appState.videoState = "calling";
             openVideoModal(appState, elements, { incoming: false });
             setVideoStatus(elements, "呼叫中...");

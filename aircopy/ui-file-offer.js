@@ -13,10 +13,12 @@ var UiFileOffer = (function () {
         if (!file) {
             return Promise.resolve();
         }
+        var conv = appState.conversations[appState.currentConversationId];
+        var peerId = conv && conv.peerId ? conv.peerId : "";
         var transferId = "";
         return Promise.resolve().then(function () {
             helpers.setStatus("等待对方确认接收文件...");
-            return peerManager.sendFile(file, { kind: "file" });
+            return peerManager.sendFile(peerId, file, { kind: "file" });
         }).then(function (transfer) {
             transferId = transfer.transferId;
             initTransferProgress(appState, elements, {
@@ -415,10 +417,12 @@ var UiFileOffer = (function () {
                 var mimeType = recorder.mimeType || "audio/webm";
                 var blob = new Blob(chunks, { type: mimeType });
                 var fileName = "voice-" + Date.now() + ".webm";
+                var conv = appState.conversations[appState.currentConversationId];
+                var voicePeerId = conv && conv.peerId ? conv.peerId : "";
                 var transferId = "";
                 helpers.setStatus("等待对方确认接收语音...");
                 Promise.resolve().then(function () {
-                    return peerManager.sendFile(blob, { kind: "voice", fileName: fileName, mimeType: mimeType });
+                    return peerManager.sendFile(voicePeerId, blob, { kind: "voice", fileName: fileName, mimeType: mimeType });
                 }).then(function (transfer) {
                     transferId = transfer.transferId;
                     initTransferProgress(appState, elements, {
