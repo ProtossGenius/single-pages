@@ -49,6 +49,27 @@ class PeerManager {
             peer.on("open", (id) => {
                 ready = true;
                 this.localPeerId = id;
+
+                // Initialize file transfer module
+                this.fileTransfer = new FileTransferManager({
+                    onIncomingFileOffer: this.handlers.onIncomingFileOffer,
+                    onTransferProgress: this.handlers.onTransferProgress,
+                    onFileReceived: this.handlers.onFileReceived,
+                    onError: this.handlers.onError
+                });
+
+                // Initialize media call module
+                this.mediaCallManager = new MediaCallManager(peer, {
+                    onIncomingCall: this.handlers.onIncomingCall,
+                    onLocalStream: this.handlers.onLocalStream,
+                    onRemoteStream: this.handlers.onRemoteStream,
+                    onCallState: this.handlers.onCallState,
+                    onError: this.handlers.onError
+                }, {
+                    displayName: this.displayName,
+                    persistentId: this.persistentId
+                });
+
                 if (this.handlers.onLocalId) {
                     this.handlers.onLocalId(id);
                 }
