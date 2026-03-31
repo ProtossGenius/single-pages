@@ -3099,10 +3099,19 @@ describe('P20 — 章节位置变量', () => {
   });
 
   it('chapter_position 有段落时为 中间', async () => {
-    Store.set('paragraphs', [{ content: '第一段' }]);
+    await DB.clearAll();
+    const now = Utils.now();
+    await DB.put(DB.STORES.CHAPTERS, {
+      id: 9310, title: '章节位置测试', summary: '', content: '', recapText: '', reviewNotes: '',
+      status: ChapterStatus.DRAFT, bookId: null, sortOrder: 1, createdAt: now, updatedAt: now,
+    });
+    await DB.put(DB.STORES.PARAGRAPHS, {
+      id: 'p20-position-1', chapterId: 9310, content: '第一段', sortOrder: 1,
+      recapBrief: '', followUp: '', createdAt: now, updatedAt: now,
+    });
+    await Store.setCurrentChapter(9310);
     const ctx = await ChatUI.collectContext();
     assertEqual(ctx.chapter_position, '中间');
-    Store.set('paragraphs', []);
   });
 
   it('FlowEngine._replaceVariables 替换章节位置', () => {
@@ -3489,6 +3498,71 @@ describe('P21 — SidebarUI 章节目录顺序与去重', () => {
   });
 
   it('清理 P21 测试数据', async () => {
+    EventBus.offAll();
+    await DB.clearAll();
+    assert(true);
+  });
+});
+
+describe('P22 — 类目侧栏与状态同步修复', () => {
+  it('CategoryUI.refreshInto 能渲染到指定容器', async () => {
+    await DB.clearAll();
+    Store.set('currentBookId', null);
+    const now = Utils.now();
+    await DB.put(DB.STORES.CATEGORIES, {
+      id: 'p22-cat-1', parentId: null, bookId: null, type: 'character',
+      name: '张三', description: '', attributes: '{}', sortOrder: 1, version: 1, createdAt: now, updatedAt: now,
+    });
+
+    const target = document.createElement('div');
+    document.body.appendChild(target);
+    await CategoryUI.refreshInto(target);
+
+    assert(target.textContent.includes('张三'), '应渲染类目名称');
+    target.remove();
+  });
+
+  it('类目绑定按钮会发出 BINDING_ADD_REQUEST 事件', async () => {
+    await DB.clearAll();
+    Store.set('currentBookId', null);
+    const now = Utils.now();
+    await DB.put(DB.STORES.CATEGORIES, {
+      id: 'p22-cat-2', parentId: null, bookId: null, type: 'custom',
+      name: '绑定项', description: '', attributes: '{}', sortOrder: 1, version: 1, createdAt: now, updatedAt: now,
+    });
+
+    const target = document.createElement('div');
+    document.body.appendChild(target);
+    let received = null;
+    const handler = (data) => { received = data; };
+    EventBus.on(Events.BINDING_ADD_REQUEST, handler);
+
+    await CategoryUI.refreshInto(target);
+    const bindBtn = target.querySelector('button[title="添加到绑定设定"]');
+    assert(bindBtn, '应渲染绑定按钮');
+    bindBtn.click();
+
+    assertNotNull(received, '应收到绑定事件');
+    assertEqual(received.categoryId, 'p22-cat-2');
+
+    EventBus.off(Events.BINDING_ADD_REQUEST, handler);
+    target.remove();
+  });
+
+  it('loadLastChapter 在未选择书籍时不会自动创建新章节', async () => {
+    await DB.clearAll();
+    Store.set('currentBookId', null);
+    Store.set('currentChapterId', null);
+    Store.set('paragraphs', []);
+
+    await Store.loadLastChapter();
+
+    const chapterCount = await DB.count(DB.STORES.CHAPTERS);
+    assertEqual(chapterCount, 0);
+    assertNull(Store.get('currentChapterId'));
+  });
+
+  it('清理 P22 测试数据', async () => {
     EventBus.offAll();
     await DB.clearAll();
     assert(true);

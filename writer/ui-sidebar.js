@@ -37,6 +37,12 @@ const SidebarUI = (() => {
       if (Store.get('sidebarTab') === 'chapters') refreshCurrentPanel();
       if (contentArea) updateContentArea();
     });
+    EventBus.on(Events.CATEGORY_TREE_CHANGED, () => {
+      if (Store.get('sidebarTab') === 'categories') refreshCurrentPanel();
+    });
+    EventBus.on(Events.CATEGORY_SELECTED, () => {
+      if (Store.get('sidebarTab') === 'categories') refreshCurrentPanel();
+    });
     EventBus.on(Events.DATA_IMPORTED, () => {
       refreshCurrentPanel();
       if (contentArea) updateContentArea();
@@ -56,7 +62,6 @@ const SidebarUI = (() => {
 
     refreshCurrentPanel();
     if (contentArea) updateContentArea();
-    EventBus.emit(Events.SIDEBAR_TAB_CHANGED, { tab: tabId });
   }
 
   function refreshCurrentPanel() {
@@ -86,7 +91,7 @@ const SidebarUI = (() => {
     panelContainer.appendChild(treeEl);
     // CategoryUI will render into this when available
     if (typeof CategoryUI !== 'undefined' && CategoryUI.refreshInto) {
-      CategoryUI.refreshInto(treeEl);
+      CategoryUI.refreshInto(treeEl, { allowBindingActions: true });
     }
   }
 
@@ -102,7 +107,7 @@ const SidebarUI = (() => {
     if (renderVersion !== panelRenderVersion || (Store.get('sidebarTab') || TABS[0].id) !== 'chapters') {
       return;
     }
-    const chapters = bookId ? allChapters.filter(c => c.bookId === bookId) : allChapters;
+    const chapters = allChapters.filter(chapter => (chapter.bookId || null) === bookId);
     chapters.sort((a, b) => (a.sortOrder || 0) - (b.sortOrder || 0));
 
     const currentId = Store.get('currentChapterId');

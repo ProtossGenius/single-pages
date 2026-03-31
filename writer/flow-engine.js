@@ -99,6 +99,7 @@ const FlowEngine = (() => {
       throw err;
     } finally {
       Store.setAIRunning(false, false);
+      Store.setAIStatus(null);
     }
   }
 

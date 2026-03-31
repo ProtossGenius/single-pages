@@ -17,6 +17,7 @@ const CategoryUI = (() => {
 
     // 监听类目变更事件以刷新
     EventBus.on(Events.CATEGORY_TREE_CHANGED, () => refresh());
+    EventBus.on(Events.CATEGORY_SELECTED, () => refresh());
     EventBus.on(Events.DATA_IMPORTED, () => refresh());
     EventBus.on(Events.BOOK_CHANGED, () => refresh());
 
@@ -29,12 +30,24 @@ const CategoryUI = (() => {
     refresh();
   }
 
-  async function refresh() {
+  async function loadTreeData() {
     const bookId = Store.get('currentBookId') || null;
     const allCategories = await DB.getAll(DB.STORES.CATEGORIES);
-    const filtered = bookId ? allCategories.filter(c => c.bookId === bookId) : allCategories;
-    const tree = buildTree(filtered);
-    renderTree(tree);
+    const filtered = allCategories.filter(category => (category.bookId || null) === bookId);
+    return buildTree(filtered);
+  }
+
+  async function refresh() {
+    if (!treeContainer) return;
+    const tree = await loadTreeData();
+    renderTree(tree, treeContainer);
+  }
+
+  async function refreshInto(targetEl, options = {}) {
+    if (!targetEl) return;
+    const tree = await loadTreeData();
+    if (!targetEl.isConnected) return;
+    renderTree(tree, targetEl, options);
   }
 
   function buildTree(items) {
@@ -54,19 +67,21 @@ const CategoryUI = (() => {
     return roots;
   }
 
-  function renderTree(roots) {
-    treeContainer.innerHTML = '';
+  function renderTree(roots, targetEl = treeContainer, options = {}) {
+    if (!targetEl) return;
+    targetEl.innerHTML = '';
     if (roots.length === 0) {
       const hint = Utils.createElement('div', { className: 'hint-text', textContent: '暂无类目，点击 + 添加' });
-      treeContainer.appendChild(hint);
+      targetEl.appendChild(hint);
       return;
     }
     for (const node of roots) {
-      treeContainer.appendChild(renderNode(node, 0));
+      targetEl.appendChild(renderNode(node, 0, options));
     }
   }
 
-  function renderNode(node, depth) {
+  function renderNode(node, depth, options = {}) {
+    const allowBindingActions = options.allowBindingActions !== false;
     const selectedId = Store.get('selectedCategoryId');
     const hasChildren = node.children && node.children.length > 0;
     const isExpanded = getExpanded(node.id);
@@ -111,6 +126,20 @@ const CategoryUI = (() => {
     });
     editBtn.addEventListener('click', (e) => { e.stopPropagation(); editCategory(node.id); });
 
+    if (allowBindingActions) {
+      const bindBtn = Utils.createElement('button', {
+        className: 'btn-icon',
+        textContent: '⊕',
+        title: '添加到绑定设定',
+        style: { width: '22px', height: '22px', fontSize: '14px' },
+      });
+      bindBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        requestBinding(node.id, node.name);
+      });
+      actions.appendChild(bindBtn);
+    }
+
     const delBtn = Utils.createElement('button', {
       className: 'btn-icon', textContent: '🗑', title: '删除',
       style: { width: '22px', height: '22px', fontSize: '12px' },
@@ -133,7 +162,7 @@ const CategoryUI = (() => {
 
     row.addEventListener('contextmenu', (e) => {
       e.preventDefault();
-      showContextMenu(e.clientX, e.clientY, node);
+      showContextMenu(e.clientX, e.clientY, node, options);
     });
 
     wrapper.appendChild(row);
@@ -143,7 +172,7 @@ const CategoryUI = (() => {
         className: `tree-node-children${isExpanded ? '' : ' collapsed'}`,
       });
       for (const child of node.children) {
-        childrenContainer.appendChild(renderNode(child, depth + 1));
+        childrenContainer.appendChild(renderNode(child, depth + 1, options));
       }
       wrapper.appendChild(childrenContainer);
     }
@@ -163,12 +192,15 @@ const CategoryUI = (() => {
   function getExpanded(id) { return expandedMap[id] !== false; }
   function setExpanded(id, expanded) { expandedMap[id] = expanded; }
 
-  function showContextMenu(x, y, node) {
+  function showContextMenu(x, y, node, options = {}) {
     hideContextMenu();
     contextMenu = Utils.createElement('div', { className: 'context-menu', style: { left: x + 'px', top: y + 'px' } });
     const items = [
       { text: '添加子项', onClick: () => addCategory(node.id) },
       { text: '编辑', onClick: () => editCategory(node.id) },
+      ...(options.allowBindingActions === false ? [] : [
+        { text: '添加到绑定设定', onClick: () => requestBinding(node.id, node.name) },
+      ]),
       { divider: true },
       { text: '删除', onClick: () => deleteCategory(node.id, node.name) },
     ];
@@ -189,6 +221,11 @@ const CategoryUI = (() => {
       contextMenu.parentNode.removeChild(contextMenu);
       contextMenu = null;
     }
+  }
+
+  function requestBinding(categoryId, categoryName) {
+    EventBus.emit(Events.BINDING_ADD_REQUEST, { categoryId });
+    Utils.showToast(`已加入绑定设定: ${categoryName}`);
   }
 
   async function addCategory(parentId) {
@@ -263,6 +300,10 @@ const CategoryUI = (() => {
     allIds.push(id);
 
     for (const catId of allIds) {
+      Store.removeBoundSetting(catId);
+    }
+
+    for (const catId of allIds) {
       const bindings = await DB.getByIndex(DB.STORES.PARAGRAPH_BINDINGS, 'idx_categoryId', catId);
       for (const b of bindings) {
         await DB.delete(DB.STORES.PARAGRAPH_BINDINGS, b.id);
@@ -293,5 +334,5 @@ const CategoryUI = (() => {
     return ids;
   }
 
-  return { init, refresh };
+  return { init, refresh, refreshInto };
 })();

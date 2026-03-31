@@ -250,7 +250,7 @@ const Store = (() => {
 
     /** 加载最后编辑的章节 */
     async loadLastChapter() {
-      await this.syncCurrentChapterForBook({ createIfMissing: true });
+      await this.syncCurrentChapterForBook({ createIfMissing: state.currentBookId !== null });
     },
 
     /** 同步当前书籍对应的章节状态 */

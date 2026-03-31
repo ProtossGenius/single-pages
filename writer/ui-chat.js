@@ -110,40 +110,69 @@ const ChatUI = (() => {
     });
     EventBus.on(Events.BINDING_ADDED, () => refreshBindings());
     EventBus.on(Events.BINDING_REMOVED, () => refreshBindings());
+    EventBus.on(Events.BOOK_CHANGED, () => {
+      exitEditLastParagraphMode();
+      syncInputsFromStore();
+      refreshBindings();
+      updateButtons();
+    });
+    EventBus.on(Events.DATA_IMPORTED, () => {
+      exitEditLastParagraphMode();
+      syncInputsFromStore();
+      refreshBindings();
+      updateButtons();
+      updateStatusBar(Store.get('aiStatus'));
+    });
 
     // 监听 AI 状态
     EventBus.on(Events.AI_TASK_STARTED, () => updateButtons());
-    EventBus.on(Events.AI_TASK_COMPLETED, () => updateButtons());
-    EventBus.on(Events.AI_TASK_FAILED, () => updateButtons());
+    EventBus.on(Events.AI_TASK_COMPLETED, () => {
+      updateButtons();
+      updateStatusBar(null);
+    });
+    EventBus.on(Events.AI_TASK_FAILED, () => {
+      updateButtons();
+      updateStatusBar(null);
+    });
     EventBus.on(Events.AI_TASK_PROGRESS, updateStatusBar);
 
     // 段落变化时更新重新生成按钮可见性
     EventBus.on(Events.PARAGRAPH_ADDED, () => updateButtons());
     EventBus.on(Events.PARAGRAPH_DELETED, () => updateButtons());
-    EventBus.on(Events.CHAPTER_CHANGED, () => updateButtons());
+    EventBus.on(Events.CHAPTER_CHANGED, () => {
+      exitEditLastParagraphMode();
+      updateButtons();
+    });
+
+    syncInputsFromStore();
+    refreshBindings();
+    updateButtons();
+    updateStatusBar(Store.get('aiStatus'));
+  }
+
+  function syncInputsFromStore() {
+    const outlineInput = document.getElementById('input-outline');
+    if (outlineInput) {
+      outlineInput.value = Store.get('chapterOutline') || '';
+    }
+
+    const followUpInput = document.getElementById('input-followUp');
+    if (followUpInput) {
+      followUpInput.value = Store.get('followUpSummary') || '';
+    }
   }
 
   async function getCurrentParagraphs(options = {}) {
     const chapterId = Store.get('currentChapterId');
     if (!chapterId) {
-      const paragraphs = Store.get('paragraphs') || [];
       if (options.syncStore !== false) {
-        Store.set('paragraphs', paragraphs);
+        Store.set('paragraphs', []);
       }
-      return paragraphs;
+      return [];
     }
 
     const paragraphs = await DB.getByIndex(DB.STORES.PARAGRAPHS, 'idx_chapterId', chapterId);
     paragraphs.sort((a, b) => a.sortOrder - b.sortOrder);
-    if (paragraphs.length === 0) {
-      const cachedParagraphs = Store.get('paragraphs') || [];
-      if (cachedParagraphs.length > 0) {
-        if (options.syncStore !== false) {
-          Store.set('paragraphs', cachedParagraphs);
-        }
-        return cachedParagraphs;
-      }
-    }
     if (options.syncStore !== false) {
       Store.set('paragraphs', paragraphs);
     }
@@ -265,12 +294,12 @@ const ChatUI = (() => {
 
     const boundIds = Store.get('boundSettings');
     if (!boundIds || boundIds.length === 0) {
-      listEl.appendChild(Utils.createElement('p', {
-        className: 'hint-text',
-        textContent: '在左侧类目管理器中点击项目以添加绑定',
-      }));
-      return;
-    }
+        listEl.appendChild(Utils.createElement('p', {
+          className: 'hint-text',
+          textContent: '在左侧类目管理器中点击 ⊕ 或右键添加绑定',
+        }));
+        return;
+      }
 
     for (const catId of boundIds) {
       const cat = await DB.getById(DB.STORES.CATEGORIES, catId);
@@ -313,23 +342,20 @@ const ChatUI = (() => {
     const running = Store.get('aiRunning');
     const blocking = Store.get('aiBlocking');
     const disabled = running && blocking;
-    const domButtons = dom('#btn-generate, #btn-generate-chapter, #btn-direct-add, #btn-batch-generate, #btn-regenerate, #btn-delete-last');
-    if (domButtons && domButtons.length > 0) {
-      domButtons.prop('disabled', disabled);
-    }
-
     const genBtn = document.getElementById('btn-generate');
-    const genChapBtn = document.getElementById('btn-generate-chapter');
-    const directBtn = document.getElementById('btn-direct-add');
-    const batchBtn = document.getElementById('btn-batch-generate');
     const regenBtn = document.getElementById('btn-regenerate');
     const deleteLastBtn = document.getElementById('btn-delete-last');
-    if (genBtn) genBtn.disabled = disabled;
-    if (genChapBtn) genChapBtn.disabled = disabled;
-    if (directBtn) directBtn.disabled = disabled;
-    if (batchBtn) batchBtn.disabled = disabled;
-    if (regenBtn) regenBtn.disabled = disabled;
-    if (deleteLastBtn) deleteLastBtn.disabled = disabled;
+    const actionButtons = [
+      genBtn,
+      document.getElementById('btn-generate-chapter'),
+      document.getElementById('btn-direct-add'),
+      document.getElementById('btn-batch-generate'),
+      regenBtn,
+      deleteLastBtn,
+    ];
+    for (const button of actionButtons) {
+      if (button) button.disabled = disabled;
+    }
 
     // 有段落时才显示重新生成按钮
     const paragraphs = Store.get('paragraphs') || [];
@@ -338,15 +364,6 @@ const ChatUI = (() => {
     }
     if (deleteLastBtn) {
       deleteLastBtn.style.display = paragraphs.length > 0 ? '' : 'none';
-    }
-
-    const regenDom = dom('#btn-regenerate');
-    if (regenDom && regenDom.length > 0 && !_editingLastParagraph) {
-      regenDom.css('display', paragraphs.length > 0 ? '' : 'none');
-    }
-    const deleteDom = dom('#btn-delete-last');
-    if (deleteDom && deleteDom.length > 0) {
-      deleteDom.css('display', paragraphs.length > 0 ? '' : 'none');
     }
   }
 
