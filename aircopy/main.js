@@ -703,6 +703,8 @@
     }
 
     function hasPeerDependency() { return typeof window.Peer === "function"; }
+    function hasFileTransferDependency() { return typeof FileTransferManager === "function"; }
+    function hasMediaCallDependency() { return typeof MediaCallManager === "function"; }
 
     async function loadRuntimeDependencies() {
         setInitStage("dependency", "running", "开始加载第三方依赖");
@@ -722,6 +724,8 @@
         const missingCore = [];
         if (!hasPeerDependency()) { missingCore.push("PeerJS"); }
         if (!UiConnector.hasQrDependency()) { missingCore.push("QRCode"); }
+        if (!hasFileTransferDependency()) { missingCore.push("FileTransferManager（file-transfer.js）"); }
+        if (!hasMediaCallDependency()) { missingCore.push("MediaCallManager（media-call.js）"); }
         const warnings = [];
         if (!UiConnector.hasScannerDependency()) { warnings.push("ZXing（内置扫码不可用）"); }
         if (missingCore.length > 0) {

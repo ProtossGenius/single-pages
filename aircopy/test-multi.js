@@ -163,13 +163,16 @@
         if (!peerManager || !connected) {
             throw new Error("当前未连接到对端");
         }
+        if (!remotePeerId) {
+            throw new Error("当前缺少对端 peerId");
+        }
         const packet = {
             type: String(type || ""),
             data: data || {},
             ts: Date.now(),
             fromPeerId: localPeerId
         };
-        peerManager.sendText(`${CMD_PREFIX}${JSON.stringify(packet)}`);
+        peerManager.sendText(remotePeerId, `${CMD_PREFIX}${JSON.stringify(packet)}`);
     }
 
     async function waitForConnection(timeoutMs) {
