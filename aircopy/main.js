@@ -120,6 +120,7 @@
         displayName: document.getElementById("display-name"),
         statusText: document.getElementById("status-text"),
         chatMessages: document.getElementById("chat-messages"),
+        chatInputArea: document.querySelector(".chat-input-area"),
         messageInput: document.getElementById("message-input"),
         sendBtn: document.getElementById("send-btn"),
         exitChat: document.getElementById("exit-chat"),
@@ -588,6 +589,9 @@
         });
         elements.fileInput.addEventListener("change", (event) => {
             UiFileOffer.onFileInputChanged(event, appState, elements, peerManager, helpers);
+        });
+        UiChat.bindFileDrop(appState, elements, {
+            onDropFiles: (files) => UiFileOffer.sendFiles(files, appState, elements, peerManager, helpers)
         });
         elements.sendEmoji.addEventListener("click", () => UiChat.toggleEmojiPanel(elements));
         elements.recordVoice.addEventListener("click", () => UiFileOffer.toggleVoiceRecording(appState, elements, peerManager, helpers));

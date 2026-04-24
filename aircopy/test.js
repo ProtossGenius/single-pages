@@ -488,6 +488,13 @@
             assert(typeof decodePeerSignal === "function", "decodePeerSignal 未加载");
         });
 
+        runner.addTest("UiChat/UiFileOffer 可用", () => {
+            assert(typeof UiChat === "object", "UiChat 未加载");
+            assert(typeof UiChat.bindFileDrop === "function", "UiChat.bindFileDrop 未加载");
+            assert(typeof UiFileOffer === "object", "UiFileOffer 未加载");
+            assert(typeof UiFileOffer.sendFiles === "function", "UiFileOffer.sendFiles 未加载");
+        });
+
         runner.addTest("encodePeerSignal/decodePeerSignal URL 往返", () => {
             const token = `peer-${Date.now()}`;
             const encoded = encodePeerSignal(token);
@@ -830,6 +837,111 @@
             const text = await receivedPayload.blob.text();
             assertEqual(text, "abc", "组包内容错误");
             assert(progressList.length >= 1, "未上报接收进度");
+        });
+
+        runner.addTest("UiFileOffer.sendFiles 会顺序发送拖拽文件", async () => {
+            const originalCreateObjectURL = URL.createObjectURL;
+            const originalRevokeObjectURL = URL.revokeObjectURL;
+            const createdUrls = [];
+            URL.createObjectURL = (blob) => {
+                const url = `blob:test-${createdUrls.length}`;
+                createdUrls.push({ url, blob });
+                return url;
+            };
+            URL.revokeObjectURL = () => {};
+            try {
+                const sentCalls = [];
+                const messages = [];
+                const statuses = [];
+                const appState = {
+                    currentConversationId: "conv-1",
+                    conversations: {
+                        "conv-1": { peerId: "peer-drop" }
+                    },
+                    transferViews: {},
+                    objectUrls: []
+                };
+                const elements = {
+                    chatMessages: document.createElement("div")
+                };
+                const helpers = {
+                    setStatus(text) {
+                        statuses.push(String(text || ""));
+                    },
+                    appendMessage(from, text, isSystem, options) {
+                        messages.push({ from, text, isSystem, options });
+                    },
+                    isCurrentConversationConnected() {
+                        return true;
+                    }
+                };
+                const peerManager = {
+                    sendFile(peerId, file, options) {
+                        sentCalls.push({ peerId, file, options });
+                        return Promise.resolve({
+                            transferId: `tx-${sentCalls.length}`,
+                            fileName: file.name,
+                            mimeType: file.type,
+                            size: file.size
+                        });
+                    }
+                };
+                const files = [
+                    new File(["abc"], "demo-a.txt", { type: "text/plain" }),
+                    new File(["xyz"], "demo-b.txt", { type: "text/plain" })
+                ];
+
+                await UiFileOffer.sendFiles(files, appState, elements, peerManager, helpers);
+
+                assertEqual(sentCalls.length, 2, "应顺序发送两个文件");
+                assertEqual(sentCalls[0].peerId, "peer-drop", "应使用当前会话 peerId");
+                assertEqual(sentCalls[1].file.name, "demo-b.txt", "第二个文件未继续发送");
+                assertEqual(messages.length, 2, "每个文件都应追加附件消息");
+                assert(String(statuses[statuses.length - 1] || "").includes("demo-b.txt"), "最终状态应包含最后一个文件名");
+            } finally {
+                URL.createObjectURL = originalCreateObjectURL;
+                URL.revokeObjectURL = originalRevokeObjectURL;
+            }
+        });
+
+        runner.addTest("UiChat.bindFileDrop 会接收文件拖拽", () => {
+            const dropZone = document.createElement("div");
+            const appState = {
+                currentConversationId: "conv-1",
+                conversations: {
+                    "conv-1": { peerId: "peer-drop" }
+                },
+                connected: true
+            };
+            const elements = {
+                chatInputArea: dropZone
+            };
+            const droppedFiles = [];
+            UiChat.bindFileDrop(appState, elements, {
+                onDropFiles(files) {
+                    droppedFiles.push.apply(droppedFiles, files);
+                }
+            });
+
+            const file = new File(["drag-demo"], "drag-demo.txt", { type: "text/plain" });
+            const dragEnterEvent = new Event("dragenter", { bubbles: true, cancelable: true });
+            Object.defineProperty(dragEnterEvent, "dataTransfer", {
+                configurable: true,
+                value: { types: ["Files"], files: [file] }
+            });
+            dropZone.dispatchEvent(dragEnterEvent);
+            assert(dropZone.classList.contains("file-drop-active"), "拖入文件时应高亮聊天框");
+
+            const dropEvent = new Event("drop", { bubbles: true, cancelable: true });
+            Object.defineProperty(dropEvent, "dataTransfer", {
+                configurable: true,
+                value: { types: ["Files"], files: [file] }
+            });
+            dropZone.dispatchEvent(dropEvent);
+
+            assertEqual(droppedFiles.length, 1, "拖拽文件后应触发发送回调");
+            assertEqual(droppedFiles[0].name, "drag-demo.txt", "拖拽得到的文件名不正确");
+            assert(!dropZone.classList.contains("file-drop-active"), "放下文件后应取消高亮");
         });
 
         runner.addTest("WebRTCManager 可用", () => {

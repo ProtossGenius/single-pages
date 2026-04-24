@@ -9,15 +9,55 @@ var UiFileOffer = (function () {
     function onFileInputChanged(event, appState, elements, peerManager, helpers) {
         var input = event && event.target ? event.target : null;
         var files = input && input.files ? input.files : null;
-        var file = files && files.length > 0 ? files[0] : null;
-        if (!file) {
+        return sendFiles(files, appState, elements, peerManager, helpers).finally(function () {
+            if (input) {
+                input.value = "";
+            }
+        });
+    }
+
+    function sendFiles(filesLike, appState, elements, peerManager, helpers) {
+        var files = normalizeFiles(filesLike);
+        if (files.length === 0) {
+            return Promise.resolve();
+        }
+        if (!helpers || typeof helpers.isCurrentConversationConnected !== "function" || !helpers.isCurrentConversationConnected()) {
+            if (helpers && typeof helpers.setStatus === "function") {
+                helpers.setStatus("当前会话未连接，当前无法发送文件。");
+            }
             return Promise.resolve();
         }
         var conv = appState.conversations[appState.currentConversationId];
         var peerId = conv && conv.peerId ? conv.peerId : "";
+        return files.reduce(function (promise, file, index) {
+            return promise.then(function () {
+                return sendSingleFile(file, peerId, appState, elements, peerManager, helpers, index, files.length);
+            });
+        }, Promise.resolve()).catch(function () {
+            return Promise.resolve();
+        });
+    }
+
+    function normalizeFiles(filesLike) {
+        if (!filesLike || typeof filesLike.length !== "number") {
+            return [];
+        }
+        var files = [];
+        for (var i = 0; i < filesLike.length; i += 1) {
+            var file = filesLike[i];
+            if (file instanceof Blob) {
+                files.push(file);
+            }
+        }
+        return files;
+    }
+
+    function sendSingleFile(file, peerId, appState, elements, peerManager, helpers, index, totalCount) {
         var transferId = "";
+        var fileName = file && file.name ? file.name : "未命名文件";
+        var batchLabel = totalCount > 1 ? "（" + (index + 1) + "/" + totalCount + "）" : "";
         return Promise.resolve().then(function () {
-            helpers.setStatus("等待对方确认接收文件...");
+            helpers.setStatus("等待对方确认接收文件" + batchLabel + "...");
             return peerManager.sendFile(peerId, file, { kind: "file" });
         }).then(function (transfer) {
             transferId = transfer.transferId;
@@ -38,18 +78,14 @@ var UiFileOffer = (function () {
                 blob: file
             }, appState, elements, helpers);
         }).then(function () {
-            var transfer = { transferId: transferId };
             clearTransferProgress(appState, transferId, "已发送");
-            helpers.setStatus("文件已发送：" + (file.name || "未命名文件"));
+            helpers.setStatus("文件已发送：" + fileName + batchLabel);
         }).catch(function (error) {
             if (transferId) {
                 clearTransferProgress(appState, transferId, "发送失败");
             }
             helpers.setStatus("文件发送失败：" + toErrorMessage(error));
-        }).finally(function () {
-            if (input) {
-                input.value = "";
-            }
+            throw error;
         });
     }
 
@@ -480,6 +516,7 @@ var UiFileOffer = (function () {
 
     return {
         onFileInputChanged: onFileInputChanged,
+        sendFiles: sendFiles,
         appendAttachmentMessage: appendAttachmentMessage,
         buildAttachmentText: buildAttachmentText,
         createObjectUrl: createObjectUrl,

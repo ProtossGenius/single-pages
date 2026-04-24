@@ -404,6 +404,98 @@ var UiChat = (function () {
         }
     }
 
+    function bindFileDrop(appState, elements, options) {
+        var cfg = options || {};
+        var dropZone = elements.chatInputArea || null;
+        if (!dropZone) {
+            return;
+        }
+        var dragDepth = 0;
+
+        function clearDropState() {
+            dragDepth = 0;
+            dropZone.classList.remove("file-drop-active");
+        }
+
+        dropZone.addEventListener("dragenter", function (event) {
+            if (!isFileDragEvent(event)) {
+                return;
+            }
+            event.preventDefault();
+            dragDepth += 1;
+            dropZone.classList.add("file-drop-active");
+        });
+
+        dropZone.addEventListener("dragover", function (event) {
+            if (!isFileDragEvent(event)) {
+                return;
+            }
+            event.preventDefault();
+            if (event.dataTransfer) {
+                event.dataTransfer.dropEffect = isCurrentConversationConnected(appState) ? "copy" : "none";
+            }
+            dropZone.classList.add("file-drop-active");
+        });
+
+        dropZone.addEventListener("dragleave", function (event) {
+            if (!isFileDragEvent(event)) {
+                return;
+            }
+            dragDepth = Math.max(0, dragDepth - 1);
+            if (dragDepth === 0) {
+                clearDropState();
+            }
+        });
+
+        dropZone.addEventListener("drop", function (event) {
+            if (!isFileDragEvent(event)) {
+                clearDropState();
+                return;
+            }
+            event.preventDefault();
+            var files = getDraggedFiles(event);
+            if (files.length === 0) {
+                clearDropState();
+                return;
+            }
+            clearDropState();
+            if (typeof cfg.onDropFiles === "function") {
+                cfg.onDropFiles(files);
+            }
+        });
+    }
+
+    function isFileDragEvent(event) {
+        var dataTransfer = event && event.dataTransfer ? event.dataTransfer : null;
+        if (!dataTransfer) {
+            return false;
+        }
+        var types = dataTransfer.types;
+        if (types && typeof types.length === "number") {
+            for (var i = 0; i < types.length; i += 1) {
+                if (types[i] === "Files") {
+                    return true;
+                }
+            }
+        }
+        return Boolean(dataTransfer.files && dataTransfer.files.length > 0);
+    }
+
+    function getDraggedFiles(event) {
+        var dataTransfer = event && event.dataTransfer ? event.dataTransfer : null;
+        if (!dataTransfer || !dataTransfer.files || typeof dataTransfer.files.length !== "number") {
+            return [];
+        }
+        var files = [];
+        for (var i = 0; i < dataTransfer.files.length; i += 1) {
+            var file = dataTransfer.files[i];
+            if (file instanceof Blob) {
+                files.push(file);
+            }
+        }
+        return files;
+    }
+
     function enterChatInterface(appState, elements) {
         UiConnector.closeQrModal(elements);
         appState.setSessionPanelOpen(false);
@@ -524,6 +616,7 @@ var UiChat = (function () {
         clearUnread: clearUnread,
         renderUnread: renderUnread,
         updateSendControlsEnabledState: updateSendControlsEnabledState,
+        bindFileDrop: bindFileDrop,
         enterChatInterface: enterChatInterface,
         showChatScreen: showChatScreen,
         initEmojiPanel: initEmojiPanel,
