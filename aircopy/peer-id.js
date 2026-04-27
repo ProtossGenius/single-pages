@@ -2,11 +2,15 @@
  * peer-id.js - Stable PeerJS peerId generation and persistence.
  *
  * Generates a stable peerId on first visit, stored in localStorage.
- * Format: `aircopy-{random12hex}` (valid PeerJS id).
+ * Format: `AirCopyXXXXXX`, where X is a digit or uppercase letter with
+ * ambiguous characters such as 0/O/1/I/L removed.
  * The existing `persistentId` mechanism for cross-device identity is separate.
  */
 
 const PEER_ID_STORAGE_KEY = "aircopy.peer.id.v1";
+const PEER_ID_SHORTCUT_PREFIX = "AirCopy";
+const PEER_ID_SHORTCUT_LENGTH = 6;
+const PEER_ID_SHORTCUT_ALPHABET = "23456789ABCDEFGHJKMNPQRSTUVWXYZ";
 
 function getOrCreatePeerId() {
     let peerId = "";
@@ -15,7 +19,7 @@ function getOrCreatePeerId() {
     } catch (_error) {
         // Ignore storage failures.
     }
-    if (peerId && isValidPeerId(peerId)) {
+    if (peerId && getShortcutCodeFromPeerId(peerId)) {
         return peerId;
     }
     peerId = generatePeerId();
@@ -36,16 +40,78 @@ function getPeerId() {
 }
 
 function generatePeerId() {
+    return createPeerIdFromShortcutCode(generateShortcutCode());
+}
+
+function generateShortcutCode() {
+    const alphabet = PEER_ID_SHORTCUT_ALPHABET;
     if (window.crypto && typeof window.crypto.getRandomValues === "function") {
-        const bytes = new Uint8Array(12);
+        const bytes = new Uint8Array(PEER_ID_SHORTCUT_LENGTH);
         window.crypto.getRandomValues(bytes);
-        let hex = "";
+        let code = "";
         for (let i = 0; i < bytes.length; i += 1) {
-            hex += bytes[i].toString(16).padStart(2, "0");
+            code += alphabet[bytes[i] % alphabet.length];
         }
-        return `aircopy-${hex}`;
+        return code;
     }
-    return `aircopy-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`;
+    let fallback = "";
+    for (let i = 0; i < PEER_ID_SHORTCUT_LENGTH; i += 1) {
+        const index = Math.floor(Math.random() * alphabet.length);
+        fallback += alphabet[index];
+    }
+    return fallback;
+}
+
+function sanitizeShortcutCodeInput(value, maxLength) {
+    const compact = String(value || "").toUpperCase().replace(/[\s-]+/g, "");
+    const prefix = PEER_ID_SHORTCUT_PREFIX.toUpperCase();
+    const raw = compact.indexOf(prefix) === 0 ? compact.slice(prefix.length) : compact;
+    const limit = Math.max(1, Number(maxLength) || PEER_ID_SHORTCUT_LENGTH);
+    let result = "";
+    for (let i = 0; i < raw.length; i += 1) {
+        const char = raw.charAt(i);
+        if (PEER_ID_SHORTCUT_ALPHABET.indexOf(char) >= 0) {
+            result += char;
+        }
+        if (result.length >= limit) {
+            break;
+        }
+    }
+    return result;
+}
+
+function normalizeShortcutCode(value) {
+    const code = sanitizeShortcutCodeInput(value, PEER_ID_SHORTCUT_LENGTH);
+    return code.length === PEER_ID_SHORTCUT_LENGTH ? code : "";
+}
+
+function createPeerIdFromShortcutCode(shortcutCode) {
+    const normalized = normalizeShortcutCode(shortcutCode);
+    if (!normalized) {
+        throw new Error("快捷码格式无效，应为 6 位数字/大写字母（已排除 0/O/1/I/L）。");
+    }
+    return `${PEER_ID_SHORTCUT_PREFIX}${normalized}`;
+}
+
+function getShortcutCodeFromPeerId(peerId) {
+    const value = String(peerId || "").trim();
+    if (!value || value.indexOf(PEER_ID_SHORTCUT_PREFIX) !== 0) {
+        return "";
+    }
+    const code = value.slice(PEER_ID_SHORTCUT_PREFIX.length);
+    return normalizeShortcutCode(code);
+}
+
+function isValidShortcutCode(value) {
+    return normalizeShortcutCode(value) === String(value || "").trim().toUpperCase();
+}
+
+function getShortcutPeerPrefix() {
+    return PEER_ID_SHORTCUT_PREFIX;
+}
+
+function getShortcutCodeHint() {
+    return `${PEER_ID_SHORTCUT_LENGTH} 位数字/大写字母（已排除 0/O/1/I/L）`;
 }
 
 function isValidPeerId(peerId) {

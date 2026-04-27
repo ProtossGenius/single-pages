@@ -55,6 +55,7 @@
                         </p>
                         <p class="usage-divider" aria-hidden="true">或者</p>
                         <p class="usage-item">双方都打开网页后，一端展示二维码，另一端点击“开始扫码”用内置扫码连接。</p>
+                        <p class="usage-item">也可以直接把下方 6 位快捷码告诉对方，对方输入后即可快速连入。</p>
                     </div>
                 </div>
             </div>
@@ -90,6 +91,28 @@
                 <div class="user-info">
                     <label for="display-name">展示名：</label>
                     <input type="text" id="display-name" placeholder="请输入您的名字" value="用户_">
+                </div>
+
+                <div class="shortcut-panel">
+                    <div class="shortcut-code-card">
+                        <span class="shortcut-title">我的快捷码</span>
+                        <strong id="shortcut-code-text" class="shortcut-code-text">------</strong>
+                        <p class="shortcut-hint">实际连接到以 AirCopy 开头的 Peer 节点，对方只需输入这 6 位码。</p>
+                    </div>
+                    <div class="shortcut-connect-row">
+                        <label class="hidden" for="shortcut-code-input">输入对方快捷码</label>
+                        <input
+                            id="shortcut-code-input"
+                            type="text"
+                            maxlength="6"
+                            autocomplete="off"
+                            autocapitalize="characters"
+                            spellcheck="false"
+                            placeholder="输入对方快捷码"
+                            aria-label="输入对方快捷码"
+                        />
+                        <button id="connect-shortcut" type="button">快捷连入</button>
+                    </div>
                 </div>
 
                 <p id="status-text" class="status-text">正在初始化…</p>

@@ -76,9 +76,12 @@ var UiConnector = (function () {
             setScanVisualSuccess(appState, elements, false);
             setStatus(appState, elements, "正在初始化 Peer 节点并生成二维码…");
             var peerId = await appState.ensurePeerReady();
+            updateShortcutCodeDisplay(elements, peerId);
             var encoded = encodePeerSignal(peerId);
             renderQr(appState, elements, encoded);
-            setStatus(appState, elements, "请让对方扫码该二维码（长度 " + encoded.length + "）。扫码后将直接发起连接。");
+            var shortcutCode = getShortcutCodeFromPeerId(peerId);
+            var shortcutText = shortcutCode ? "，也可让对方直接输入快捷码 " + shortcutCode : "";
+            setStatus(appState, elements, "请让对方扫码该二维码（长度 " + encoded.length + "）" + shortcutText + "。");
         } catch (error) {
             setStatus(appState, elements, "生成二维码失败：" + toErrorMessage(error));
         }
@@ -474,6 +477,67 @@ var UiConnector = (function () {
         new QRCode(elements.qrcodeLarge, { text: appState.currentQrText, width: 900, height: 900, correctLevel: QRCode.CorrectLevel.M });
     }
 
+    function updateShortcutCodeDisplay(elements, peerId) {
+        if (!elements.shortcutCodeText) {
+            return "";
+        }
+        var code = getShortcutCodeFromPeerId(peerId || getPeerId());
+        elements.shortcutCodeText.textContent = code || "------";
+        elements.shortcutCodeText.classList.toggle("is-empty", !code);
+        return code;
+    }
+
+    async function connectByShortcutCode(appState, elements, rawCode) {
+        var normalizedInput = sanitizeShortcutCodeInput(rawCode, PEER_ID_SHORTCUT_LENGTH);
+        if (elements.shortcutCodeInput) {
+            elements.shortcutCodeInput.value = normalizedInput;
+        }
+        if (!normalizedInput) {
+            setStatus(appState, elements, "请输入对方快捷码。");
+            return false;
+        }
+        if (normalizedInput.length !== PEER_ID_SHORTCUT_LENGTH) {
+            setStatus(appState, elements, "快捷码格式无效，应为 " + getShortcutCodeHint() + "。");
+            return false;
+        }
+        var remotePeerId = "";
+        try {
+            remotePeerId = createPeerIdFromShortcutCode(normalizedInput);
+        } catch (error) {
+            setStatus(appState, elements, toErrorMessage(error));
+            return false;
+        }
+        try {
+            var localPeerId = await appState.ensurePeerReady();
+            updateShortcutCodeDisplay(elements, localPeerId);
+            if (remotePeerId === localPeerId) {
+                setStatus(appState, elements, "输入的是自己的快捷码，请输入对方快捷码。");
+                return false;
+            }
+            appState.clearRefreshReconnectPending();
+            var connectResult = appState.peerManager.connect(remotePeerId);
+            if (connectResult && connectResult.reused) {
+                if (typeof appState.handleReusedConnection === "function") {
+                    appState.handleReusedConnection(remotePeerId, connectResult);
+                }
+                if (elements.shortcutCodeInput) {
+                    elements.shortcutCodeInput.value = "";
+                }
+                setStatus(appState, elements, "已连接到快捷码 " + normalizedInput + " 对应会话。");
+                return true;
+            }
+            if (elements.shortcutCodeInput) {
+                elements.shortcutCodeInput.value = "";
+            }
+            setStatus(appState, elements, "正在通过快捷码 " + normalizedInput + " 发起连接…");
+            appState.setSessionPanelOpen(false);
+            return true;
+        } catch (error) {
+            setStatus(appState, elements, "快捷连入失败：" + toErrorMessage(error));
+            return false;
+        }
+    }
+
     function setScanVisualSuccess(appState, elements, success) {
         appState.scanVisualSuccess = Boolean(success);
         if (elements.scannerShell) { elements.scannerShell.classList.toggle("scan-success", appState.scanVisualSuccess); }
@@ -492,6 +556,7 @@ var UiConnector = (function () {
         elements.connectionSetup.classList.remove("hidden");
         elements.backToChat.classList.toggle("hidden", !appState.connected);
         document.body.classList.remove("chat-active");
+        updateShortcutCodeDisplay(elements);
         var preferred = getPreferredConnectorMode(appState, appState.isMobileLayout ? "scanner" : "qr");
         setMode(appState, elements, preferred, { force: true });
     }
@@ -528,6 +593,8 @@ var UiConnector = (function () {
         openQrModal: openQrModal,
         closeQrModal: closeQrModal,
         renderQr: renderQr,
+        updateShortcutCodeDisplay: updateShortcutCodeDisplay,
+        connectByShortcutCode: connectByShortcutCode,
         setScanVisualSuccess: setScanVisualSuccess,
         updateScanButton: updateScanButton,
         showConnectorScreen: showConnectorScreen,

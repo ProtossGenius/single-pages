@@ -119,6 +119,9 @@
         chatInterfaceRoot: document.getElementById("chat-interface"),
         displayName: document.getElementById("display-name"),
         statusText: document.getElementById("status-text"),
+        shortcutCodeText: document.getElementById("shortcut-code-text"),
+        shortcutCodeInput: document.getElementById("shortcut-code-input"),
+        connectShortcut: document.getElementById("connect-shortcut"),
         chatMessages: document.getElementById("chat-messages"),
         chatInputArea: document.querySelector(".chat-input-area"),
         messageInput: document.getElementById("message-input"),
@@ -434,6 +437,7 @@
         if (elements.statusLogMaxInput) {
             elements.statusLogMaxInput.value = String(appState.statusLogMax);
         }
+        UiConnector.updateShortcutCodeDisplay(elements, getOrCreatePeerId());
 
         const isMobile = /Android|webOS|iPhone|iPod|iPad|Mobile/i.test(navigator.userAgent);
         const initialMode = getPreferredConnectorMode(appState, isMobile ? "scanner" : "qr");
@@ -468,6 +472,22 @@
         elements.regenOffer.addEventListener("click", () => {
             UiConnector.regenerateOffer(appState, elements);
         });
+        if (elements.shortcutCodeInput) {
+            elements.shortcutCodeInput.addEventListener("input", () => {
+                elements.shortcutCodeInput.value = sanitizeShortcutCodeInput(elements.shortcutCodeInput.value, PEER_ID_SHORTCUT_LENGTH);
+            });
+            elements.shortcutCodeInput.addEventListener("keydown", (event) => {
+                if (event.key === "Enter") {
+                    event.preventDefault();
+                    void UiConnector.connectByShortcutCode(appState, elements, elements.shortcutCodeInput.value);
+                }
+            });
+        }
+        if (elements.connectShortcut) {
+            elements.connectShortcut.addEventListener("click", () => {
+                void UiConnector.connectByShortcutCode(appState, elements, elements.shortcutCodeInput ? elements.shortcutCodeInput.value : "");
+            });
+        }
         elements.backToChat.addEventListener("click", () => {
             UiChat.showChatScreen(elements);
         });
@@ -1232,6 +1252,8 @@
     function formatPeerIdHint(peerId) {
         const value = String(peerId || "").trim();
         if (!value) { return ""; }
+        const shortcutCode = getShortcutCodeFromPeerId(value);
+        if (shortcutCode) { return shortcutCode; }
         if (value.length <= 14) { return value; }
         return `${value.slice(0, 7)}...${value.slice(-5)}`;
     }

@@ -495,6 +495,22 @@
             assert(typeof UiFileOffer.sendFiles === "function", "UiFileOffer.sendFiles 未加载");
         });
 
+        runner.addTest("快捷码 peerId 生成与解析可往返", () => {
+            const code = generateShortcutCode();
+            assert(/^[23456789ABCDEFGHJKMNPQRSTUVWXYZ]{6}$/.test(code), "快捷码字符集不正确");
+            const peerId = createPeerIdFromShortcutCode(code.toLowerCase());
+            assertEqual(peerId, `AirCopy${code}`, "快捷码生成的 peerId 不正确");
+            assertEqual(getShortcutCodeFromPeerId(peerId), code, "peerId 解析快捷码失败");
+            assertEqual(getShortcutPeerPrefix(), "AirCopy", "快捷码前缀不正确");
+        });
+
+        runner.addTest("快捷码输入清洗会去掉易混淆字符", () => {
+            assertEqual(sanitizeShortcutCodeInput("ab-0o1ilz2", 6), "ABZ2", "快捷码输入清洗结果错误");
+            assertEqual(sanitizeShortcutCodeInput("AirCopyab2cd3", 6), "AB2CD3", "完整 peerId 应能提取为快捷码");
+            assertEqual(normalizeShortcutCode("ab2cd3"), "AB2CD3", "快捷码标准化失败");
+            assertEqual(normalizeShortcutCode("ab0cd3"), "", "包含禁用字符时不应通过标准化");
+        });
+
         runner.addTest("encodePeerSignal/decodePeerSignal URL 往返", () => {
             const token = `peer-${Date.now()}`;
             const encoded = encodePeerSignal(token);
@@ -942,6 +958,40 @@
             assertEqual(droppedFiles.length, 1, "拖拽文件后应触发发送回调");
             assertEqual(droppedFiles[0].name, "drag-demo.txt", "拖拽得到的文件名不正确");
             assert(!dropZone.classList.contains("file-drop-active"), "放下文件后应取消高亮");
+        });
+
+        runner.addTest("UiConnector.connectByShortcutCode 会补 AirCopy 前缀连接", async () => {
+            const statuses = [];
+            let connectedPeerId = "";
+            const elements = {
+                statusText: document.createElement("p"),
+                shortcutCodeText: document.createElement("strong"),
+                shortcutCodeInput: document.createElement("input")
+            };
+            const appState = {
+                peerManager: {
+                    connect(peerId) {
+                        connectedPeerId = peerId;
+                        return { reused: false, peerId };
+                    }
+                },
+                ensurePeerReady() {
+                    return Promise.resolve("AirCopyZXCVBN");
+                },
+                clearRefreshReconnectPending() {},
+                setSessionPanelOpen() {},
+                setStatus(text) {
+                    statuses.push(String(text || ""));
+                }
+            };
+
+            const ok = await UiConnector.connectByShortcutCode(appState, elements, "ab2cd3");
+
+            assertEqual(ok, true, "快捷码连接应成功发起");
+            assertEqual(connectedPeerId, "AirCopyAB2CD3", "快捷码应补全 AirCopy 前缀");
+            assertEqual(elements.shortcutCodeText.textContent, "ZXCVBN", "应同步展示本端快捷码");
+            assertEqual(elements.shortcutCodeInput.value, "", "发起连接后应清空输入框");
+            assert(String(statuses[statuses.length - 1] || "").includes("AB2CD3"), "状态提示应包含快捷码");
         });
 
         runner.addTest("WebRTCManager 可用", () => {
