@@ -111,8 +111,36 @@ var UiChat = (function () {
             }
             return body;
         }
+        var standaloneUrl = getStandaloneMessageUrl(message.text);
+        if (standaloneUrl) {
+            var link = document.createElement("a");
+            link.className = "attachment-link";
+            link.href = standaloneUrl;
+            link.target = "_blank";
+            link.rel = "noopener noreferrer";
+            link.textContent = message.text || "";
+            body.appendChild(link);
+            return body;
+        }
         body.textContent = message.text || "";
         return body;
+    }
+
+    function getStandaloneMessageUrl(text) {
+        var raw = String(text || "");
+        var trimmed = raw.trim();
+        if (!trimmed || raw !== trimmed) {
+            return "";
+        }
+        try {
+            var url = new URL(trimmed);
+            if (url.protocol !== "http:" && url.protocol !== "https:") {
+                return "";
+            }
+            return url.href;
+        } catch (_error) {
+            return "";
+        }
     }
 
     async function saveBlobUrlToDisk(blobUrl, fileName, mimeType) {

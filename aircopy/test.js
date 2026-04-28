@@ -495,6 +495,42 @@
             assert(typeof UiFileOffer.sendFiles === "function", "UiFileOffer.sendFiles 未加载");
         });
 
+        runner.addTest("UiChat.appendMessage 遇到纯 URL 会渲染可点击链接", () => {
+            const chatMessages = document.createElement("div");
+            const elements = {
+                chatMessages
+            };
+            const appState = {
+                currentConversationId: "conv-1",
+                conversations: {
+                    "conv-1": {
+                        peerId: "peer-1",
+                        peerName: "",
+                        unreadCount: 0,
+                        messages: []
+                    }
+                },
+                chatHistory: [],
+                unreadCount: 0,
+                peerName: "",
+                remotePersistentId: "",
+                localPersistentId: "local-1"
+            };
+
+            UiChat.appendMessage(appState, elements, "peer", "https://example.com/demo?a=1#frag", false);
+            UiChat.appendMessage(appState, elements, "peer", "hello https://example.com", false);
+
+            const messages = chatMessages.querySelectorAll(".message-body");
+            const urlLink = messages[0].querySelector("a");
+            const plainLink = messages[1].querySelector("a");
+
+            assert(urlLink, "纯 URL 消息应渲染为链接");
+            assertEqual(urlLink.href, "https://example.com/demo?a=1#frag", "链接地址不正确");
+            assertEqual(urlLink.target, "_blank", "链接应在新窗口打开");
+            assertEqual(urlLink.textContent, "https://example.com/demo?a=1#frag", "链接文案不正确");
+            assertEqual(plainLink, null, "普通文本消息不应自动渲染链接");
+        });
+
         runner.addTest("快捷码 peerId 生成与解析可往返", () => {
             const code = generateShortcutCode();
             assert(/^[23456789ABCDEFGHJKMNPQRSTUVWXYZ]{6}$/.test(code), "快捷码字符集不正确");
