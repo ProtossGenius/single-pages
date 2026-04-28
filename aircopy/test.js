@@ -969,6 +969,8 @@
                 shortcutCodeInput: document.createElement("input")
             };
             const appState = {
+                scannerTask: Promise.resolve(),
+                scannerRunning: false,
                 peerManager: {
                     connect(peerId) {
                         connectedPeerId = peerId;
@@ -992,6 +994,41 @@
             assertEqual(elements.shortcutCodeText.textContent, "ZXCVBN", "应同步展示本端快捷码");
             assertEqual(elements.shortcutCodeInput.value, "", "发起连接后应清空输入框");
             assert(String(statuses[statuses.length - 1] || "").includes("AB2CD3"), "状态提示应包含快捷码");
+        });
+
+        runner.addTest("UiConnector.setMode 切到扫码模式时会先初始化快捷码", async () => {
+            const statuses = [];
+            let ensureCalls = 0;
+            const elements = {
+                qrContainer: document.createElement("div"),
+                scannerContainer: document.createElement("div"),
+                scanTrigger: document.createElement("button"),
+                regenOffer: document.createElement("button"),
+                enlargeQr: document.createElement("button"),
+                toggleMethod: document.createElement("button"),
+                statusText: document.createElement("p"),
+                shortcutCodeText: document.createElement("strong"),
+                scannerShell: document.createElement("div")
+            };
+            const appState = {
+                mode: "qr",
+                modeTask: Promise.resolve(),
+                scannerTask: Promise.resolve(),
+                scannerRunning: false,
+                setStatus(text) {
+                    statuses.push(String(text || ""));
+                },
+                ensurePeerReady() {
+                    ensureCalls += 1;
+                    return Promise.resolve("AirCopyAB2CD3");
+                }
+            };
+
+            await UiConnector.setMode(appState, elements, "scanner", { force: true });
+
+            assertEqual(ensureCalls, 1, "扫码模式应先初始化 peer/快捷码");
+            assertEqual(elements.shortcutCodeText.textContent, "AB2CD3", "扫码模式应展示真实快捷码");
+            assert(String(statuses[statuses.length - 1] || "").includes("AB2CD3"), "扫码模式提示应包含快捷码");
         });
 
         runner.addTest("WebRTCManager 可用", () => {
