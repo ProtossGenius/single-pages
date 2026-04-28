@@ -54,10 +54,17 @@ var UiConnector = (function () {
                     await regenerateOffer(appState, elements);
                 }
             } else {
-                if (hasScannerDependency()) {
-                    setStatus(appState, elements, '已切到扫码模式，点击"开始扫码"后扫描对方页面 URL 二维码即可连接。');
-                } else {
-                    setStatus(appState, elements, "已切到扫码模式，但扫码依赖未加载。请检查网络后刷新页面。");
+                try {
+                    var localPeerId = await appState.ensurePeerReady();
+                    var shortcutCode = updateShortcutCodeDisplay(elements, localPeerId);
+                    if (hasScannerDependency()) {
+                        var shortcutText = shortcutCode ? "；也可让对方直接输入快捷码 " + shortcutCode + " 连接。" : "。";
+                        setStatus(appState, elements, '已切到扫码模式，点击"开始扫码"后扫描对方页面 URL 二维码即可连接' + shortcutText);
+                    } else {
+                        setStatus(appState, elements, "已切到扫码模式，但扫码依赖未加载。请检查网络后刷新页面。");
+                    }
+                } catch (error) {
+                    setStatus(appState, elements, "初始化快捷码失败：" + toErrorMessage(error));
                 }
             }
             updateScanButton(appState, elements);
@@ -481,7 +488,7 @@ var UiConnector = (function () {
         if (!elements.shortcutCodeText) {
             return "";
         }
-        var code = getShortcutCodeFromPeerId(peerId || getPeerId());
+        var code = getShortcutCodeFromPeerId(peerId);
         elements.shortcutCodeText.textContent = code || "------";
         elements.shortcutCodeText.classList.toggle("is-empty", !code);
         return code;
@@ -514,9 +521,14 @@ var UiConnector = (function () {
                 setStatus(appState, elements, "输入的是自己的快捷码，请输入对方快捷码。");
                 return false;
             }
+            await stopScanIfRunning(appState, elements);
             appState.clearRefreshReconnectPending();
+            if (appState.autoReconnectPeers) {
+                appState.autoReconnectPeers = {};
+            }
             var connectResult = appState.peerManager.connect(remotePeerId);
             if (connectResult && connectResult.reused) {
+                appState.clearRefreshReconnectPending();
                 if (typeof appState.handleReusedConnection === "function") {
                     appState.handleReusedConnection(remotePeerId, connectResult);
                 }
@@ -556,7 +568,7 @@ var UiConnector = (function () {
         elements.connectionSetup.classList.remove("hidden");
         elements.backToChat.classList.toggle("hidden", !appState.connected);
         document.body.classList.remove("chat-active");
-        updateShortcutCodeDisplay(elements);
+        updateShortcutCodeDisplay(elements, appState.localPeerId);
         var preferred = getPreferredConnectorMode(appState, appState.isMobileLayout ? "scanner" : "qr");
         setMode(appState, elements, preferred, { force: true });
     }

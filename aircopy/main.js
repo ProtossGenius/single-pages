@@ -184,6 +184,7 @@
                 "连接已断开"
             );
             const closeReason = closeDetails.reason;
+            const closedPeerId = info && info.peerId ? String(info.peerId).trim() : "";
             const hiddenText = document.hidden ? "是" : "否";
             if (wasConnected) {
                 UiChat.appendMessage(appState, elements, "system", `连接已断开：${closeReason}（页面隐藏：${hiddenText}）`, true);
@@ -197,11 +198,10 @@
             if (wasConnected) {
                 setStatus(`连接已断开：${closeReason}（页面隐藏：${hiddenText}），可点击重连或重新扫码连接。`);
             }
-            if (isRefreshReconnectPending()) {
+            if (isRefreshReconnectPendingForPeer(closedPeerId)) {
                 handleRefreshReconnectFailure(closeReason);
                 return;
             }
-            const closedPeerId = info && info.peerId ? String(info.peerId).trim() : "";
             if (closedPeerId && appState.autoReconnectPeers && appState.autoReconnectPeers[closedPeerId]) {
                 handleAutoReconnectPeerFailure(closedPeerId, closeReason);
             }
@@ -216,7 +216,7 @@
             if (details.source === "peer" && appState.connected) {
                 return;
             }
-            if (isRefreshReconnectPending()) {
+            if (isRefreshReconnectPendingForPeer(details.peerId)) {
                 handleRefreshReconnectFailure(details.message);
                 return;
             }
@@ -354,6 +354,7 @@
     appState.setSessionPanelOpen = (open) => setSessionPanelOpen(open);
     appState.setHeaderMenuOpen = (open) => setHeaderMenuOpen(open);
     appState.clearRefreshReconnectPending = () => clearRefreshReconnectPending();
+    appState.markRefreshReconnectPending = (targetPeerId, options) => markRefreshReconnectPending(targetPeerId, options);
     appState.handleReusedConnection = (remotePeerId, connectResult) => {
         const knownPersistentId = appState.remotePersistentId || connectResult.peerPersistentId || "";
         const knownPeerName = connectResult.peerName || appState.peerName || "";
@@ -437,12 +438,13 @@
         if (elements.statusLogMaxInput) {
             elements.statusLogMaxInput.value = String(appState.statusLogMax);
         }
-        UiConnector.updateShortcutCodeDisplay(elements, getOrCreatePeerId());
+        UiConnector.updateShortcutCodeDisplay(elements, "");
 
         const isMobile = /Android|webOS|iPhone|iPod|iPad|Mobile/i.test(navigator.userAgent);
         const initialMode = getPreferredConnectorMode(appState, isMobile ? "scanner" : "qr");
         setInitStage("bootstrap", "success", "基础页面初始化完成");
         void (async () => {
+            void warmupPeerForShortcut();
             await UiConnector.setMode(appState, elements, initialMode, { force: true });
             const hasUrlPeerTarget = await tryConnectToUrlPeerIdOnFirstLoad();
             if (!hasUrlPeerTarget) {
@@ -887,6 +889,17 @@
         return appState.peerInitTask;
     }
 
+    async function warmupPeerForShortcut() {
+        try {
+            const peerId = await ensurePeerReady();
+            UiConnector.updateShortcutCodeDisplay(elements, peerId);
+            return peerId;
+        } catch (error) {
+            appendStatusLog(appState, "快捷码节点预热失败：" + toErrorMessage(error), "shortcut");
+            return "";
+        }
+    }
+
     // ── Connection State ──
 
     function setConnectionState(connected) {
@@ -956,6 +969,15 @@
 
     function isRefreshReconnectPending() {
         return Boolean(appState.refreshReconnectPending && appState.refreshReconnectPending.targetPeerId);
+    }
+
+    function isRefreshReconnectPendingForPeer(peerId) {
+        if (!isRefreshReconnectPending()) { return false; }
+        const pendingTargetPeerId = String(appState.refreshReconnectPending.targetPeerId || "").trim();
+        if (!pendingTargetPeerId) { return false; }
+        const normalizedPeerId = String(peerId || "").trim();
+        if (!normalizedPeerId) { return false; }
+        return normalizedPeerId === pendingTargetPeerId;
     }
 
     function markRefreshReconnectPending(targetPeerId, options = {}) {
