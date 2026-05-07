@@ -23,6 +23,7 @@ class MediaCallManager {
         this.localMediaStream = null;
         this.remoteMediaStream = null;
         this.activePeerId = "";
+        this.localSourceMode = "camera";
     }
 
     /**
@@ -40,24 +41,39 @@ class MediaCallManager {
             throw new Error("未找到对端 peerId。");
         }
         const media = await this._createLocalMediaStream({
+            sourceMode: options.sourceMode || (options.showVideo === false ? "audio" : "camera"),
             showVideo: options.showVideo !== false,
             requireAudio: options.requireAudio !== false
         });
-        this._setLocalMediaStream(media.stream, { hasVideoTrack: media.hasVideoTrack, requestedVideo: media.requestedVideo });
+        this._setLocalMediaStream(media.stream, {
+            hasVideoTrack: media.hasVideoTrack,
+            requestedVideo: media.requestedVideo,
+            sourceMode: media.sourceMode
+        });
         this.activePeerId = targetPeerId;
 
         const call = this.peer.call(targetPeerId, media.stream, {
             metadata: {
                 name: this.localInfo.displayName || "匿名用户",
                 pid: this.localInfo.persistentId || "",
-                videoEnabled: media.hasVideoTrack
+                videoEnabled: media.hasVideoTrack,
+                sourceMode: media.sourceMode
             }
         });
 
         this._attachMediaCall(call, { incoming: false });
         if (this.handlers.onCallState) {
-            this.handlers.onCallState({ state: "calling", incoming: false, hasVideoTrack: media.hasVideoTrack });
+            this.handlers.onCallState({
+                state: "calling",
+                incoming: false,
+                hasVideoTrack: media.hasVideoTrack,
+                sourceMode: media.sourceMode
+            });
         }
+        return {
+            sourceMode: media.sourceMode,
+            hasVideoTrack: media.hasVideoTrack
+        };
     }
 
     /**
@@ -71,17 +87,31 @@ class MediaCallManager {
         const call = this.pendingIncomingCall;
         this.pendingIncomingCall = null;
         const media = await this._createLocalMediaStream({
+            sourceMode: options.sourceMode || (options.showVideo === false ? "audio" : "camera"),
             showVideo: options.showVideo !== false,
             requireAudio: options.requireAudio !== false
         });
-        this._setLocalMediaStream(media.stream, { hasVideoTrack: media.hasVideoTrack, requestedVideo: media.requestedVideo });
+        this._setLocalMediaStream(media.stream, {
+            hasVideoTrack: media.hasVideoTrack,
+            requestedVideo: media.requestedVideo,
+            sourceMode: media.sourceMode
+        });
         this.activePeerId = call.peer || "";
 
         call.answer(media.stream);
         this._attachMediaCall(call, { incoming: true });
         if (this.handlers.onCallState) {
-            this.handlers.onCallState({ state: "connecting", incoming: true, hasVideoTrack: media.hasVideoTrack });
+            this.handlers.onCallState({
+                state: "connecting",
+                incoming: true,
+                hasVideoTrack: media.hasVideoTrack,
+                sourceMode: media.sourceMode
+            });
         }
+        return {
+            sourceMode: media.sourceMode,
+            hasVideoTrack: media.hasVideoTrack
+        };
     }
 
     /**
@@ -195,7 +225,8 @@ class MediaCallManager {
                 this.handlers.onCallState({
                     state: "connected",
                     incoming: Boolean(options.incoming),
-                    hasVideoTrack
+                    hasVideoTrack,
+                    sourceMode: this.localSourceMode
                 });
             }
         });
@@ -237,13 +268,18 @@ class MediaCallManager {
             throw new Error("当前页面不是 HTTPS，iPad Safari 无法访问摄像头/麦克风。");
         }
 
-        const showVideo = options.showVideo !== false;
+        const sourceMode = this._normalizeSourceMode(options.sourceMode, options.showVideo !== false);
+        const showVideo = sourceMode !== "audio";
         const requireAudio = options.requireAudio !== false;
+        if (sourceMode === "screen") {
+            return this._createScreenMediaStream({ requireAudio });
+        }
         if (!showVideo && !requireAudio) {
             return {
                 stream: new MediaStream(),
                 requestedVideo: false,
-                hasVideoTrack: false
+                hasVideoTrack: false,
+                sourceMode
             };
         }
 
@@ -310,8 +346,69 @@ class MediaCallManager {
         return {
             stream,
             requestedVideo: showVideo,
-            hasVideoTrack: stream.getVideoTracks().length > 0
+            hasVideoTrack: stream.getVideoTracks().length > 0,
+            sourceMode
         };
+    }
+
+    async _createScreenMediaStream(options) {
+        options = options || {};
+        if (!navigator.mediaDevices || typeof navigator.mediaDevices.getDisplayMedia !== "function") {
+            throw new Error("当前浏览器不支持屏幕共享。");
+        }
+        let displayStream = null;
+        let micStream = null;
+        try {
+            displayStream = await navigator.mediaDevices.getDisplayMedia({
+                video: true,
+                audio: false
+            });
+            const merged = new MediaStream();
+            const displayTracks = displayStream && typeof displayStream.getVideoTracks === "function"
+                ? displayStream.getVideoTracks()
+                : [];
+            if (displayTracks.length === 0) {
+                throw new Error("未获取到屏幕画面。");
+            }
+            merged.addTrack(displayTracks[0]);
+            if (options.requireAudio !== false) {
+                micStream = await navigator.mediaDevices.getUserMedia({
+                    audio: true,
+                    video: false
+                });
+                const audioTracks = micStream && typeof micStream.getAudioTracks === "function"
+                    ? micStream.getAudioTracks()
+                    : [];
+                for (let i = 0; i < audioTracks.length; i += 1) {
+                    merged.addTrack(audioTracks[i]);
+                }
+            }
+            return {
+                stream: merged,
+                requestedVideo: true,
+                hasVideoTrack: true,
+                sourceMode: "screen"
+            };
+        } catch (error) {
+            this._stopStreamTracks(displayStream);
+            this._stopStreamTracks(micStream);
+            const errorName = error && error.name ? String(error.name) : "";
+            if (errorName === "NotAllowedError" || errorName === "PermissionDeniedError") {
+                throw new Error("屏幕共享已取消或浏览器拒绝了权限。");
+            }
+            throw error;
+        }
+    }
+
+    _normalizeSourceMode(sourceMode, showVideo) {
+        const raw = String(sourceMode || "").trim().toLowerCase();
+        if (raw === "screen") {
+            return "screen";
+        }
+        if (raw === "audio") {
+            return "audio";
+        }
+        return showVideo === false ? "audio" : "camera";
     }
 
     _createBlackVideoTrack() {
@@ -336,10 +433,12 @@ class MediaCallManager {
         info = info || {};
         this._stopLocalMedia();
         this.localMediaStream = stream || null;
+        this.localSourceMode = info.sourceMode || "camera";
         if (this.handlers.onLocalStream) {
             this.handlers.onLocalStream(this.localMediaStream, {
                 hasVideoTrack: Boolean(info.hasVideoTrack),
-                requestedVideo: Boolean(info.requestedVideo)
+                requestedVideo: Boolean(info.requestedVideo),
+                sourceMode: this.localSourceMode
             });
         }
     }
@@ -349,7 +448,8 @@ class MediaCallManager {
         this.remoteMediaStream = stream || null;
         if (this.handlers.onRemoteStream) {
             this.handlers.onRemoteStream(this.remoteMediaStream, {
-                hasVideoTrack: Boolean(info.hasVideoTrack)
+                hasVideoTrack: Boolean(info.hasVideoTrack),
+                sourceMode: info.sourceMode || ""
             });
         }
     }
@@ -357,8 +457,13 @@ class MediaCallManager {
     _stopLocalMedia() {
         this._stopStreamTracks(this.localMediaStream);
         this.localMediaStream = null;
+        this.localSourceMode = "camera";
         if (this.handlers.onLocalStream) {
-            this.handlers.onLocalStream(null, { hasVideoTrack: false, requestedVideo: false });
+            this.handlers.onLocalStream(null, {
+                hasVideoTrack: false,
+                requestedVideo: false,
+                sourceMode: "audio"
+            });
         }
     }
 

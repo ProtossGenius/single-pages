@@ -56,8 +56,13 @@
         voiceStream: null,
         voiceSendAfterStop: true,
         lastVideoPlayHintAt: 0,
+        localMediaSourceMode: "camera",
+        remoteMediaSourceMode: "audio",
         videoState: "idle",
         videoModalOpen: false,
+        boardModalOpen: false,
+        boardSessions: {},
+        boardPreferences: {},
         incomingCallInfo: null,
         incomingFileOffer: null,
         transferViews: {},
@@ -130,11 +135,14 @@
         sendFile: document.getElementById("send-file"),
         sendEmoji: document.getElementById("send-emoji"),
         recordVoice: document.getElementById("record-voice"),
+        boardToggle: document.getElementById("board-toggle"),
         videoCall: document.getElementById("video-call"),
         fileInput: document.getElementById("file-input"),
         emojiPanel: document.getElementById("emoji-panel"),
         videoModal: document.getElementById("video-modal"),
         videoStatus: document.getElementById("video-status"),
+        videoSourceSelect: document.getElementById("video-source-select"),
+        applyVideoSource: document.getElementById("apply-video-source"),
         videoShowToggle: document.getElementById("video-show-toggle"),
         videoMuteToggle: document.getElementById("video-mute-toggle"),
         localVideo: document.getElementById("local-video"),
@@ -144,6 +152,25 @@
         rejectVideoCall: document.getElementById("reject-video-call"),
         hangupVideo: document.getElementById("hangup-video"),
         closeVideoModal: document.getElementById("close-video-modal"),
+        boardModal: document.getElementById("board-modal"),
+        boardStatus: document.getElementById("board-status"),
+        boardVoiceToggle: document.getElementById("board-voice-toggle"),
+        boardScreenToggle: document.getElementById("board-screen-toggle"),
+        boardOpenVideoSettings: document.getElementById("board-open-video-settings"),
+        closeBoardModal: document.getElementById("close-board-modal"),
+        boardToolBrush: document.getElementById("board-tool-brush"),
+        boardToolEraser: document.getElementById("board-tool-eraser"),
+        boardToolPan: document.getElementById("board-tool-pan"),
+        boardColor: document.getElementById("board-color"),
+        boardSize: document.getElementById("board-size"),
+        boardShareViewToggle: document.getElementById("board-share-view-toggle"),
+        boardFollowViewToggle: document.getElementById("board-follow-view-toggle"),
+        boardStage: document.getElementById("board-stage"),
+        boardCanvas: document.getElementById("board-canvas"),
+        boardMediaHint: document.getElementById("board-media-hint"),
+        boardRemoteMedia: document.getElementById("board-remote-media"),
+        boardLocalMedia: document.getElementById("board-local-media"),
+        boardLayerList: document.getElementById("board-layer-list"),
         fileOfferModal: document.getElementById("file-offer-modal"),
         fileOfferText: document.getElementById("file-offer-text"),
         acceptFileOffer: document.getElementById("accept-file-offer"),
@@ -173,6 +200,9 @@
             UiChat.clearUnread(appState, elements);
             UiChat.enterChatInterface(appState, elements);
             setStatus("连接成功。");
+            if (typeof UiBoard !== "undefined" && UiBoard && typeof UiBoard.onPeerConnected === "function") {
+                UiBoard.onPeerConnected(appState, elements, peerManager, info);
+            }
             if (info && info.peerId && appState.autoReconnectPeers && appState.autoReconnectPeers[info.peerId]) {
                 delete appState.autoReconnectPeers[info.peerId];
             }
@@ -190,6 +220,7 @@
                 UiChat.appendMessage(appState, elements, "system", `连接已断开：${closeReason}（页面隐藏：${hiddenText}）`, true);
                 UiChat.setPeerName(appState, elements, "", { persist: false });
                 appState.remotePersistentId = "";
+                appState.remoteMediaSourceMode = "audio";
                 setConnectionState(false);
                 UiFileOffer.clearAllTransferProgress(appState);
                 UiVideo.resetVideoUI(appState, elements, "未开始");
@@ -250,6 +281,28 @@
             UiChat.appendMessage(appState, elements, message.from, message.body, message.type === "hello");
             UiChat.markUnreadIfNeeded(appState, elements, message.from === "peer");
         },
+        onStructuredPayload: (payload, pc) => {
+            if (!payload || !payload.t) {
+                return false;
+            }
+            if (payload.t === "media-state") {
+                appState.remoteMediaSourceMode = payload && payload.sourceMode ? String(payload.sourceMode) : "audio";
+                if (payload.state === "idle" && elements.remoteVideo) {
+                    elements.remoteVideo.srcObject = null;
+                }
+                if (payload.state === "idle" && typeof UiBoard !== "undefined" && UiBoard && typeof UiBoard.onRemoteStream === "function") {
+                    UiBoard.onRemoteStream(appState, elements, null, { hasVideoTrack: false });
+                }
+                if (typeof UiBoard !== "undefined" && UiBoard && typeof UiBoard.updateBoardMediaUI === "function") {
+                    UiBoard.updateBoardMediaUI(appState, elements);
+                }
+                return true;
+            }
+            if (typeof UiBoard !== "undefined" && UiBoard && typeof UiBoard.handleStructuredPayload === "function") {
+                return UiBoard.handleStructuredPayload(appState, elements, peerManager, helpers, payload, pc);
+            }
+            return false;
+        },
         onHeartbeat: (info) => {
             handleHeartbeatPing(info);
         },
@@ -280,12 +333,19 @@
         onIncomingCall: (info) => {
             appState.incomingCallInfo = info || null;
             appState.videoState = "incoming";
+            appState.remoteMediaSourceMode = info && info.metadata && info.metadata.sourceMode
+                ? String(info.metadata.sourceMode)
+                : "camera";
             const callerName = info && info.metadata && info.metadata.name ? String(info.metadata.name) : (appState.peerName || "对方");
-            UiVideo.setVideoStatus(elements, `${callerName} 邀请视频通话`);
+            UiVideo.setVideoStatus(elements, `${callerName} 邀请${appState.remoteMediaSourceMode === "screen" ? "屏幕共享" : (appState.remoteMediaSourceMode === "audio" ? "语音通话" : "视频通话")}`);
             UiVideo.openVideoModal(appState, elements, { incoming: true });
             UiVideo.updateVideoButton(appState, elements);
+            if (typeof UiBoard !== "undefined" && UiBoard && typeof UiBoard.updateBoardMediaUI === "function") {
+                UiBoard.updateBoardMediaUI(appState, elements);
+            }
         },
         onLocalStream: (stream, info) => {
+            appState.localMediaSourceMode = info && info.sourceMode ? String(info.sourceMode) : appState.localMediaSourceMode;
             elements.localVideo.srcObject = stream || null;
             if (elements.localVideo && elements.localVideo.parentElement) {
                 const noVideo = !info || !info.hasVideoTrack;
@@ -293,6 +353,9 @@
             }
             UiVideo.applyLocalMediaTrackToggles(elements);
             UiVideo.ensureVideoPlayback(elements.localVideo, appState, helpers, { muted: true });
+            if (typeof UiBoard !== "undefined" && UiBoard && typeof UiBoard.onLocalStream === "function") {
+                UiBoard.onLocalStream(appState, elements, stream, info);
+            }
         },
         onRemoteStream: (stream, info) => {
             elements.remoteVideo.srcObject = stream || null;
@@ -304,17 +367,26 @@
             if (stream) {
                 UiVideo.openVideoModal(appState, elements, { incoming: false });
             }
+            if (typeof UiBoard !== "undefined" && UiBoard && typeof UiBoard.onRemoteStream === "function") {
+                UiBoard.onRemoteStream(appState, elements, stream, info);
+            }
         },
         onCallState: (state) => {
             const next = state && state.state ? state.state : "idle";
+            if (state && state.sourceMode) {
+                appState.localMediaSourceMode = String(state.sourceMode);
+            }
+            const sourceLabel = appState.localMediaSourceMode === "screen"
+                ? "屏幕共享"
+                : (appState.localMediaSourceMode === "audio" ? "语音" : "视频");
             if (next === "calling") {
-                UiVideo.setVideoStatus(elements, "呼叫中...");
+                UiVideo.setVideoStatus(elements, sourceLabel + "呼叫中...");
                 appState.videoState = "calling";
             } else if (next === "connecting") {
-                UiVideo.setVideoStatus(elements, "连接中...");
+                UiVideo.setVideoStatus(elements, sourceLabel + "连接中...");
                 appState.videoState = "connecting";
             } else if (next === "connected") {
-                UiVideo.setVideoStatus(elements, "通话中");
+                UiVideo.setVideoStatus(elements, sourceLabel + "进行中");
                 appState.videoState = "connected";
             } else if (next === "rejected") {
                 UiVideo.setVideoStatus(elements, "对方未接听");
@@ -331,6 +403,9 @@
                 }
             }
             UiVideo.updateVideoButton(appState, elements);
+            if (typeof UiBoard !== "undefined" && UiBoard && typeof UiBoard.updateBoardMediaUI === "function") {
+                UiBoard.updateBoardMediaUI(appState, elements);
+            }
         },
         onStateChange: (state) => {
             if (state === "disconnected") {
@@ -398,6 +473,7 @@
         loadConnectorModePreference(appState);
         loadStatusLogMaxSetting(appState);
         loadPersistedStatusLogs(appState);
+        loadBoardPreferences(appState);
         renderBaseUrlText();
         setInitStage("location", "success", "已读取当前页面链接");
         if (!peerManager) {
@@ -434,6 +510,9 @@
         UiChat.renderUnread(appState, elements);
         UiChat.renderSessionList(appState, elements);
         UiChat.updateSendControlsEnabledState(appState, elements);
+        if (typeof UiBoard !== "undefined" && UiBoard && typeof UiBoard.onConversationChanged === "function") {
+            UiBoard.onConversationChanged(appState, elements);
+        }
 
         if (elements.statusLogMaxInput) {
             elements.statusLogMaxInput.value = String(appState.statusLogMax);
@@ -459,6 +538,9 @@
     function bindEventListeners() {
         elements.displayName.addEventListener("input", () => {
             peerManager.setDisplayName(getDisplayName());
+            if (typeof UiBoard !== "undefined" && UiBoard && typeof UiBoard.onConversationChanged === "function") {
+                UiBoard.onConversationChanged(appState, elements);
+            }
         });
         elements.toggleMethod.addEventListener("click", () => {
             const nextMode = appState.mode === "qr" ? "scanner" : "qr";
@@ -529,6 +611,9 @@
                     return;
                 }
                 UiChat.selectConversation(appState, elements, id);
+                if (typeof UiBoard !== "undefined" && UiBoard && typeof UiBoard.onConversationChanged === "function") {
+                    UiBoard.onConversationChanged(appState, elements);
+                }
                 UiChat.clearUnread(appState, elements);
                 if (appState.isMobileLayout) {
                     setSessionPanelOpen(false);
@@ -585,12 +670,21 @@
                 setHeaderMenuOpen(false);
                 UiChat.closeEmojiPanel(elements);
                 UiVideo.closeVideoModal(appState, elements, { keepCall: true });
+                if (typeof UiBoard !== "undefined" && UiBoard && typeof UiBoard.closeBoardModal === "function") {
+                    UiBoard.closeBoardModal(appState, elements);
+                }
                 if (appState.incomingFileOffer) {
                     UiFileOffer.rejectIncomingFileOffer(appState, elements, peerManager, helpers);
                 }
             }
         });
-        window.addEventListener("resize", updateLayoutMode);
+        window.addEventListener("resize", () => {
+            updateLayoutMode();
+            if (typeof UiBoard !== "undefined" && UiBoard) {
+                UiBoard.resizeBoardCanvas(elements);
+                UiBoard.requestRender(appState, elements);
+            }
+        });
         document.addEventListener("visibilitychange", () => {
             if (!document.hidden) {
                 UiChat.clearUnread(appState, elements);
@@ -617,7 +711,11 @@
         });
         elements.sendEmoji.addEventListener("click", () => UiChat.toggleEmojiPanel(elements));
         elements.recordVoice.addEventListener("click", () => UiFileOffer.toggleVoiceRecording(appState, elements, peerManager, helpers));
+        elements.boardToggle.addEventListener("click", () => UiBoard.toggleBoardModal(appState, elements, peerManager, helpers));
         elements.videoCall.addEventListener("click", () => UiVideo.toggleVideoCall(appState, elements, peerManager, helpers));
+        if (elements.applyVideoSource) {
+            elements.applyVideoSource.addEventListener("click", () => UiVideo.applySelectedSource(appState, elements, peerManager, helpers));
+        }
         elements.videoShowToggle.addEventListener("change", () => UiVideo.onVideoShowToggleChanged(elements));
         elements.videoMuteToggle.addEventListener("change", () => UiVideo.onVideoMuteToggleChanged(elements));
         elements.acceptVideoCall.addEventListener("click", () => UiVideo.acceptIncomingVideoCall(appState, elements, peerManager, helpers));
@@ -626,6 +724,9 @@
             peerManager.hangupVideoCall();
             appState.videoState = "idle";
             UiVideo.updateVideoButton(appState, elements);
+            if (typeof UiBoard !== "undefined" && UiBoard && typeof UiBoard.updateBoardMediaUI === "function") {
+                UiBoard.updateBoardMediaUI(appState, elements);
+            }
         });
         elements.closeVideoModal.addEventListener("click", () => UiVideo.closeVideoModal(appState, elements, { keepCall: true }));
         elements.localVideo.addEventListener("click", () => {
@@ -634,6 +735,33 @@
         elements.remoteVideo.addEventListener("click", () => {
             UiVideo.ensureVideoPlayback(elements.remoteVideo, appState, helpers, { muted: false });
         });
+        elements.closeBoardModal.addEventListener("click", () => UiBoard.closeBoardModal(appState, elements));
+        elements.boardModal.addEventListener("click", (event) => {
+            if (event.target === elements.boardModal) {
+                UiBoard.closeBoardModal(appState, elements);
+            }
+        });
+        elements.boardOpenVideoSettings.addEventListener("click", () => UiBoard.openVideoSettings(elements));
+        elements.boardVoiceToggle.addEventListener("click", () => {
+            void UiBoard.toggleVoice(appState, elements, peerManager, helpers);
+        });
+        elements.boardScreenToggle.addEventListener("click", () => {
+            void UiBoard.toggleScreenShare(appState, elements, peerManager, helpers);
+        });
+        elements.boardToolBrush.addEventListener("click", () => UiBoard.setTool(appState, elements, "brush"));
+        elements.boardToolEraser.addEventListener("click", () => UiBoard.setTool(appState, elements, "eraser"));
+        elements.boardToolPan.addEventListener("click", () => UiBoard.setTool(appState, elements, "pan"));
+        elements.boardColor.addEventListener("input", () => UiBoard.setBrushColor(appState, elements, elements.boardColor.value));
+        elements.boardSize.addEventListener("input", () => UiBoard.setBrushSize(appState, elements, elements.boardSize.value));
+        elements.boardShareViewToggle.addEventListener("change", () => UiBoard.setShareViewport(appState, elements, peerManager, elements.boardShareViewToggle.checked));
+        elements.boardFollowViewToggle.addEventListener("change", () => UiBoard.setFollowViewport(appState, elements, elements.boardFollowViewToggle.checked));
+        if (elements.boardCanvas) {
+            elements.boardCanvas.addEventListener("pointerdown", (event) => UiBoard.handlePointerDown(event, appState, elements, peerManager));
+            elements.boardCanvas.addEventListener("pointermove", (event) => UiBoard.handlePointerMove(event, appState, elements, peerManager));
+            elements.boardCanvas.addEventListener("pointerup", (event) => UiBoard.handlePointerUp(event, appState));
+            elements.boardCanvas.addEventListener("pointercancel", (event) => UiBoard.handlePointerUp(event, appState));
+            elements.boardCanvas.addEventListener("wheel", (event) => UiBoard.handleWheel(event, appState, elements, peerManager), { passive: false });
+        }
         elements.acceptFileOffer.addEventListener("click", () => UiFileOffer.acceptIncomingFileOffer(appState, elements, peerManager, helpers));
         elements.rejectFileOffer.addEventListener("click", () => UiFileOffer.rejectIncomingFileOffer(appState, elements, peerManager, helpers));
         elements.messageInput.addEventListener("keydown", (event) => {
@@ -915,6 +1043,9 @@
         UiFileOffer.updateVoiceButton(appState, elements);
         UiVideo.updateVideoButton(appState, elements);
         UiChat.setPeerPresence(appState, elements, appState.connected ? "online" : "offline");
+        if (typeof UiBoard !== "undefined" && UiBoard && typeof UiBoard.updateBoardMediaUI === "function") {
+            UiBoard.updateBoardMediaUI(appState, elements);
+        }
     }
 
     function bindConversation(remotePersistentId, peerName = "", fallbackPeerId = "") {
@@ -927,6 +1058,9 @@
         if (normalizedPid) {
             migrateTempConversationToPersistent(appState, targetId, fallbackId);
             appState.remotePersistentId = normalizedPid;
+            if (typeof UiBoard !== "undefined" && UiBoard && typeof UiBoard.migrateSession === "function" && fallbackId) {
+                UiBoard.migrateSession(appState, `peer:${fallbackId}`, targetId);
+            }
         }
 
         const conversation = ensureConversation(appState, targetId);
@@ -939,6 +1073,9 @@
         appState.unreadCount = Math.max(0, Number(conversation.unreadCount || 0));
         UiChat.setPeerName(appState, elements, conversation.peerName || peerName || "", { persist: false });
         UiVideo.syncVideoPrefForCurrentPeer(appState, elements);
+        if (typeof UiBoard !== "undefined" && UiBoard && typeof UiBoard.onConversationChanged === "function") {
+            UiBoard.onConversationChanged(appState, elements);
+        }
 
         if (switched || elements.chatMessages.dataset.inited) {
             UiChat.renderHistoryFromState(appState, elements);

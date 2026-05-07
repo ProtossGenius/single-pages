@@ -76,6 +76,16 @@ class PeerConnection {
         });
     }
 
+    sendStructured(type, payload) {
+        const base = payload && typeof payload === "object" ? payload : {};
+        this.send({
+            ...base,
+            t: String(type || ""),
+            name: base.name || this.localInfo.displayName || "匿名用户",
+            pid: base.pid || this.localInfo.persistentId || ""
+        });
+    }
+
     sendHello() {
         if (!this.conn || !this.conn.open || this.helloSent) {
             return;
@@ -274,6 +284,15 @@ class PeerConnection {
                 this.handlers.onCallHangup(this);
             }
             return;
+        }
+
+        if (type !== "text" && type !== "hello") {
+            if (this.handlers.onStructuredPayload) {
+                const handled = this.handlers.onStructuredPayload(payload, this);
+                if (handled !== false) {
+                    return;
+                }
+            }
         }
 
         // Text/hello messages

@@ -1092,6 +1092,7 @@ button.danger:hover {
     display: flex;
     align-items: center;
     gap: 8px;
+    flex-wrap: wrap;
     font-size: 0.92rem;
 }
 
@@ -1099,6 +1100,15 @@ button.danger:hover {
     display: inline-flex;
     align-items: center;
     gap: 6px;
+}
+
+.video-settings select {
+    min-width: 112px;
+    padding: 6px 8px;
+    border: 1px solid #cbd5e1;
+    border-radius: 8px;
+    background: #fff;
+    color: #111827;
 }
 
 .video-grid {
@@ -1131,6 +1141,221 @@ button.danger:hover {
     display: flex;
     gap: 10px;
     justify-content: flex-end;
+}
+
+.board-modal {
+    position: fixed;
+    inset: 0;
+    z-index: 11050;
+    background: rgba(15, 23, 42, 0.82);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 18px;
+}
+
+.board-card {
+    width: min(1220px, 100%);
+    height: min(92vh, 920px);
+    background: #fff;
+    border-radius: 16px;
+    padding: 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    overflow: hidden;
+}
+
+.board-card-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    flex-wrap: wrap;
+}
+
+.board-card-title {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    color: #111827;
+}
+
+.board-card-title strong {
+    font-size: 1.05rem;
+}
+
+.board-card-title span {
+    font-size: 0.9rem;
+    color: #475569;
+}
+
+.board-card-actions {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+}
+
+.board-toolbar {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+    padding: 10px 12px;
+    border-radius: 12px;
+    background: #f8fafc;
+    border: 1px solid #e2e8f0;
+}
+
+.board-tool-group {
+    display: inline-flex;
+    gap: 8px;
+}
+
+.board-tool-group button.active {
+    background: #1d4ed8;
+}
+
+.board-field,
+.board-checkbox {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    color: #334155;
+    font-size: 0.9rem;
+}
+
+.board-field input[type="range"] {
+    width: 140px;
+}
+
+.board-layout {
+    flex: 1;
+    min-height: 0;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 320px;
+    gap: 12px;
+}
+
+.board-stage {
+    position: relative;
+    min-height: 0;
+    border: 1px solid #dbe2ea;
+    border-radius: 14px;
+    overflow: hidden;
+    background: #f8fafc;
+}
+
+.board-stage canvas {
+    width: 100%;
+    height: 100%;
+    display: block;
+    touch-action: none;
+    cursor: crosshair;
+}
+
+.board-sidebar {
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.board-media-panel,
+.board-layer-panel {
+    border: 1px solid #e2e8f0;
+    border-radius: 14px;
+    padding: 12px;
+    background: #fff;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.board-media-panel strong,
+.board-layer-panel strong {
+    color: #0f172a;
+}
+
+.board-media-panel p {
+    margin: 0;
+    color: #475569;
+    font-size: 0.88rem;
+    line-height: 1.4;
+}
+
+.board-media-grid {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 10px;
+}
+
+.board-media-box {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.board-media-box span {
+    font-size: 0.84rem;
+    color: #475569;
+}
+
+.board-media-box video {
+    width: 100%;
+    aspect-ratio: 16 / 9;
+    border-radius: 10px;
+    background: #0f172a;
+    object-fit: cover;
+}
+
+.board-layer-list {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    overflow-y: auto;
+}
+
+.board-layer-empty {
+    color: #64748b;
+    font-size: 0.88rem;
+}
+
+.board-layer-row {
+    border: 1px solid #e2e8f0;
+    border-radius: 12px;
+    padding: 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    background: #f8fafc;
+}
+
+.board-layer-title {
+    color: #111827;
+    font-size: 0.92rem;
+    font-weight: 600;
+    line-height: 1.4;
+}
+
+.board-layer-actions {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.board-layer-opacity {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    color: #475569;
+    font-size: 0.88rem;
+}
+
+.board-layer-opacity input {
+    flex: 1;
 }
 
 .file-offer-modal {
@@ -1248,5 +1473,24 @@ button.danger:hover {
 
     .video-grid {
         grid-template-columns: 1fr;
+    }
+
+    .video-settings {
+        align-items: flex-start;
+    }
+
+    .board-card {
+        width: 100%;
+        height: 100%;
+        border-radius: 0;
+        padding: 12px;
+    }
+
+    .board-layout {
+        grid-template-columns: 1fr;
+    }
+
+    .board-sidebar {
+        overflow-y: auto;
     }
 }
