@@ -241,6 +241,11 @@ class PeerManager {
         pc.sendText(text);
     }
 
+    sendStructured(peerId, type, payload) {
+        const pc = this._getConnectionOrThrow(peerId);
+        pc.sendStructured(type, payload);
+    }
+
     async sendFile(peerId, file, options) {
         const pc = this._getConnectionOrThrow(peerId);
         if (!this.fileTransfer) {
@@ -275,14 +280,32 @@ class PeerManager {
             throw new Error("视频通话模块未初始化。");
         }
         const pc = this._getConnectionOrThrow(peerId);
-        return this.mediaCallManager.startCall(pc, options);
+        const info = await this.mediaCallManager.startCall(pc, options);
+        pc.sendStructured("media-state", {
+            state: "active",
+            sourceMode: info && info.sourceMode ? info.sourceMode : "camera",
+            hasVideoTrack: Boolean(info && info.hasVideoTrack)
+        });
+        return info;
     }
 
     async acceptIncomingCall(options) {
         if (!this.mediaCallManager) {
             throw new Error("视频通话模块未初始化。");
         }
-        return this.mediaCallManager.acceptCall(options);
+        const info = await this.mediaCallManager.acceptCall(options);
+        const activePeerId = this.mediaCallManager && this.mediaCallManager.activePeerId
+            ? String(this.mediaCallManager.activePeerId)
+            : "";
+        const pc = activePeerId ? this.getConnection(activePeerId) : null;
+        if (pc && pc.isOpen()) {
+            pc.sendStructured("media-state", {
+                state: "active",
+                sourceMode: info && info.sourceMode ? info.sourceMode : "camera",
+                hasVideoTrack: Boolean(info && info.hasVideoTrack)
+            });
+        }
+        return info;
     }
 
     rejectIncomingCall() {
@@ -292,6 +315,17 @@ class PeerManager {
     }
 
     hangupVideoCall(options) {
+        const activePeerId = this.mediaCallManager && this.mediaCallManager.activePeerId
+            ? String(this.mediaCallManager.activePeerId)
+            : "";
+        const pc = activePeerId ? this.getConnection(activePeerId) : null;
+        if (pc && pc.isOpen()) {
+            pc.sendStructured("media-state", {
+                state: "idle",
+                sourceMode: "audio",
+                hasVideoTrack: false
+            });
+        }
         if (this.mediaCallManager) {
             this.mediaCallManager.hangup(options);
         }
@@ -377,6 +411,12 @@ class PeerManager {
                 if (self.mediaCallManager) {
                     self.mediaCallManager.hangup({ notifyPeer: false });
                 }
+            },
+            onStructuredPayload: function(payload, pc) {
+                if (self.handlers.onStructuredPayload) {
+                    return self.handlers.onStructuredPayload(payload, pc);
+                }
+                return false;
             },
             onConnectionClosed: function(info) {
                 const closedPeerId = info && info.peerId ? String(info.peerId) : peerId;

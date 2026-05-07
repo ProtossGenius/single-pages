@@ -11,6 +11,7 @@ const NODE_HINT_STORAGE_KEY = "aircopy.node.hint.v1";
 const CONNECTOR_MODE_STORAGE_KEY = "aircopy.connector.mode.v1";
 const STATUS_LOG_MAX_STORAGE_KEY = "aircopy.status.log.max.v1";
 const STATUS_LOG_STORAGE_KEY = "aircopy.status.logs.v1";
+const BOARD_PREF_STORAGE_KEY = "aircopy.board.pref.v1";
 
 const CHAT_HISTORY_MAX = 300;
 const STATUS_LOG_DEFAULT_MAX = 240;
@@ -279,6 +280,150 @@ function appendStatusLog(appState, message, source) {
         appState.statusLogs.splice(0, appState.statusLogs.length - appState.statusLogMax);
     }
     persistStatusLogs(appState);
+}
+
+// ── Board Preferences ──
+
+function sanitizeBoardLayerPrefs(rawLayers) {
+    const next = {};
+    if (!rawLayers || typeof rawLayers !== "object") {
+        return next;
+    }
+    const participantIds = Object.keys(rawLayers);
+    for (let i = 0; i < participantIds.length; i += 1) {
+        const participantId = participantIds[i];
+        const layer = rawLayers[participantId];
+        next[participantId] = {
+            hidden: Boolean(layer && layer.hidden),
+            opacity: normalizeBoardLayerOpacity(layer && layer.opacity),
+            order: Number.isFinite(Number(layer && layer.order)) ? Number(layer.order) : 0
+        };
+    }
+    return next;
+}
+
+function normalizeBoardLayerOpacity(value) {
+    const num = Number(value);
+    if (!Number.isFinite(num)) {
+        return 1;
+    }
+    if (num < 0.1) {
+        return 0.1;
+    }
+    if (num > 1) {
+        return 1;
+    }
+    return Math.round(num * 100) / 100;
+}
+
+function sanitizeBoardConversationPrefs(rawPrefs) {
+    const prefs = rawPrefs && typeof rawPrefs === "object" ? rawPrefs : {};
+    return {
+        shareViewport: Boolean(prefs.shareViewport),
+        followParticipantId: prefs.followParticipantId ? String(prefs.followParticipantId).trim() : "",
+        layers: sanitizeBoardLayerPrefs(prefs.layers)
+    };
+}
+
+function loadBoardPreferences(appState) {
+    try {
+        const raw = localStorage.getItem(BOARD_PREF_STORAGE_KEY);
+        if (!raw) {
+            appState.boardPreferences = {};
+            return;
+        }
+        const parsed = JSON.parse(raw);
+        const records = parsed && parsed.records && typeof parsed.records === "object" ? parsed.records : parsed;
+        const next = {};
+        const conversationIds = records && typeof records === "object" ? Object.keys(records) : [];
+        for (let i = 0; i < conversationIds.length; i += 1) {
+            const conversationId = conversationIds[i];
+            next[conversationId] = sanitizeBoardConversationPrefs(records[conversationId]);
+        }
+        appState.boardPreferences = next;
+    } catch (_error) {
+        appState.boardPreferences = {};
+    }
+}
+
+function persistBoardPreferences(appState) {
+    try {
+        localStorage.setItem(BOARD_PREF_STORAGE_KEY, JSON.stringify({
+            version: 1,
+            records: appState.boardPreferences || {}
+        }));
+    } catch (_error) {}
+}
+
+function ensureBoardConversationPrefs(appState, conversationId) {
+    const id = String(conversationId || "").trim();
+    if (!id) {
+        return {
+            shareViewport: false,
+            followParticipantId: "",
+            layers: {}
+        };
+    }
+    if (!appState.boardPreferences || typeof appState.boardPreferences !== "object") {
+        appState.boardPreferences = {};
+    }
+    if (!appState.boardPreferences[id]) {
+        appState.boardPreferences[id] = {
+            shareViewport: false,
+            followParticipantId: "",
+            layers: {}
+        };
+    }
+    return appState.boardPreferences[id];
+}
+
+function setBoardConversationPrefs(appState, conversationId, patch) {
+    const prefs = ensureBoardConversationPrefs(appState, conversationId);
+    const next = {
+        ...prefs,
+        ...(patch && typeof patch === "object" ? patch : {})
+    };
+    next.followParticipantId = next.followParticipantId ? String(next.followParticipantId).trim() : "";
+    next.layers = sanitizeBoardLayerPrefs(next.layers);
+    appState.boardPreferences[String(conversationId || "").trim()] = next;
+    persistBoardPreferences(appState);
+    return next;
+}
+
+function setBoardLayerPrefs(appState, conversationId, participantId, patch) {
+    const normalizedParticipantId = String(participantId || "").trim();
+    if (!normalizedParticipantId) {
+        return null;
+    }
+    const prefs = ensureBoardConversationPrefs(appState, conversationId);
+    const layers = {
+        ...(prefs.layers || {})
+    };
+    const current = layers[normalizedParticipantId] || {
+        hidden: false,
+        opacity: 1,
+        order: 0
+    };
+    layers[normalizedParticipantId] = {
+        ...current,
+        ...(patch && typeof patch === "object" ? patch : {})
+    };
+    layers[normalizedParticipantId].hidden = Boolean(layers[normalizedParticipantId].hidden);
+    layers[normalizedParticipantId].opacity = normalizeBoardLayerOpacity(layers[normalizedParticipantId].opacity);
+    layers[normalizedParticipantId].order = Number.isFinite(Number(layers[normalizedParticipantId].order))
+        ? Number(layers[normalizedParticipantId].order)
+        : 0;
+    setBoardConversationPrefs(appState, conversationId, { layers });
+    return layers[normalizedParticipantId];
+}
+
+function deleteBoardConversationPrefs(appState, conversationId) {
+    const id = String(conversationId || "").trim();
+    if (!id || !appState.boardPreferences || !appState.boardPreferences[id]) {
+        return;
+    }
+    delete appState.boardPreferences[id];
+    persistBoardPreferences(appState);
 }
 
 // ── Chat State ──

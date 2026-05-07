@@ -19,6 +19,9 @@ var UiVideo = (function () {
     }
 
     function setVideoControlDefaults(elements) {
+        if (elements.videoSourceSelect) {
+            elements.videoSourceSelect.value = "camera";
+        }
         if (elements.videoShowToggle) {
             elements.videoShowToggle.checked = true;
         }
@@ -48,6 +51,26 @@ var UiVideo = (function () {
         return Boolean(elements.videoShowToggle && elements.videoShowToggle.checked);
     }
 
+    function getSelectedSourceMode(elements) {
+        if (!elements || !elements.videoSourceSelect) {
+            return "camera";
+        }
+        var value = String(elements.videoSourceSelect.value || "").trim().toLowerCase();
+        if (value === "screen" || value === "audio") {
+            return value;
+        }
+        return "camera";
+    }
+
+    function buildCallOptions(elements) {
+        var sourceMode = getSelectedSourceMode(elements);
+        return {
+            sourceMode: sourceMode,
+            showVideo: sourceMode !== "audio" && shouldShowOwnVideo(elements),
+            requireAudio: true
+        };
+    }
+
     function hasPendingTransfer(appState) {
         return Boolean(
             appState.incomingFileOffer
@@ -72,7 +95,7 @@ var UiVideo = (function () {
             peerManager.hangupVideoCall();
             appState.videoState = "idle";
             updateVideoButton(appState, elements);
-            helpers.setStatus("已挂断视频通话。");
+            helpers.setStatus("已挂断通话。");
             return;
         }
         await startVideoCall(appState, elements, peerManager, helpers);
@@ -86,10 +109,12 @@ var UiVideo = (function () {
         var conv = appState.conversations[appState.currentConversationId];
         var peerId = conv && conv.peerId ? conv.peerId : "";
         try {
-            await peerManager.startVideoCall(peerId, { showVideo: shouldShowOwnVideo(elements), requireAudio: true });
+            var callOptions = buildCallOptions(elements);
+            appState.localMediaSourceMode = callOptions.sourceMode;
+            await peerManager.startVideoCall(peerId, callOptions);
             appState.videoState = "calling";
             openVideoModal(appState, elements, { incoming: false });
-            setVideoStatus(elements, "呼叫中...");
+            setVideoStatus(elements, describeSourceMode(callOptions.sourceMode) + "连接中...");
             updateVideoButton(appState, elements);
         } catch (error) {
             helpers.setStatus("发起视频通话失败：" + toErrorMessage(error));
@@ -103,12 +128,11 @@ var UiVideo = (function () {
             return;
         }
         try {
-            await peerManager.acceptIncomingCall({
-                showVideo: shouldShowOwnVideo(elements),
-                requireAudio: true
-            });
+            var acceptOptions = buildCallOptions(elements);
+            appState.localMediaSourceMode = acceptOptions.sourceMode;
+            await peerManager.acceptIncomingCall(acceptOptions);
             appState.videoState = "connecting";
-            setVideoStatus(elements, "连接中...");
+            setVideoStatus(elements, describeSourceMode(acceptOptions.sourceMode) + "连接中...");
             renderVideoModalActions(appState, elements);
             updateVideoButton(appState, elements);
         } catch (error) {
@@ -221,14 +245,55 @@ var UiVideo = (function () {
             return;
         }
         if (appState.videoState === "idle") {
-            elements.videoCall.textContent = "视频";
+            elements.videoCall.textContent = "通话";
             return;
         }
         if (!appState.videoModalOpen) {
-            elements.videoCall.textContent = "显示视频窗口";
+            elements.videoCall.textContent = "显示通话窗口";
             return;
         }
-        elements.videoCall.textContent = appState.videoState === "incoming" ? "显示视频窗口" : "挂断视频";
+        elements.videoCall.textContent = appState.videoState === "incoming" ? "显示通话窗口" : "挂断通话";
+    }
+
+    function describeSourceMode(sourceMode) {
+        if (sourceMode === "screen") {
+            return "屏幕共享";
+        }
+        if (sourceMode === "audio") {
+            return "语音";
+        }
+        return "视频";
+    }
+
+    async function applySelectedSource(appState, elements, peerManager, helpers) {
+        if (!helpers.isCurrentConversationConnected()) {
+            helpers.setStatus("当前会话未连接，无法切换发送内容。");
+            return;
+        }
+        var callOptions = buildCallOptions(elements);
+        appState.localMediaSourceMode = callOptions.sourceMode;
+        if (appState.videoState === "idle" || appState.videoState === "incoming") {
+            setVideoStatus(elements, "已切换为" + describeSourceMode(callOptions.sourceMode) + "，发起/接听时生效");
+            if (typeof UiBoard !== "undefined" && UiBoard && typeof UiBoard.updateBoardMediaUI === "function") {
+                UiBoard.updateBoardMediaUI(appState, elements);
+            }
+            return;
+        }
+        var conv = appState.conversations[appState.currentConversationId];
+        var peerId = conv && conv.peerId ? conv.peerId : "";
+        try {
+            peerManager.hangupVideoCall();
+            appState.videoState = "idle";
+            updateVideoButton(appState, elements);
+            await peerManager.startVideoCall(peerId, callOptions);
+            appState.videoState = "calling";
+            setVideoStatus(elements, describeSourceMode(callOptions.sourceMode) + "重新连接中...");
+            if (typeof UiBoard !== "undefined" && UiBoard && typeof UiBoard.updateBoardMediaUI === "function") {
+                UiBoard.updateBoardMediaUI(appState, elements);
+            }
+        } catch (error) {
+            helpers.setStatus("切换发送内容失败：" + toErrorMessage(error));
+        }
     }
 
     return {
@@ -237,11 +302,14 @@ var UiVideo = (function () {
         onVideoMuteToggleChanged: onVideoMuteToggleChanged,
         applyLocalMediaTrackToggles: applyLocalMediaTrackToggles,
         shouldShowOwnVideo: shouldShowOwnVideo,
+        getSelectedSourceMode: getSelectedSourceMode,
+        buildCallOptions: buildCallOptions,
         hasPendingTransfer: hasPendingTransfer,
         toggleVideoCall: toggleVideoCall,
         startVideoCall: startVideoCall,
         acceptIncomingVideoCall: acceptIncomingVideoCall,
         rejectIncomingVideoCall: rejectIncomingVideoCall,
+        applySelectedSource: applySelectedSource,
         ensureVideoPlayback: ensureVideoPlayback,
         setVideoStatus: setVideoStatus,
         resetVideoUI: resetVideoUI,

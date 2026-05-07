@@ -320,6 +320,7 @@ var UiChat = (function () {
             return;
         }
         delete appState.conversations[id];
+        deleteBoardConversationPrefs(appState, id);
         persistChatState(appState);
         renderSessionList(appState, elements);
     }
@@ -425,6 +426,7 @@ var UiChat = (function () {
         if (elements.sendFile) { elements.sendFile.disabled = !online; }
         if (elements.sendEmoji) { elements.sendEmoji.disabled = !online; }
         if (elements.recordVoice) { elements.recordVoice.disabled = !online; }
+        if (elements.boardToggle) { elements.boardToggle.disabled = !online; }
         if (elements.videoCall) { elements.videoCall.disabled = !online; }
         if (elements.messageInput) {
             elements.messageInput.disabled = !online;
