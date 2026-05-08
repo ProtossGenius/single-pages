@@ -21,7 +21,12 @@ var UiBoard = (function () {
             appState.boardUi = {
                 controlsCollapsed: false,
                 layerPopoverOpen: false,
-                dragParticipantId: ""
+                pseudoFullscreen: false,
+                fullscreenRequested: false,
+                dragParticipantId: "",
+                touchDragTimer: null,
+                touchDragPending: null,
+                touchDragState: null
             };
         }
         if (!appState.boardPointerState || typeof appState.boardPointerState !== "object") {
@@ -52,6 +57,8 @@ var UiBoard = (function () {
             brushSize: DEFAULT_BRUSH_SIZE,
             viewMode: "free",
             followParticipantId: "",
+            sessionState: "idle",
+            incomingInviteName: "",
             participants: {},
             liveStroke: null,
             renderQueued: false,
@@ -142,6 +149,34 @@ var UiBoard = (function () {
         return String(appState.conversations[id].peerId || "").trim();
     }
 
+    function getConversationDisplayName(appState, conversationId) {
+        var id = String(conversationId || getCurrentConversationId(appState)).trim();
+        if (!id || !appState.conversations || !appState.conversations[id]) {
+            return "";
+        }
+        return String(appState.conversations[id].peerName || "").trim();
+    }
+
+    function getSessionState(session) {
+        if (!session || !session.sessionState) {
+            return "idle";
+        }
+        return String(session.sessionState);
+    }
+
+    function setSessionState(session, nextState) {
+        if (!session) {
+            return;
+        }
+        if (nextState !== "outgoing" && nextState !== "incoming" && nextState !== "active") {
+            nextState = "idle";
+        }
+        session.sessionState = nextState;
+        if (nextState !== "incoming") {
+            session.incomingInviteName = "";
+        }
+    }
+
     function supportsScreenShare() {
         return Boolean(
             navigator.mediaDevices
@@ -150,6 +185,79 @@ var UiBoard = (function () {
     }
 
     function supportsFullscreen(target) {
+        if (canUseNativeFullscreen(target)) {
+            return true;
+        }
+        return canUseInstalledAppFullscreen(target);
+    }
+
+    function isFullscreenActive(elements) {
+        if (!elements || !elements.boardModal) {
+            return false;
+        }
+        if (elements.boardModal.classList.contains("board-modal-pseudo-fullscreen")) {
+            return true;
+        }
+        var active = getNativeFullscreenElement();
+        return Boolean(active && (active === elements.boardModal || elements.boardModal.contains(active)));
+    }
+
+    function getNativeFullscreenElement() {
+        if (document.fullscreenElement) {
+            return document.fullscreenElement;
+        }
+        if (document.webkitFullscreenElement) {
+            return document.webkitFullscreenElement;
+        }
+        return null;
+    }
+
+    function shouldUseFullscreenGuard() {
+        var touchCapable = Boolean(
+            (typeof navigator !== "undefined" && navigator.maxTouchPoints > 0)
+            || (typeof window !== "undefined" && window.matchMedia && window.matchMedia("(pointer: coarse)").matches)
+        );
+        if (!touchCapable) {
+            return false;
+        }
+        var ua = typeof navigator !== "undefined" ? String(navigator.userAgent || "") : "";
+        return /iPad|iPhone|iPod/.test(ua) || (/Macintosh/.test(ua) && touchCapable);
+    }
+
+    function isStandaloneDisplayMode() {
+        var navigatorStandalone = typeof navigator !== "undefined" && navigator.standalone === true;
+        var mediaStandalone = typeof window !== "undefined"
+            && window.matchMedia
+            && window.matchMedia("(display-mode: standalone)").matches;
+        return Boolean(navigatorStandalone || mediaStandalone);
+    }
+
+    function canUseInstalledAppFullscreen(target) {
+        return Boolean(
+            target
+            && shouldUseFullscreenGuard()
+            && isStandaloneDisplayMode()
+        );
+    }
+
+    function getMobileBrowserLabel() {
+        var ua = typeof navigator !== "undefined" ? String(navigator.userAgent || "") : "";
+        if (/CriOS/i.test(ua)) {
+            return "Chrome";
+        }
+        if (/FxiOS/i.test(ua)) {
+            return "Firefox";
+        }
+        if (/EdgiOS/i.test(ua)) {
+            return "Edge";
+        }
+        if (/Safari/i.test(ua) && !/CriOS|FxiOS|EdgiOS/i.test(ua)) {
+            return "Safari";
+        }
+        return "当前浏览器";
+    }
+
+    function canUseNativeFullscreen(target) {
         return Boolean(
             target
             && typeof target.requestFullscreen === "function"
@@ -158,12 +266,86 @@ var UiBoard = (function () {
         );
     }
 
-    function isFullscreenActive(elements) {
+    function setPseudoFullscreen(appState, elements, active) {
+        ensureBoardRoot(appState);
+        var enabled = Boolean(active);
+        appState.boardUi.pseudoFullscreen = enabled;
         if (!elements || !elements.boardModal) {
-            return false;
+            return;
         }
-        var active = document.fullscreenElement;
-        return Boolean(active && (active === elements.boardModal || elements.boardModal.contains(active)));
+        elements.boardModal.classList.toggle("board-modal-pseudo-fullscreen", enabled);
+        if (document && document.documentElement) {
+            document.documentElement.classList.toggle("board-pseudo-fullscreen", enabled);
+        }
+        if (document && document.body) {
+            document.body.classList.toggle("board-pseudo-fullscreen", enabled);
+        }
+    }
+
+    function getViewportMetaElement() {
+        return document.querySelector('meta[name="viewport"]');
+    }
+
+    function lockBoardViewportGestures(appState) {
+        ensureBoardRoot(appState);
+        if (appState.boardUi.viewportLockActive) {
+            return;
+        }
+        var viewportMeta = getViewportMetaElement();
+        appState.boardUi.viewportMetaElement = viewportMeta || null;
+        appState.boardUi.viewportMetaOriginal = viewportMeta ? String(viewportMeta.getAttribute("content") || "") : "";
+        if (viewportMeta) {
+            viewportMeta.setAttribute("content", "width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover");
+        }
+        var blockGesture = function (event) {
+            if (!appState.boardModalOpen || !event || !event.cancelable) {
+                return;
+            }
+            event.preventDefault();
+        };
+        var blockBoardPinch = function (event) {
+            if (!appState.boardModalOpen || !event || !event.cancelable) {
+                return;
+            }
+            var target = event.target;
+            if (!(target instanceof HTMLElement) || !target.closest("#board-modal")) {
+                return;
+            }
+            if (event.touches && event.touches.length >= 2) {
+                event.preventDefault();
+            }
+        };
+        document.addEventListener("gesturestart", blockGesture, { passive: false });
+        document.addEventListener("gesturechange", blockGesture, { passive: false });
+        document.addEventListener("gestureend", blockGesture, { passive: false });
+        document.addEventListener("touchmove", blockBoardPinch, { passive: false });
+        appState.boardUi.viewportLockHandlers = {
+            blockGesture: blockGesture,
+            blockBoardPinch: blockBoardPinch
+        };
+        appState.boardUi.viewportLockActive = true;
+    }
+
+    function unlockBoardViewportGestures(appState) {
+        ensureBoardRoot(appState);
+        if (!appState.boardUi.viewportLockActive) {
+            return;
+        }
+        var handlers = appState.boardUi.viewportLockHandlers || null;
+        if (handlers) {
+            document.removeEventListener("gesturestart", handlers.blockGesture, { passive: false });
+            document.removeEventListener("gesturechange", handlers.blockGesture, { passive: false });
+            document.removeEventListener("gestureend", handlers.blockGesture, { passive: false });
+            document.removeEventListener("touchmove", handlers.blockBoardPinch, { passive: false });
+        }
+        var viewportMeta = appState.boardUi.viewportMetaElement || getViewportMetaElement();
+        if (viewportMeta && typeof appState.boardUi.viewportMetaOriginal === "string") {
+            viewportMeta.setAttribute("content", appState.boardUi.viewportMetaOriginal || "width=device-width, initial-scale=1.0");
+        }
+        appState.boardUi.viewportLockHandlers = null;
+        appState.boardUi.viewportMetaElement = null;
+        appState.boardUi.viewportMetaOriginal = "";
+        appState.boardUi.viewportLockActive = false;
     }
 
     function isRemoteScreenBackgroundActive(appState, elements) {
@@ -183,30 +365,42 @@ var UiBoard = (function () {
         return false;
     }
 
-    function openBoardModal(appState, elements, peerManager, helpers) {
+    function openBoardModal(appState, elements, peerManager, helpers, conversationId) {
         if (!helpers || typeof helpers.isCurrentConversationConnected !== "function" || !helpers.isCurrentConversationConnected()) {
             if (helpers && typeof helpers.setStatus === "function") {
                 helpers.setStatus("当前会话未连接，当前无法打开共享画板。");
             }
             return;
         }
-        var session = ensureBoardSession(appState, elements);
+        var session = ensureBoardSession(appState, elements, conversationId);
         if (!session || !elements.boardModal) {
             return;
         }
+        setSessionState(session, "active");
         appState.boardModalOpen = true;
+        closeBoardInviteModal(elements);
+        lockBoardViewportGestures(appState);
         elements.boardModal.classList.remove("hidden");
         resizeBoardCanvas(elements);
         syncBoardUI(appState, elements, session);
         sendViewportUpdate(appState, elements, peerManager, session.conversationId, true);
-        requestBoardSync(appState, peerManager, session.conversationId);
+        requestBoardSync(appState, elements, peerManager, session.conversationId);
         requestRender(appState, elements, session.conversationId);
     }
 
     function closeBoardModal(appState, elements) {
         ensureBoardRoot(appState);
+        appState.boardUi.fullscreenRequested = false;
+        setPseudoFullscreen(appState, elements, false);
+        unlockBoardViewportGestures(appState);
+        if (getNativeFullscreenElement() && document.exitFullscreen) {
+            document.exitFullscreen().catch(function () {
+                return;
+            });
+        }
         appState.boardModalOpen = false;
         appState.boardUi.layerPopoverOpen = false;
+        clearTouchLayerDrag(appState);
         appState.boardPointerState = createPointerState();
         if (elements.boardModal) {
             elements.boardModal.classList.add("hidden");
@@ -216,21 +410,118 @@ var UiBoard = (function () {
         }
     }
 
-    function toggleBoardModal(appState, elements, peerManager, helpers) {
-        if (!elements.boardModal) {
+    function resetSessionUiState(session) {
+        if (!session) {
             return;
         }
-        if (appState.boardModalOpen) {
+        session.liveStroke = null;
+        session.viewportBroadcastTimer = null;
+        setSessionState(session, "idle");
+    }
+
+    function handleBoardToggle(appState, elements, peerManager, helpers) {
+        var session = ensureBoardSession(appState, elements);
+        if (!session) {
+            return;
+        }
+        var state = getSessionState(session);
+        if (state === "active" || state === "outgoing") {
+            leaveBoardSession(appState, elements, peerManager);
+            return;
+        }
+        if (state === "incoming") {
+            openBoardInviteModal(elements, (session.incomingInviteName || getConversationDisplayName(appState, session.conversationId) || "对方") + " 邀请你进入共享画板");
+            return;
+        }
+        requestBoardSession(appState, elements, peerManager, helpers);
+    }
+
+    function requestBoardSession(appState, elements, peerManager, helpers) {
+        if (!helpers || typeof helpers.isCurrentConversationConnected !== "function" || !helpers.isCurrentConversationConnected()) {
+            if (helpers && typeof helpers.setStatus === "function") {
+                helpers.setStatus("当前会话未连接，当前无法发起共享画板。");
+            }
+            return;
+        }
+        var session = ensureBoardSession(appState, elements);
+        var peerId = getConversationPeerId(appState, session && session.conversationId);
+        if (!session || !peerId || !peerManager || typeof peerManager.sendStructured !== "function") {
+            return;
+        }
+        setSessionState(session, "outgoing");
+        updateBoardButton(appState, elements, session);
+        peerManager.sendStructured(peerId, "board-invite", {
+            pid: getLocalParticipantId(appState),
+            name: getLocalParticipantName(appState, elements)
+        });
+        if (helpers && typeof helpers.setStatus === "function") {
+            helpers.setStatus("已发送共享画板邀请，等待对方确认。");
+        }
+    }
+
+    function acceptBoardInvite(appState, elements, peerManager, helpers) {
+        var session = ensureBoardSession(appState, elements);
+        var peerId = getConversationPeerId(appState, session && session.conversationId);
+        if (!session || getSessionState(session) !== "incoming" || !peerId || !peerManager || typeof peerManager.sendStructured !== "function") {
+            return;
+        }
+        peerManager.sendStructured(peerId, "board-invite-response", {
+            pid: getLocalParticipantId(appState),
+            name: getLocalParticipantName(appState, elements),
+            accepted: true
+        });
+        openBoardModal(appState, elements, peerManager, helpers || {
+            isCurrentConversationConnected: function () {
+                return true;
+            }
+        }, session.conversationId);
+    }
+
+    function rejectBoardInvite(appState, elements, peerManager) {
+        var session = ensureBoardSession(appState, elements);
+        var peerId = getConversationPeerId(appState, session && session.conversationId);
+        if (!session) {
+            return;
+        }
+        if (getSessionState(session) === "incoming" && peerId && peerManager && typeof peerManager.sendStructured === "function") {
+            peerManager.sendStructured(peerId, "board-invite-response", {
+                pid: getLocalParticipantId(appState),
+                name: getLocalParticipantName(appState, elements),
+                accepted: false
+            });
+        }
+        resetSessionUiState(session);
+        closeBoardInviteModal(elements);
+        closeBoardModal(appState, elements);
+        updateBoardButton(appState, elements, session);
+    }
+
+    function leaveBoardSession(appState, elements, peerManager, options) {
+        options = options || {};
+        var session = ensureBoardSession(appState, elements);
+        if (!session) {
             closeBoardModal(appState, elements);
+            closeBoardInviteModal(elements);
             return;
         }
-        openBoardModal(appState, elements, peerManager, helpers);
+        var peerId = getConversationPeerId(appState, session.conversationId);
+        if (options.notify !== false && peerId && peerManager && typeof peerManager.sendStructured === "function") {
+            peerManager.sendStructured(peerId, "board-session-ended", {
+                pid: getLocalParticipantId(appState),
+                name: getLocalParticipantName(appState, elements)
+            });
+        }
+        resetSessionUiState(session);
+        closeBoardModal(appState, elements);
+        closeBoardInviteModal(elements);
+        updateBoardButton(appState, elements, session);
     }
 
     function syncBoardUI(appState, elements, session) {
         if (!session) {
             return;
         }
+        updateBoardButton(appState, elements, session);
         if (elements.boardColor) {
             elements.boardColor.value = session.brushColor || DEFAULT_BRUSH_COLOR;
         }
@@ -246,7 +537,45 @@ var UiBoard = (function () {
         syncControlsState(appState, elements);
         syncLayerList(appState, elements, session);
         syncFollowList(appState, elements, session);
-        syncFullscreenButton(elements);
+        syncFullscreenButton(appState, elements);
+    }
+
+    function updateBoardButton(appState, elements, session) {
+        if (!elements || !elements.boardToggle) {
+            return;
+        }
+        var currentSession = session || ensureBoardSession(appState, elements);
+        var state = getSessionState(currentSession);
+        if (state === "active") {
+            elements.boardToggle.textContent = "退出画板";
+            return;
+        }
+        if (state === "outgoing") {
+            elements.boardToggle.textContent = "取消画板邀请";
+            return;
+        }
+        if (state === "incoming") {
+            elements.boardToggle.textContent = "处理画板邀请";
+            return;
+        }
+        elements.boardToggle.textContent = "发起画板";
+    }
+
+    function openBoardInviteModal(elements, text) {
+        if (!elements || !elements.boardInviteModal) {
+            return;
+        }
+        if (elements.boardInviteText) {
+            elements.boardInviteText.textContent = text || "对方邀请你进入共享画板";
+        }
+        elements.boardInviteModal.classList.remove("hidden");
+    }
+
+    function closeBoardInviteModal(elements) {
+        if (!elements || !elements.boardInviteModal) {
+            return;
+        }
+        elements.boardInviteModal.classList.add("hidden");
     }
 
     function syncControlsState(appState, elements) {
@@ -339,13 +668,38 @@ var UiBoard = (function () {
         }
     }
 
-    function syncFullscreenButton(elements) {
+    function syncFullscreenButton(appState, elements) {
         if (!elements || !elements.boardFullscreenToggle) {
             return;
         }
         var canFullscreen = supportsFullscreen(elements.boardModal);
         elements.boardFullscreenToggle.classList.toggle("hidden", !canFullscreen);
         elements.boardFullscreenToggle.textContent = isFullscreenActive(elements) ? "退出全屏" : "全屏";
+        updateFullscreenHint(appState, elements);
+    }
+
+    function updateFullscreenHint(appState, elements) {
+        if (!elements || !elements.boardFullscreenHint) {
+            return;
+        }
+        var showHint = shouldUseFullscreenGuard();
+        elements.boardFullscreenHint.classList.toggle("hidden", !showHint);
+        if (!showHint) {
+            elements.boardFullscreenHint.textContent = "";
+            return;
+        }
+        if (canUseInstalledAppFullscreen(elements.boardModal)) {
+            elements.boardFullscreenHint.textContent = isFullscreenActive(elements)
+                ? "当前已从主屏幕 App 模式运行；若退出全屏，按钮会按真实状态自动恢复。"
+                : "已处于主屏幕 App 模式；此时全屏不会受 Safari 标签页手势干扰。";
+            return;
+        }
+        var browserLabel = getMobileBrowserLabel();
+        if (browserLabel !== "Safari") {
+            elements.boardFullscreenHint.textContent = "你当前在 iPad " + browserLabel + " 中；这里看不到主屏幕独立启动。若要规避全屏上扫/下扫退出，请改用 Safari 打开本页，再点“分享”→“添加到主屏幕”，然后从主屏幕启动 AirCopy。";
+            return;
+        }
+        elements.boardFullscreenHint.textContent = "若要规避 iPad 上扫/下扫导致的全屏退出，请在 Safari 里点“分享”→“添加到主屏幕”，再从主屏幕打开 AirCopy 后使用全屏。";
     }
 
     function toggleControlsCollapsed(appState, elements) {
@@ -664,6 +1018,10 @@ var UiBoard = (function () {
             row.addEventListener("drop", handleLayerDrop.bind(null, appState, elements, session));
             row.addEventListener("dragend", handleLayerDragEnd);
         }
+        row.addEventListener("pointerdown", handleTouchLayerPointerDown.bind(null, appState, elements, session));
+        row.addEventListener("pointermove", handleTouchLayerPointerMove.bind(null, appState, elements, session));
+        row.addEventListener("pointerup", handleTouchLayerPointerUp.bind(null, appState, elements, session));
+        row.addEventListener("pointercancel", handleTouchLayerPointerUp.bind(null, appState, elements, session));
 
         var title = document.createElement("div");
         title.className = "board-layer-title";
@@ -672,7 +1030,7 @@ var UiBoard = (function () {
         title.appendChild(label);
         var handle = document.createElement("span");
         handle.className = "board-layer-handle";
-        handle.textContent = allowDrag ? "拖动排序" : "桌面端可拖动";
+        handle.textContent = allowDrag ? "拖动排序" : "长按拖动排序";
         title.appendChild(handle);
         row.appendChild(title);
 
@@ -769,6 +1127,145 @@ var UiBoard = (function () {
             target.classList.remove("dragging");
             target.classList.remove("drag-over");
         }
+    }
+
+    function handleTouchLayerPointerDown(appState, elements, session, event) {
+        if (event.pointerType !== "touch") {
+            return;
+        }
+        var row = event.currentTarget;
+        var target = event.target;
+        if (!(row instanceof HTMLElement) || !(target instanceof HTMLElement)) {
+            return;
+        }
+        if (target.closest("input, button")) {
+            return;
+        }
+        clearTouchLayerDrag(appState);
+        appState.boardUi.touchDragPending = {
+            pointerId: event.pointerId,
+            startX: event.clientX,
+            startY: event.clientY
+        };
+        appState.boardUi.touchDragTimer = window.setTimeout(function () {
+            startTouchLayerDrag(appState, row, event.pointerId, event.clientX, event.clientY);
+        }, 380);
+    }
+
+    function handleTouchLayerPointerMove(appState, elements, session, event) {
+        if (event.pointerType !== "touch") {
+            return;
+        }
+        var touchDragState = appState.boardUi && appState.boardUi.touchDragState ? appState.boardUi.touchDragState : null;
+        if (!touchDragState) {
+            if (appState.boardUi && appState.boardUi.touchDragTimer && appState.boardUi.touchDragPending && appState.boardUi.touchDragPending.pointerId === event.pointerId) {
+                var moved = distanceBetweenScreenPoints(
+                    { x: appState.boardUi.touchDragPending.startX, y: appState.boardUi.touchDragPending.startY },
+                    { x: event.clientX, y: event.clientY }
+                );
+                if (moved > 10) {
+                    clearTouchLayerDrag(appState);
+                }
+            }
+            return;
+        }
+        if (touchDragState.pointerId !== event.pointerId) {
+            return;
+        }
+        event.preventDefault();
+        touchDragState.lastX = event.clientX;
+        touchDragState.lastY = event.clientY;
+        if (touchDragState.row) {
+            touchDragState.row.style.transform = "translateY(" + (event.clientY - touchDragState.startY) + "px)";
+        }
+        updateTouchDragTarget(elements, touchDragState, event.clientX, event.clientY);
+    }
+
+    function handleTouchLayerPointerUp(appState, elements, session, event) {
+        if (event.pointerType !== "touch") {
+            return;
+        }
+        if (appState.boardUi && appState.boardUi.touchDragTimer) {
+            window.clearTimeout(appState.boardUi.touchDragTimer);
+            appState.boardUi.touchDragTimer = null;
+        }
+        var touchDragState = appState.boardUi && appState.boardUi.touchDragState ? appState.boardUi.touchDragState : null;
+        if (!touchDragState || touchDragState.pointerId !== event.pointerId) {
+            return;
+        }
+        var sourceParticipantId = String(touchDragState.participantId || "").trim();
+        var targetParticipantId = String(touchDragState.targetParticipantId || "").trim();
+        clearTouchLayerDrag(appState);
+        if (!sourceParticipantId || !targetParticipantId || sourceParticipantId === targetParticipantId) {
+            syncLayerList(appState, elements, session);
+            return;
+        }
+        reorderLayerPrefs(appState, session, sourceParticipantId, targetParticipantId);
+        syncLayerList(appState, elements, session);
+        requestRender(appState, elements, session.conversationId);
+    }
+
+    function startTouchLayerDrag(appState, row, pointerId, startX, startY) {
+        if (!(row instanceof HTMLElement)) {
+            return;
+        }
+        clearTouchLayerDrag(appState);
+        appState.boardUi.touchDragState = {
+            participantId: String(row.dataset.participantId || "").trim(),
+            pointerId: pointerId,
+            row: row,
+            startX: startX,
+            startY: startY,
+            lastX: startX,
+            lastY: startY,
+            targetParticipantId: String(row.dataset.participantId || "").trim(),
+            targetRow: row
+        };
+        appState.boardUi.touchDragPending = null;
+        row.classList.add("dragging");
+        row.classList.add("touch-dragging");
+        row.style.pointerEvents = "none";
+    }
+
+    function updateTouchDragTarget(elements, touchDragState, clientX, clientY) {
+        if (!touchDragState) {
+            return;
+        }
+        if (touchDragState.targetRow) {
+            touchDragState.targetRow.classList.remove("drag-over");
+        }
+        var element = document.elementFromPoint(clientX, clientY);
+        var row = element && element.closest ? element.closest(".board-layer-row") : null;
+        if (!(row instanceof HTMLElement)) {
+            touchDragState.targetParticipantId = touchDragState.participantId;
+            touchDragState.targetRow = null;
+            return;
+        }
+        row.classList.add("drag-over");
+        touchDragState.targetRow = row;
+        touchDragState.targetParticipantId = String(row.dataset.participantId || touchDragState.participantId || "").trim();
+    }
+
+    function clearTouchLayerDrag(appState) {
+        if (!appState.boardUi) {
+            return;
+        }
+        if (appState.boardUi.touchDragTimer) {
+            window.clearTimeout(appState.boardUi.touchDragTimer);
+            appState.boardUi.touchDragTimer = null;
+        }
+        appState.boardUi.touchDragPending = null;
+        var touchDragState = appState.boardUi.touchDragState;
+        if (touchDragState && touchDragState.row) {
+            touchDragState.row.classList.remove("dragging");
+            touchDragState.row.classList.remove("touch-dragging");
+            touchDragState.row.style.transform = "";
+            touchDragState.row.style.pointerEvents = "";
+        }
+        if (touchDragState && touchDragState.targetRow) {
+            touchDragState.targetRow.classList.remove("drag-over");
+        }
+        appState.boardUi.touchDragState = null;
     }
 
     function reorderLayerPrefs(appState, session, sourceParticipantId, targetParticipantId) {
@@ -891,7 +1388,7 @@ var UiBoard = (function () {
         }
         session.viewMode = "follow";
         session.followParticipantId = normalized;
-        var participant = ensureParticipant(session, normalized, normalized);
+        var participant = ensureParticipant(session, normalized, "");
         if (participant && participant.lastViewport) {
             session.viewport = cloneViewport(participant.lastViewport);
         }
@@ -926,6 +1423,7 @@ var UiBoard = (function () {
         if (peerId && peerManager && typeof peerManager.sendStructured === "function") {
             peerManager.sendStructured(peerId, "board-clear", {
                 pid: getLocalParticipantId(appState),
+                name: getLocalParticipantName(appState, elements),
                 bounds: bounds
             });
         }
@@ -942,7 +1440,8 @@ var UiBoard = (function () {
         var peerId = getConversationPeerId(appState, session.conversationId);
         if (peerId && peerManager && typeof peerManager.sendStructured === "function") {
             peerManager.sendStructured(peerId, "board-reset", {
-                pid: getLocalParticipantId(appState)
+                pid: getLocalParticipantId(appState),
+                name: getLocalParticipantName(appState, elements)
             });
         }
     }
@@ -1008,7 +1507,7 @@ var UiBoard = (function () {
         participant.historyUndone.push(stroke.id);
         updateHistoryButtons(appState, elements, session);
         requestRender(appState, elements, session.conversationId);
-        sendStrokeVisibility(appState, peerManager, session.conversationId, stroke.id, true);
+        sendStrokeVisibility(appState, elements, peerManager, session.conversationId, stroke.id, true);
     }
 
     function redo(appState, elements, peerManager, conversationId) {
@@ -1028,7 +1527,7 @@ var UiBoard = (function () {
         participant.historyDone.push(stroke.id);
         updateHistoryButtons(appState, elements, session);
         requestRender(appState, elements, session.conversationId);
-        sendStrokeVisibility(appState, peerManager, session.conversationId, stroke.id, false);
+        sendStrokeVisibility(appState, elements, peerManager, session.conversationId, stroke.id, false);
     }
 
     function getLastVisibleHistoryStroke(participant) {
@@ -1057,13 +1556,14 @@ var UiBoard = (function () {
         return null;
     }
 
-    function sendStrokeVisibility(appState, peerManager, conversationId, strokeId, hidden) {
+    function sendStrokeVisibility(appState, elements, peerManager, conversationId, strokeId, hidden) {
         var peerId = getConversationPeerId(appState, conversationId);
         if (!peerId || !peerManager || typeof peerManager.sendStructured !== "function") {
             return;
         }
         peerManager.sendStructured(peerId, "board-stroke-visibility", {
             pid: getLocalParticipantId(appState),
+            name: getLocalParticipantName(appState, elements),
             strokeId: strokeId,
             hidden: Boolean(hidden)
         });
@@ -1353,13 +1853,14 @@ var UiBoard = (function () {
         });
     }
 
-    function requestBoardSync(appState, peerManager, conversationId) {
+    function requestBoardSync(appState, elements, peerManager, conversationId) {
         var peerId = getConversationPeerId(appState, conversationId);
         if (!peerId || !peerManager || typeof peerManager.sendStructured !== "function") {
             return;
         }
         peerManager.sendStructured(peerId, "board-sync-request", {
-            pid: getLocalParticipantId(appState)
+            pid: getLocalParticipantId(appState),
+            name: getLocalParticipantName(appState, elements)
         });
     }
 
@@ -1382,6 +1883,7 @@ var UiBoard = (function () {
         }
         peerManager.sendStructured(peerId, "board-sync-snapshot", {
             pid: getLocalParticipantId(appState),
+            name: getLocalParticipantName(appState, elements),
             viewport: cloneViewport(session.viewport),
             participants: snapshotParticipants
         });
@@ -1431,9 +1933,12 @@ var UiBoard = (function () {
         if (!payload || typeof payload !== "object") {
             return false;
         }
-        var type = String(payload.type || "").trim();
+        var type = String(payload.t || payload.type || "").trim();
         if (
-            type !== "board-stroke"
+            type !== "board-invite"
+            && type !== "board-invite-response"
+            && type !== "board-session-ended"
+            && type !== "board-stroke"
             && type !== "board-stroke-visibility"
             && type !== "board-sync-request"
             && type !== "board-sync-snapshot"
@@ -1449,9 +1954,49 @@ var UiBoard = (function () {
             return true;
         }
         var participantId = resolveParticipantId(payload, pc);
-        var participantName = payload.name ? String(payload.name || "").trim() : "";
+        var participantName = resolveParticipantName(appState, payload, pc, conversationId, participantId);
         if (participantId) {
-            ensureParticipant(session, participantId, participantName || participantId);
+            ensureParticipant(session, participantId, participantName);
+        }
+
+        if (type === "board-invite") {
+            setSessionState(session, "incoming");
+            session.incomingInviteName = participantName || getConversationDisplayName(appState, conversationId) || "对方";
+            openBoardInviteModal(elements, session.incomingInviteName + " 邀请你进入共享画板");
+            updateBoardButton(appState, elements, session);
+            return true;
+        }
+        if (type === "board-invite-response") {
+            if (payload.accepted) {
+                openBoardModal(appState, elements, peerManager, helpers || {
+                    isCurrentConversationConnected: function () {
+                        return true;
+                    }
+                }, session.conversationId);
+            } else {
+                resetSessionUiState(session);
+                closeBoardInviteModal(elements);
+                closeBoardModal(appState, elements);
+                updateBoardButton(appState, elements, session);
+                if (helpers && typeof helpers.setStatus === "function") {
+                    helpers.setStatus((participantName || "对方") + " 拒绝了共享画板邀请。");
+                }
+            }
+            return true;
+        }
+        if (type === "board-session-ended") {
+            resetSessionUiState(session);
+            closeBoardInviteModal(elements);
+            closeBoardModal(appState, elements);
+            updateBoardButton(appState, elements, session);
+            if (helpers && typeof helpers.setStatus === "function") {
+                helpers.setStatus((participantName || "对方") + " 已退出共享画板。");
+            }
+            return true;
+        }
+
+        if (getSessionState(session) !== "active") {
+            return true;
         }
 
         if (type === "board-sync-request") {
@@ -1489,6 +2034,27 @@ var UiBoard = (function () {
         return true;
     }
 
+    function resolveParticipantName(appState, payload, pc, conversationId, participantId) {
+        var fromPayload = payload && payload.name ? String(payload.name || "").trim() : "";
+        if (fromPayload) {
+            return fromPayload;
+        }
+        var fromConnection = pc && pc.remoteDisplayName ? String(pc.remoteDisplayName || "").trim() : "";
+        if (fromConnection) {
+            return fromConnection;
+        }
+        var fromConversation = getConversationDisplayName(appState, conversationId);
+        if (fromConversation) {
+            return fromConversation;
+        }
+        var session = appState && appState.boardSessions ? appState.boardSessions[String(conversationId || "").trim()] : null;
+        var existing = session && session.participants && participantId ? session.participants[participantId] : null;
+        if (existing && existing.name) {
+            return String(existing.name || "").trim();
+        }
+        return "";
+    }
+
     function resolveConversationId(appState, payload, pc) {
         var persistentId = payload && payload.pid ? String(payload.pid).trim() : "";
         var peerId = pc && pc.peerId ? String(pc.peerId).trim() : "";
@@ -1520,7 +2086,7 @@ var UiBoard = (function () {
             if (!incoming || !incoming.id || incoming.id === localParticipantId) {
                 continue;
             }
-            var participant = ensureParticipant(session, incoming.id, incoming.name || incoming.id);
+            var participant = ensureParticipant(session, incoming.id, incoming.name || "");
             participant.lastViewport = sanitizeViewport(incoming.lastViewport) || participant.lastViewport;
             participant.strokes = [];
             participant.strokeMap = {};
@@ -1542,7 +2108,7 @@ var UiBoard = (function () {
             }
         }
         if (senderParticipantId && payload.viewport) {
-            var sender = ensureParticipant(session, senderParticipantId, senderParticipantId);
+            var sender = ensureParticipant(session, senderParticipantId, resolveParticipantName(appState, payload, null, session.conversationId, senderParticipantId));
             sender.lastViewport = sanitizeViewport(payload.viewport) || sender.lastViewport;
             if (session.viewMode === "follow" && session.followParticipantId === senderParticipantId && sender.lastViewport) {
                 session.viewport = cloneViewport(sender.lastViewport);
@@ -1556,7 +2122,7 @@ var UiBoard = (function () {
         if (!participantId) {
             return;
         }
-        var participant = ensureParticipant(session, participantId, participantId);
+        var participant = ensureParticipant(session, participantId, "");
         participant.lastViewport = sanitizeViewport(viewport);
         if (session.viewMode === "follow" && session.followParticipantId === participantId && participant.lastViewport) {
             session.viewport = cloneViewport(participant.lastViewport);
@@ -1570,7 +2136,7 @@ var UiBoard = (function () {
         if (!participantId) {
             return;
         }
-        var participant = ensureParticipant(session, participantId, participantName || participantId);
+        var participant = ensureParticipant(session, participantId, participantName);
         var stroke = deserializeStroke(rawStroke, participantId);
         if (!stroke || participant.strokeMap[stroke.id]) {
             return;
@@ -1591,7 +2157,7 @@ var UiBoard = (function () {
         if (!participantId || !strokeId) {
             return;
         }
-        var participant = ensureParticipant(session, participantId, participantId);
+        var participant = ensureParticipant(session, participantId, "");
         var stroke = participant.strokeMap[String(strokeId || "").trim()];
         if (!stroke) {
             return;
@@ -1618,9 +2184,17 @@ var UiBoard = (function () {
             return;
         }
         ensureParticipant(session, getLocalParticipantId(appState), getLocalParticipantName(appState, elements));
-        if (appState.boardModalOpen) {
+        updateBoardButton(appState, elements, session);
+        if (getSessionState(session) === "incoming") {
+            openBoardInviteModal(elements, (session.incomingInviteName || getConversationDisplayName(appState, session.conversationId) || "对方") + " 邀请你进入共享画板");
+        } else {
+            closeBoardInviteModal(elements);
+        }
+        if (appState.boardModalOpen && getSessionState(session) === "active") {
             syncBoardUI(appState, elements, session);
             requestRender(appState, elements, session.conversationId);
+        } else if (appState.boardModalOpen) {
+            closeBoardModal(appState, elements);
         }
     }
 
@@ -1635,10 +2209,13 @@ var UiBoard = (function () {
         }
         var participantId = String(info.peerPersistentId || "").trim() || (info.peerId ? ("peer:" + info.peerId) : "");
         if (participantId) {
-            ensureParticipant(session, participantId, info.peerName || participantId);
+            ensureParticipant(session, participantId, info.peerName || getConversationDisplayName(appState, conversationId));
         }
-        requestBoardSync(appState, peerManager, conversationId);
-        sendViewportUpdate(appState, elements, peerManager, conversationId, true);
+        updateBoardButton(appState, elements, session);
+        if (getSessionState(session) === "active") {
+            requestBoardSync(appState, elements, peerManager, conversationId);
+            sendViewportUpdate(appState, elements, peerManager, conversationId, true);
+        }
         if (appState.boardModalOpen && conversationId === getCurrentConversationId(appState)) {
             syncBoardUI(appState, elements, session);
             requestRender(appState, elements, conversationId);
@@ -1664,6 +2241,36 @@ var UiBoard = (function () {
         if (appState.boardPreferences && appState.boardPreferences[fromId]) {
             delete appState.boardPreferences[fromId];
             persistBoardPreferences(appState);
+        }
+    }
+
+    function handlePeerDisconnected(appState, elements, info) {
+        ensureBoardRoot(appState);
+        var currentConversationId = getCurrentConversationId(appState);
+        var affectedIds = [];
+        var peerPersistentId = info && info.peerPersistentId ? String(info.peerPersistentId || "").trim() : "";
+        var peerId = info && info.peerId ? String(info.peerId || "").trim() : "";
+        if (peerPersistentId) {
+            affectedIds.push("pid:" + peerPersistentId);
+        }
+        if (peerId) {
+            affectedIds.push("peer:" + peerId);
+        }
+        if (!affectedIds.length && currentConversationId) {
+            affectedIds.push(currentConversationId);
+        }
+        for (var i = 0; i < affectedIds.length; i += 1) {
+            var session = appState.boardSessions[affectedIds[i]];
+            if (!session) {
+                continue;
+            }
+            resetSessionUiState(session);
+        }
+        closeBoardInviteModal(elements);
+        closeBoardModal(appState, elements);
+        var currentSession = ensureBoardSession(appState, elements, currentConversationId);
+        if (currentSession) {
+            updateBoardButton(appState, elements, currentSession);
         }
     }
 
@@ -1730,17 +2337,41 @@ var UiBoard = (function () {
         if (!elements || !elements.boardModal || !supportsFullscreen(elements.boardModal)) {
             return;
         }
+        ensureBoardRoot(appState);
         if (isFullscreenActive(elements)) {
-            if (document.exitFullscreen) {
+            appState.boardUi.fullscreenRequested = false;
+            setPseudoFullscreen(appState, elements, false);
+            if (getNativeFullscreenElement() && document.exitFullscreen) {
                 await document.exitFullscreen();
             }
             return;
         }
-        await elements.boardModal.requestFullscreen();
+        appState.boardUi.fullscreenRequested = true;
+        if (canUseInstalledAppFullscreen(elements.boardModal)) {
+            setPseudoFullscreen(appState, elements, true);
+            syncFullscreenButton(appState, elements);
+            requestRender(appState, elements);
+            return;
+        }
+        if (canUseNativeFullscreen(elements.boardModal)) {
+            try {
+                await elements.boardModal.requestFullscreen();
+                return;
+            } catch (_error) {
+                appState.boardUi.fullscreenRequested = false;
+                throw _error;
+            }
+        }
     }
 
     function onFullscreenChanged(appState, elements) {
-        syncFullscreenButton(elements);
+        ensureBoardRoot(appState);
+        if (getNativeFullscreenElement()) {
+            setPseudoFullscreen(appState, elements, false);
+        } else if (appState.boardModalOpen && appState.boardUi.fullscreenRequested && canUseInstalledAppFullscreen(elements.boardModal)) {
+            setPseudoFullscreen(appState, elements, true);
+        }
+        syncFullscreenButton(appState, elements);
         requestRender(appState, elements);
     }
 
@@ -1946,7 +2577,11 @@ var UiBoard = (function () {
     return {
         openBoardModal: openBoardModal,
         closeBoardModal: closeBoardModal,
-        toggleBoardModal: toggleBoardModal,
+        handleBoardToggle: handleBoardToggle,
+        requestBoardSession: requestBoardSession,
+        acceptBoardInvite: acceptBoardInvite,
+        rejectBoardInvite: rejectBoardInvite,
+        leaveBoardSession: leaveBoardSession,
         resizeBoardCanvas: resizeBoardCanvas,
         handleStructuredPayload: handleStructuredPayload,
         handleDocumentClick: handleDocumentClick,
@@ -1963,10 +2598,12 @@ var UiBoard = (function () {
         resetBoard: resetBoard,
         onConversationChanged: onConversationChanged,
         onPeerConnected: onPeerConnected,
+        handlePeerDisconnected: handlePeerDisconnected,
         migrateSession: migrateSession,
         onLocalStream: onLocalStream,
         onRemoteStream: onRemoteStream,
         updateBoardMediaUI: updateBoardMediaUI,
+        updateBoardButton: updateBoardButton,
         openVideoSettings: openVideoSettings,
         toggleVoice: toggleVoice,
         toggleScreenShare: toggleScreenShare,
