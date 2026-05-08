@@ -10,6 +10,13 @@ body {
     overflow: hidden;
 }
 
+html.board-pseudo-fullscreen,
+body.board-pseudo-fullscreen {
+    height: 100dvh;
+    overflow: hidden;
+    overscroll-behavior: none;
+}
+
 body {
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
     background-color: #f0f2f5;
@@ -1154,6 +1161,12 @@ button.danger:hover {
     padding: 0;
 }
 
+.board-modal.board-modal-pseudo-fullscreen {
+    inset: 0;
+    width: 100vw;
+    height: 100dvh;
+}
+
 .board-toolbar {
     display: flex;
     align-items: center;
@@ -1282,6 +1295,13 @@ button.danger:hover {
     flex: 0 0 auto;
 }
 
+.board-fullscreen-hint {
+    margin: -2px 0 0;
+    color: #cbd5e1;
+    font-size: 0.82rem;
+    line-height: 1.45;
+}
+
 .board-layer-popover {
     width: 100%;
     max-height: min(48vh, 460px);
@@ -1382,6 +1402,12 @@ button.danger:hover {
 
 .board-layer-row.dragging {
     opacity: 0.65;
+}
+
+.board-layer-row.touch-dragging {
+    position: relative;
+    z-index: 2;
+    box-shadow: 0 12px 28px rgba(15, 23, 42, 0.18);
 }
 
 .board-layer-row.drag-over {

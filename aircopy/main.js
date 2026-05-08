@@ -164,6 +164,7 @@
         boardFreeView: document.getElementById("board-free-view"),
         closeBoardModal: document.getElementById("close-board-modal"),
         boardFullscreenToggle: document.getElementById("board-fullscreen-toggle"),
+        boardFullscreenHint: document.getElementById("board-fullscreen-hint"),
         boardToolBrush: document.getElementById("board-tool-brush"),
         boardToolEraser: document.getElementById("board-tool-eraser"),
         boardToolPan: document.getElementById("board-tool-pan"),
@@ -179,6 +180,10 @@
         boardCanvas: document.getElementById("board-canvas"),
         boardMediaHint: document.getElementById("board-media-hint"),
         boardLayerList: document.getElementById("board-layer-list"),
+        boardInviteModal: document.getElementById("board-invite-modal"),
+        boardInviteText: document.getElementById("board-invite-text"),
+        acceptBoardInvite: document.getElementById("accept-board-invite"),
+        rejectBoardInvite: document.getElementById("reject-board-invite"),
         fileOfferModal: document.getElementById("file-offer-modal"),
         fileOfferText: document.getElementById("file-offer-text"),
         acceptFileOffer: document.getElementById("accept-file-offer"),
@@ -233,6 +238,9 @@
                 UiFileOffer.clearAllTransferProgress(appState);
                 UiVideo.resetVideoUI(appState, elements, "未开始");
                 UiFileOffer.closeFileOfferModal(appState, elements);
+                if (typeof UiBoard !== "undefined" && UiBoard && typeof UiBoard.handlePeerDisconnected === "function") {
+                    UiBoard.handlePeerDisconnected(appState, elements, info);
+                }
             }
             if (wasConnected) {
                 setStatus(`连接已断开：${closeReason}（页面隐藏：${hiddenText}），可点击重连或重新扫码连接。`);
@@ -513,6 +521,9 @@
             navigator.mediaDevices
             && typeof navigator.mediaDevices.getDisplayMedia === "function"
         ));
+        if (typeof UiBoard !== "undefined" && UiBoard && typeof UiBoard.onConversationChanged === "function") {
+            UiBoard.onConversationChanged(appState, elements);
+        }
         setSettingsPanelOpen(false);
         setHeaderMenuOpen(false);
         setConnectionState(false);
@@ -685,8 +696,10 @@
                 UiVideo.closeVideoModal(appState, elements, { keepCall: true });
                 if (elements.boardLayerPopover && !elements.boardLayerPopover.classList.contains("hidden")) {
                     UiBoard.toggleLayerPopover(appState, elements, false);
+                } else if (elements.boardInviteModal && !elements.boardInviteModal.classList.contains("hidden")) {
+                    UiBoard.rejectBoardInvite(appState, elements, peerManager);
                 } else if (typeof UiBoard !== "undefined" && UiBoard && typeof UiBoard.closeBoardModal === "function") {
-                    UiBoard.closeBoardModal(appState, elements);
+                    UiBoard.leaveBoardSession(appState, elements, peerManager);
                 }
                 if (appState.incomingFileOffer) {
                     UiFileOffer.rejectIncomingFileOffer(appState, elements, peerManager, helpers);
@@ -697,7 +710,15 @@
             updateLayoutMode();
             if (typeof UiBoard !== "undefined" && UiBoard) {
                 UiBoard.resizeBoardCanvas(elements);
+                if (typeof UiBoard.onFullscreenChanged === "function") {
+                    UiBoard.onFullscreenChanged(appState, elements);
+                }
                 UiBoard.requestRender(appState, elements);
+            }
+        });
+        window.addEventListener("orientationchange", () => {
+            if (typeof UiBoard !== "undefined" && UiBoard && typeof UiBoard.onFullscreenChanged === "function") {
+                UiBoard.onFullscreenChanged(appState, elements);
             }
         });
         document.addEventListener("fullscreenchange", () => {
@@ -705,7 +726,15 @@
                 UiBoard.onFullscreenChanged(appState, elements);
             }
         });
+        document.addEventListener("webkitfullscreenchange", () => {
+            if (typeof UiBoard !== "undefined" && UiBoard && typeof UiBoard.onFullscreenChanged === "function") {
+                UiBoard.onFullscreenChanged(appState, elements);
+            }
+        });
         document.addEventListener("visibilitychange", () => {
+            if (typeof UiBoard !== "undefined" && UiBoard && typeof UiBoard.onFullscreenChanged === "function") {
+                UiBoard.onFullscreenChanged(appState, elements);
+            }
             if (!document.hidden) {
                 UiChat.clearUnread(appState, elements);
             }
@@ -731,7 +760,7 @@
         });
         elements.sendEmoji.addEventListener("click", () => UiChat.toggleEmojiPanel(elements));
         elements.recordVoice.addEventListener("click", () => UiFileOffer.toggleVoiceRecording(appState, elements, peerManager, helpers));
-        elements.boardToggle.addEventListener("click", () => UiBoard.toggleBoardModal(appState, elements, peerManager, helpers));
+        elements.boardToggle.addEventListener("click", () => UiBoard.handleBoardToggle(appState, elements, peerManager, helpers));
         elements.videoCall.addEventListener("click", () => UiVideo.toggleVideoCall(appState, elements, peerManager, helpers));
         if (elements.applyVideoSource) {
             elements.applyVideoSource.addEventListener("click", () => UiVideo.applySelectedSource(appState, elements, peerManager, helpers));
@@ -756,7 +785,7 @@
             UiVideo.ensureVideoPlayback(elements.remoteVideo, appState, helpers, { muted: false });
         });
         if (elements.closeBoardModal) {
-            elements.closeBoardModal.addEventListener("click", () => UiBoard.closeBoardModal(appState, elements));
+            elements.closeBoardModal.addEventListener("click", () => UiBoard.leaveBoardSession(appState, elements, peerManager));
         }
         if (elements.boardFullscreenToggle) {
             elements.boardFullscreenToggle.addEventListener("click", () => {
@@ -811,6 +840,12 @@
         }
         if (elements.boardResetBoard) {
             elements.boardResetBoard.addEventListener("click", () => UiBoard.resetBoard(appState, elements, peerManager));
+        }
+        if (elements.acceptBoardInvite) {
+            elements.acceptBoardInvite.addEventListener("click", () => UiBoard.acceptBoardInvite(appState, elements, peerManager, helpers));
+        }
+        if (elements.rejectBoardInvite) {
+            elements.rejectBoardInvite.addEventListener("click", () => UiBoard.rejectBoardInvite(appState, elements, peerManager));
         }
         if (elements.boardCanvas) {
             elements.boardCanvas.addEventListener("contextmenu", (event) => {
