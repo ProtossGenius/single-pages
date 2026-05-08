@@ -71,6 +71,20 @@ var UiVideo = (function () {
         };
     }
 
+    function setScreenShareAvailability(elements, supported) {
+        if (!elements || !elements.videoSourceSelect) {
+            return;
+        }
+        var option = elements.videoSourceSelect.querySelector('option[value="screen"]');
+        if (option) {
+            option.hidden = !supported;
+            option.disabled = !supported;
+        }
+        if (!supported && elements.videoSourceSelect.value === "screen") {
+            elements.videoSourceSelect.value = "camera";
+        }
+    }
+
     function hasPendingTransfer(appState) {
         return Boolean(
             appState.incomingFileOffer
@@ -101,7 +115,8 @@ var UiVideo = (function () {
         await startVideoCall(appState, elements, peerManager, helpers);
     }
 
-    async function startVideoCall(appState, elements, peerManager, helpers) {
+    async function startVideoCall(appState, elements, peerManager, helpers, options) {
+        options = options || {};
         if (hasPendingTransfer(appState)) {
             helpers.setStatus("文件传输进行中，请稍后再发起视频通话。");
             return;
@@ -113,7 +128,12 @@ var UiVideo = (function () {
             appState.localMediaSourceMode = callOptions.sourceMode;
             await peerManager.startVideoCall(peerId, callOptions);
             appState.videoState = "calling";
-            openVideoModal(appState, elements, { incoming: false });
+            if (!options.silent) {
+                openVideoModal(appState, elements, { incoming: false });
+            } else {
+                renderVideoModalActions(appState, elements, false);
+                updateVideoButton(appState, elements);
+            }
             setVideoStatus(elements, describeSourceMode(callOptions.sourceMode) + "连接中...");
             updateVideoButton(appState, elements);
         } catch (error) {
@@ -304,6 +324,7 @@ var UiVideo = (function () {
         shouldShowOwnVideo: shouldShowOwnVideo,
         getSelectedSourceMode: getSelectedSourceMode,
         buildCallOptions: buildCallOptions,
+        setScreenShareAvailability: setScreenShareAvailability,
         hasPendingTransfer: hasPendingTransfer,
         toggleVideoCall: toggleVideoCall,
         startVideoCall: startVideoCall,

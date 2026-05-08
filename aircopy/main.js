@@ -153,23 +153,31 @@
         hangupVideo: document.getElementById("hangup-video"),
         closeVideoModal: document.getElementById("close-video-modal"),
         boardModal: document.getElementById("board-modal"),
+        boardControls: document.getElementById("board-controls"),
+        boardControlsToggle: document.getElementById("board-controls-toggle"),
+        boardControlsBody: document.getElementById("board-controls-body"),
         boardStatus: document.getElementById("board-status"),
         boardVoiceToggle: document.getElementById("board-voice-toggle"),
         boardScreenToggle: document.getElementById("board-screen-toggle"),
-        boardOpenVideoSettings: document.getElementById("board-open-video-settings"),
+        boardClearVisible: document.getElementById("board-clear-visible"),
+        boardResetBoard: document.getElementById("board-reset-board"),
+        boardFreeView: document.getElementById("board-free-view"),
         closeBoardModal: document.getElementById("close-board-modal"),
+        boardFullscreenToggle: document.getElementById("board-fullscreen-toggle"),
         boardToolBrush: document.getElementById("board-tool-brush"),
         boardToolEraser: document.getElementById("board-tool-eraser"),
         boardToolPan: document.getElementById("board-tool-pan"),
+        boardUndo: document.getElementById("board-undo"),
+        boardRedo: document.getElementById("board-redo"),
         boardColor: document.getElementById("board-color"),
         boardSize: document.getElementById("board-size"),
-        boardShareViewToggle: document.getElementById("board-share-view-toggle"),
-        boardFollowViewToggle: document.getElementById("board-follow-view-toggle"),
+        boardLayerToggle: document.getElementById("board-layer-toggle"),
+        boardLayerPopover: document.getElementById("board-layer-popover"),
+        boardFollowPanel: document.getElementById("board-follow-panel"),
+        boardFollowList: document.getElementById("board-follow-list"),
         boardStage: document.getElementById("board-stage"),
         boardCanvas: document.getElementById("board-canvas"),
         boardMediaHint: document.getElementById("board-media-hint"),
-        boardRemoteMedia: document.getElementById("board-remote-media"),
-        boardLocalMedia: document.getElementById("board-local-media"),
         boardLayerList: document.getElementById("board-layer-list"),
         fileOfferModal: document.getElementById("file-offer-modal"),
         fileOfferText: document.getElementById("file-offer-text"),
@@ -295,6 +303,7 @@
                 }
                 if (typeof UiBoard !== "undefined" && UiBoard && typeof UiBoard.updateBoardMediaUI === "function") {
                     UiBoard.updateBoardMediaUI(appState, elements);
+                    UiBoard.requestRender(appState, elements);
                 }
                 return true;
             }
@@ -500,6 +509,10 @@
         updateLayoutMode();
         UiChat.initEmojiPanel(appState, elements);
         UiVideo.syncVideoPrefForCurrentPeer(appState, elements);
+        UiVideo.setScreenShareAvailability(elements, Boolean(
+            navigator.mediaDevices
+            && typeof navigator.mediaDevices.getDisplayMedia === "function"
+        ));
         setSettingsPanelOpen(false);
         setHeaderMenuOpen(false);
         setConnectionState(false);
@@ -670,7 +683,9 @@
                 setHeaderMenuOpen(false);
                 UiChat.closeEmojiPanel(elements);
                 UiVideo.closeVideoModal(appState, elements, { keepCall: true });
-                if (typeof UiBoard !== "undefined" && UiBoard && typeof UiBoard.closeBoardModal === "function") {
+                if (elements.boardLayerPopover && !elements.boardLayerPopover.classList.contains("hidden")) {
+                    UiBoard.toggleLayerPopover(appState, elements, false);
+                } else if (typeof UiBoard !== "undefined" && UiBoard && typeof UiBoard.closeBoardModal === "function") {
                     UiBoard.closeBoardModal(appState, elements);
                 }
                 if (appState.incomingFileOffer) {
@@ -683,6 +698,11 @@
             if (typeof UiBoard !== "undefined" && UiBoard) {
                 UiBoard.resizeBoardCanvas(elements);
                 UiBoard.requestRender(appState, elements);
+            }
+        });
+        document.addEventListener("fullscreenchange", () => {
+            if (typeof UiBoard !== "undefined" && UiBoard && typeof UiBoard.onFullscreenChanged === "function") {
+                UiBoard.onFullscreenChanged(appState, elements);
             }
         });
         document.addEventListener("visibilitychange", () => {
@@ -735,31 +755,71 @@
         elements.remoteVideo.addEventListener("click", () => {
             UiVideo.ensureVideoPlayback(elements.remoteVideo, appState, helpers, { muted: false });
         });
-        elements.closeBoardModal.addEventListener("click", () => UiBoard.closeBoardModal(appState, elements));
-        elements.boardModal.addEventListener("click", (event) => {
-            if (event.target === elements.boardModal) {
-                UiBoard.closeBoardModal(appState, elements);
-            }
-        });
-        elements.boardOpenVideoSettings.addEventListener("click", () => UiBoard.openVideoSettings(elements));
-        elements.boardVoiceToggle.addEventListener("click", () => {
-            void UiBoard.toggleVoice(appState, elements, peerManager, helpers);
-        });
-        elements.boardScreenToggle.addEventListener("click", () => {
-            void UiBoard.toggleScreenShare(appState, elements, peerManager, helpers);
-        });
-        elements.boardToolBrush.addEventListener("click", () => UiBoard.setTool(appState, elements, "brush"));
-        elements.boardToolEraser.addEventListener("click", () => UiBoard.setTool(appState, elements, "eraser"));
-        elements.boardToolPan.addEventListener("click", () => UiBoard.setTool(appState, elements, "pan"));
-        elements.boardColor.addEventListener("input", () => UiBoard.setBrushColor(appState, elements, elements.boardColor.value));
-        elements.boardSize.addEventListener("input", () => UiBoard.setBrushSize(appState, elements, elements.boardSize.value));
-        elements.boardShareViewToggle.addEventListener("change", () => UiBoard.setShareViewport(appState, elements, peerManager, elements.boardShareViewToggle.checked));
-        elements.boardFollowViewToggle.addEventListener("change", () => UiBoard.setFollowViewport(appState, elements, elements.boardFollowViewToggle.checked));
+        if (elements.closeBoardModal) {
+            elements.closeBoardModal.addEventListener("click", () => UiBoard.closeBoardModal(appState, elements));
+        }
+        if (elements.boardFullscreenToggle) {
+            elements.boardFullscreenToggle.addEventListener("click", () => {
+                void UiBoard.toggleFullscreen(appState, elements);
+            });
+        }
+        if (elements.boardControlsToggle) {
+            elements.boardControlsToggle.addEventListener("click", () => UiBoard.toggleControlsCollapsed(appState, elements));
+        }
+        if (elements.boardVoiceToggle) {
+            elements.boardVoiceToggle.addEventListener("click", () => {
+                void UiBoard.toggleVoice(appState, elements, peerManager, helpers);
+            });
+        }
+        if (elements.boardScreenToggle) {
+            elements.boardScreenToggle.addEventListener("click", () => {
+                void UiBoard.toggleScreenShare(appState, elements, peerManager, helpers);
+            });
+        }
+        if (elements.boardToolBrush) {
+            elements.boardToolBrush.addEventListener("click", () => UiBoard.setTool(appState, elements, "brush"));
+        }
+        if (elements.boardToolEraser) {
+            elements.boardToolEraser.addEventListener("click", () => UiBoard.setTool(appState, elements, "eraser"));
+        }
+        if (elements.boardToolPan) {
+            elements.boardToolPan.addEventListener("click", () => UiBoard.setTool(appState, elements, "pan"));
+        }
+        if (elements.boardUndo) {
+            elements.boardUndo.addEventListener("click", () => UiBoard.undo(appState, elements, peerManager));
+        }
+        if (elements.boardRedo) {
+            elements.boardRedo.addEventListener("click", () => UiBoard.redo(appState, elements, peerManager));
+        }
+        if (elements.boardColor) {
+            elements.boardColor.addEventListener("input", () => UiBoard.setBrushColor(appState, elements, elements.boardColor.value));
+        }
+        if (elements.boardSize) {
+            elements.boardSize.addEventListener("input", () => UiBoard.setBrushSize(appState, elements, elements.boardSize.value));
+        }
+        if (elements.boardLayerToggle) {
+            elements.boardLayerToggle.addEventListener("click", (event) => {
+                event.stopPropagation();
+                UiBoard.toggleLayerPopover(appState, elements);
+            });
+        }
+        if (elements.boardFreeView) {
+            elements.boardFreeView.addEventListener("click", () => UiBoard.setViewMode(appState, elements, peerManager, "free"));
+        }
+        if (elements.boardClearVisible) {
+            elements.boardClearVisible.addEventListener("click", () => UiBoard.clearVisible(appState, elements, peerManager));
+        }
+        if (elements.boardResetBoard) {
+            elements.boardResetBoard.addEventListener("click", () => UiBoard.resetBoard(appState, elements, peerManager));
+        }
         if (elements.boardCanvas) {
+            elements.boardCanvas.addEventListener("contextmenu", (event) => {
+                event.preventDefault();
+            });
             elements.boardCanvas.addEventListener("pointerdown", (event) => UiBoard.handlePointerDown(event, appState, elements, peerManager));
             elements.boardCanvas.addEventListener("pointermove", (event) => UiBoard.handlePointerMove(event, appState, elements, peerManager));
-            elements.boardCanvas.addEventListener("pointerup", (event) => UiBoard.handlePointerUp(event, appState));
-            elements.boardCanvas.addEventListener("pointercancel", (event) => UiBoard.handlePointerUp(event, appState));
+            elements.boardCanvas.addEventListener("pointerup", (event) => UiBoard.handlePointerUp(event, appState, elements, peerManager));
+            elements.boardCanvas.addEventListener("pointercancel", (event) => UiBoard.handlePointerUp(event, appState, elements, peerManager));
             elements.boardCanvas.addEventListener("wheel", (event) => UiBoard.handleWheel(event, appState, elements, peerManager), { passive: false });
         }
         elements.acceptFileOffer.addEventListener("click", () => UiFileOffer.acceptIncomingFileOffer(appState, elements, peerManager, helpers));
@@ -785,6 +845,9 @@
                 (target.closest("#chat-menu") || target.closest("#chat-menu-toggle"));
             if (appState.headerMenuOpen && !insideHeaderMenu) {
                 setHeaderMenuOpen(false);
+            }
+            if (typeof UiBoard !== "undefined" && UiBoard && typeof UiBoard.handleDocumentClick === "function") {
+                UiBoard.handleDocumentClick(appState, elements, event);
             }
             if (!elements.emojiPanel || elements.emojiPanel.classList.contains("hidden")) {
                 return;

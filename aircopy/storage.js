@@ -318,9 +318,18 @@ function normalizeBoardLayerOpacity(value) {
 
 function sanitizeBoardConversationPrefs(rawPrefs) {
     const prefs = rawPrefs && typeof rawPrefs === "object" ? rawPrefs : {};
+    const legacyShareViewport = Boolean(prefs.shareViewport);
+    const legacyFollowParticipantId = prefs.followParticipantId ? String(prefs.followParticipantId).trim() : "";
+    let viewMode = prefs.viewMode ? String(prefs.viewMode).trim() : "";
+    if (viewMode === "share") {
+        viewMode = "free";
+    }
+    if (viewMode !== "follow" && viewMode !== "free") {
+        viewMode = legacyFollowParticipantId ? "follow" : (legacyShareViewport ? "free" : "free");
+    }
     return {
-        shareViewport: Boolean(prefs.shareViewport),
-        followParticipantId: prefs.followParticipantId ? String(prefs.followParticipantId).trim() : "",
+        viewMode,
+        followParticipantId: legacyFollowParticipantId,
         layers: sanitizeBoardLayerPrefs(prefs.layers)
     };
 }
@@ -359,7 +368,7 @@ function ensureBoardConversationPrefs(appState, conversationId) {
     const id = String(conversationId || "").trim();
     if (!id) {
         return {
-            shareViewport: false,
+            viewMode: "free",
             followParticipantId: "",
             layers: {}
         };
@@ -369,7 +378,7 @@ function ensureBoardConversationPrefs(appState, conversationId) {
     }
     if (!appState.boardPreferences[id]) {
         appState.boardPreferences[id] = {
-            shareViewport: false,
+            viewMode: "free",
             followParticipantId: "",
             layers: {}
         };
@@ -383,6 +392,7 @@ function setBoardConversationPrefs(appState, conversationId, patch) {
         ...prefs,
         ...(patch && typeof patch === "object" ? patch : {})
     };
+    next.viewMode = next.viewMode === "follow" ? "follow" : "free";
     next.followParticipantId = next.followParticipantId ? String(next.followParticipantId).trim() : "";
     next.layers = sanitizeBoardLayerPrefs(next.layers);
     appState.boardPreferences[String(conversationId || "").trim()] = next;
