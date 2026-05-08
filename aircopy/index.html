@@ -245,66 +245,58 @@
     </div>
 
     <div id="board-modal" class="board-modal hidden">
-        <div class="board-card">
-            <div class="board-card-header">
-                <div class="board-card-title">
-                    <strong>共享画板</strong>
-                    <span id="board-status">未打开</span>
+        <div id="board-stage" class="board-stage">
+            <canvas id="board-canvas"></canvas>
+            <div id="board-controls" class="board-floating board-controls">
+                <div class="board-controls-header">
+                    <button id="board-controls-toggle" class="secondary" type="button">收起</button>
+                    <span id="board-status" class="board-status-chip">未打开</span>
                 </div>
-                <div class="board-card-actions">
-                    <button id="board-voice-toggle" type="button">开启语音</button>
-                    <button id="board-screen-toggle" type="button">共享屏幕</button>
-                    <button id="board-open-video-settings" class="secondary" type="button">通话设置</button>
-                    <button id="close-board-modal" class="secondary" type="button">关闭</button>
-                </div>
-            </div>
-            <div class="board-toolbar">
-                <div class="board-tool-group">
-                    <button id="board-tool-brush" type="button" class="active">画笔</button>
-                    <button id="board-tool-eraser" type="button">橡皮</button>
-                    <button id="board-tool-pan" type="button">平移</button>
-                </div>
-                <label class="board-field">
-                    <span>颜色</span>
-                    <input id="board-color" type="color" value="#2563eb" />
-                </label>
-                <label class="board-field">
-                    <span>粗细</span>
-                    <input id="board-size" type="range" min="2" max="72" step="1" value="12" />
-                </label>
-                <label class="board-checkbox">
-                    <input id="board-share-view-toggle" type="checkbox" />
-                    共享我的视角
-                </label>
-                <label class="board-checkbox">
-                    <input id="board-follow-view-toggle" type="checkbox" />
-                    跟随对方视角
-                </label>
-            </div>
-            <div class="board-layout">
-                <div id="board-stage" class="board-stage">
-                    <canvas id="board-canvas"></canvas>
-                </div>
-                <aside class="board-sidebar">
-                    <section class="board-media-panel">
-                        <strong>语音 / 屏幕</strong>
-                        <p id="board-media-hint">当前未建立语音/视频连接</p>
-                        <div class="board-media-grid">
-                            <div class="board-media-box">
-                                <span>对方画面/屏幕</span>
-                                <video id="board-remote-media" autoplay playsinline></video>
-                            </div>
-                            <div class="board-media-box">
-                                <span>我的发送内容</span>
-                                <video id="board-local-media" autoplay playsinline muted></video>
-                            </div>
+                <div id="board-controls-body" class="board-controls-body">
+                    <div class="board-toolbar">
+                        <div class="board-tool-group">
+                            <button id="board-tool-brush" type="button" class="active">画笔</button>
+                            <button id="board-tool-eraser" type="button">橡皮</button>
+                            <button id="board-tool-pan" type="button">平移</button>
                         </div>
-                    </section>
-                    <section class="board-layer-panel">
-                        <strong>图层</strong>
-                        <div id="board-layer-list" class="board-layer-list"></div>
-                    </section>
-                </aside>
+                        <div class="board-tool-group">
+                            <button id="board-undo" type="button" class="secondary">撤销</button>
+                            <button id="board-redo" type="button" class="secondary">重做</button>
+                        </div>
+                        <label class="board-field">
+                            <span>颜色</span>
+                            <input id="board-color" type="color" value="#2563eb" />
+                        </label>
+                        <label class="board-field">
+                            <span>粗细</span>
+                            <input id="board-size" type="range" min="2" max="72" step="1" value="12" />
+                        </label>
+                    </div>
+                    <div class="board-control-actions">
+                        <button id="close-board-modal" class="secondary" type="button">关闭</button>
+                        <button id="board-fullscreen-toggle" class="secondary" type="button">全屏</button>
+                        <button id="board-voice-toggle" type="button">开启语音</button>
+                        <button id="board-screen-toggle" type="button">共享屏幕</button>
+                        <button id="board-clear-visible" class="secondary" type="button">清空当前视野</button>
+                        <button id="board-reset-board" class="secondary" type="button">重置</button>
+                        <button id="board-free-view" class="secondary" type="button">自由视角</button>
+                        <button id="board-layer-toggle" class="secondary" type="button">图层 / 视角</button>
+                    </div>
+                    <div id="board-layer-popover" class="board-layer-popover hidden">
+                        <section class="board-panel-section">
+                            <strong>状态</strong>
+                            <p id="board-media-hint" class="board-popover-hint">当前未建立语音连接</p>
+                        </section>
+                        <section id="board-follow-panel" class="board-panel-section">
+                            <strong>跟随视角</strong>
+                            <div id="board-follow-list" class="board-follow-list"></div>
+                        </section>
+                        <section class="board-panel-section">
+                            <strong>图层</strong>
+                            <div id="board-layer-list" class="board-layer-list"></div>
+                        </section>
+                    </div>
+                </div>
             </div>
         </div>
     </div>
