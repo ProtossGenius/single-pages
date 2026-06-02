@@ -2060,7 +2060,6 @@ var UiBoard = (function () {
             ts: Date.now()
         });
     }
-
     function requestBoardSync(appState, elements, peerManager, conversationId) {
         var peerId = getConversationPeerId(appState, conversationId);
         if (!peerId || !peerManager || typeof peerManager.sendStructured !== "function") {
