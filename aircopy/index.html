@@ -253,6 +253,7 @@
     <div id="board-modal" class="board-modal hidden">
         <div id="board-stage" class="board-stage">
             <canvas id="board-canvas"></canvas>
+            <canvas id="board-laser-canvas" aria-hidden="true"></canvas>
             <div id="board-controls" class="board-floating board-controls">
                 <div class="board-controls-header">
                     <button id="board-controls-toggle" class="secondary" type="button">收起</button>
@@ -263,6 +264,7 @@
                         <div class="board-tool-group">
                             <button id="board-tool-brush" type="button" class="active">画笔</button>
                             <button id="board-tool-eraser" type="button">橡皮</button>
+                            <button id="board-tool-laser" type="button">激光棒</button>
                             <button id="board-tool-pan" type="button">平移</button>
                         </div>
                         <div class="board-tool-group">

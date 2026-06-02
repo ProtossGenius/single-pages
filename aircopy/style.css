@@ -1232,6 +1232,22 @@ button.danger:hover {
     cursor: crosshair;
 }
 
+#board-canvas,
+#board-laser-canvas {
+    position: absolute;
+    top: 0;
+    left: 0;
+}
+
+#board-canvas {
+    z-index: 0;
+}
+
+#board-laser-canvas {
+    z-index: 1;
+    pointer-events: none;
+}
+
 .board-floating {
     position: absolute;
     z-index: 2;

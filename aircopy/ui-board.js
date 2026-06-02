@@ -12,6 +12,8 @@ var UiBoard = (function () {
     var VIEWPORT_BROADCAST_DELAY_MS = 80;
     var MIN_POINT_DISTANCE_PX = 0.6;
     var SELF_FOLLOW_VALUE = "__self__";
+    var LASER_TTL_MS = 1200;
+    var LASER_SEND_INTERVAL_MS = 33;
 
     function ensureBoardRoot(appState) {
         if (!appState.boardSessions || typeof appState.boardSessions !== "object") {
@@ -62,7 +64,10 @@ var UiBoard = (function () {
             participants: {},
             liveStroke: null,
             renderQueued: false,
-            viewportBroadcastTimer: null
+            viewportBroadcastTimer: null,
+            laserRenderQueued: false,
+            laserAutoClearTimer: null,
+            laserSendAt: 0
         };
     }
 
@@ -129,7 +134,8 @@ var UiBoard = (function () {
                 strokeMap: {},
                 historyDone: [],
                 historyUndone: [],
-                lastViewport: null
+                lastViewport: null,
+                laser: null
             };
         } else if (name) {
             session.participants[id].name = String(name || "").trim() || session.participants[id].name;
@@ -596,6 +602,7 @@ var UiBoard = (function () {
     function updateToolButtons(elements, tool) {
         toggleButtonActive(elements.boardToolBrush, String(tool || "") === "brush");
         toggleButtonActive(elements.boardToolEraser, String(tool || "") === "eraser");
+        toggleButtonActive(elements.boardToolLaser, String(tool || "") === "laser");
         toggleButtonActive(elements.boardToolPan, String(tool || "") === "pan");
     }
 
@@ -614,7 +621,11 @@ var UiBoard = (function () {
             elements.boardStatus.textContent = "未打开";
             return;
         }
-        var toolLabel = session.tool === "eraser" ? "橡皮" : (session.tool === "pan" ? "平移" : "画笔");
+        var toolLabel = session.tool === "eraser"
+            ? "橡皮"
+            : (session.tool === "pan"
+                ? "平移"
+                : (session.tool === "laser" ? "激光棒" : "画笔"));
         var viewLabel = session.viewMode === "follow"
             ? "跟随：" + getParticipantDisplayName(session, session.followParticipantId)
             : "自由视角";
@@ -719,10 +730,20 @@ var UiBoard = (function () {
         var width = Math.max(320, Math.round(rect.width || 0));
         var height = Math.max(240, Math.round(rect.height || 0));
         var dpr = Math.max(1, Math.min(2, window.devicePixelRatio || 1));
-        elements.boardCanvas.width = Math.round(width * dpr);
-        elements.boardCanvas.height = Math.round(height * dpr);
-        elements.boardCanvas.style.width = width + "px";
-        elements.boardCanvas.style.height = height + "px";
+        resizeCanvasElement(elements.boardCanvas, width, height, dpr);
+        if (elements.boardLaserCanvas) {
+            resizeCanvasElement(elements.boardLaserCanvas, width, height, dpr);
+        }
+    }
+
+    function resizeCanvasElement(canvas, width, height, dpr) {
+        if (!canvas) {
+            return;
+        }
+        canvas.width = Math.round(width * dpr);
+        canvas.height = Math.round(height * dpr);
+        canvas.style.width = width + "px";
+        canvas.style.height = height + "px";
     }
 
     function getCanvasMetrics(elements) {
@@ -750,6 +771,7 @@ var UiBoard = (function () {
         window.requestAnimationFrame(function () {
             session.renderQueued = false;
             renderBoard(appState, elements, session);
+            renderLaserOverlay(appState, elements, session, getCanvasMetrics(elements));
             if (appState.boardModalOpen && isRemoteScreenBackgroundActive(appState, elements)) {
                 requestRender(appState, elements, session.conversationId);
             }
@@ -790,6 +812,105 @@ var UiBoard = (function () {
             ctx.drawImage(tempCanvas, 0, 0, metrics.width, metrics.height);
             ctx.restore();
         }
+    }
+
+    function requestLaserRender(appState, elements, conversationId) {
+        var session = ensureBoardSession(appState, elements, conversationId);
+        if (!session || session.laserRenderQueued || !appState.boardModalOpen) {
+            return;
+        }
+        session.laserRenderQueued = true;
+        window.requestAnimationFrame(function () {
+            session.laserRenderQueued = false;
+            renderLaserOverlay(appState, elements, session, getCanvasMetrics(elements));
+            scheduleLaserAutoClear(appState, elements, session);
+        });
+    }
+
+    function renderLaserOverlay(appState, elements, session, metrics) {
+        if (!appState.boardModalOpen || !session || !elements || !elements.boardLaserCanvas || !metrics) {
+            return;
+        }
+        var ctx = elements.boardLaserCanvas.getContext("2d");
+        if (!ctx) {
+            return;
+        }
+        ctx.setTransform(metrics.dpr, 0, 0, metrics.dpr, 0, 0);
+        ctx.clearRect(0, 0, metrics.width, metrics.height);
+
+        var now = Date.now();
+        var ordered = getOrderedParticipants(appState, session);
+        for (var i = 0; i < ordered.length; i += 1) {
+            var participant = ordered[i];
+            var laser = participant && participant.laser ? participant.laser : null;
+            if (!laser || !laser.point || typeof laser.point !== "object") {
+                continue;
+            }
+            var updatedAt = Number(laser.updatedAt) || 0;
+            var age = now - updatedAt;
+            if (age > LASER_TTL_MS) {
+                continue;
+            }
+            var alpha = Math.max(0, 1 - (age / LASER_TTL_MS));
+            if (alpha <= 0) {
+                continue;
+            }
+
+            var screen = worldToScreen(session.viewport, laser.point, metrics);
+            var radius = 6;
+            ctx.save();
+            ctx.globalAlpha = 0.95 * alpha;
+            ctx.fillStyle = "rgba(239, 68, 68, 1)";
+            ctx.shadowColor = "rgba(239, 68, 68, 1)";
+            ctx.shadowBlur = 12 * alpha;
+            ctx.beginPath();
+            ctx.arc(screen.x, screen.y, radius, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.restore();
+        }
+    }
+
+    function scheduleLaserAutoClear(appState, elements, session) {
+        if (!session) {
+            return;
+        }
+        if (session.laserAutoClearTimer) {
+            window.clearTimeout(session.laserAutoClearTimer);
+            session.laserAutoClearTimer = null;
+        }
+        var delay = getNextLaserExpiryDelayMs(session);
+        if (!delay) {
+            return;
+        }
+        session.laserAutoClearTimer = window.setTimeout(function () {
+            session.laserAutoClearTimer = null;
+            requestLaserRender(appState, elements, session.conversationId);
+        }, Math.max(30, delay + 30));
+    }
+
+    function getNextLaserExpiryDelayMs(session) {
+        if (!session || !session.participants) {
+            return 0;
+        }
+        var now = Date.now();
+        var ids = Object.keys(session.participants);
+        var min = Infinity;
+        for (var i = 0; i < ids.length; i += 1) {
+            var participant = session.participants[ids[i]];
+            var laser = participant && participant.laser ? participant.laser : null;
+            if (!laser) {
+                continue;
+            }
+            var updatedAt = Number(laser.updatedAt) || 0;
+            if (!updatedAt) {
+                continue;
+            }
+            var remaining = (updatedAt + LASER_TTL_MS) - now;
+            if (remaining > 0) {
+                min = Math.min(min, remaining);
+            }
+        }
+        return Number.isFinite(min) ? min : 0;
     }
 
     function drawBoardBackground(ctx, appState, elements, session, metrics) {
@@ -1337,7 +1458,7 @@ var UiBoard = (function () {
         if (!session) {
             return;
         }
-        var nextTool = tool === "eraser" || tool === "pan" ? tool : "brush";
+        var nextTool = tool === "eraser" || tool === "pan" || tool === "laser" ? tool : "brush";
         session.tool = nextTool;
         updateToolButtons(elements, nextTool);
         updateBoardStatus(appState, elements, session);
@@ -1569,6 +1690,37 @@ var UiBoard = (function () {
         });
     }
 
+    function updateLocalLaser(appState, elements, peerManager, session, point, active, forceSend) {
+        if (!session) {
+            return;
+        }
+        var participant = getLocalParticipant(appState, elements, session);
+        var now = Date.now();
+
+        if (!active) {
+            if (participant) {
+                participant.laser = null;
+            }
+        } else if (participant && point) {
+            participant.laser = { point: point, active: true, updatedAt: now };
+        }
+
+        requestLaserRender(appState, elements, session.conversationId);
+
+        if (!peerManager || typeof peerManager.sendStructured !== "function") {
+            return;
+        }
+        var shouldSend = Boolean(forceSend);
+        if (!shouldSend) {
+            var lastSentAt = Number(session.laserSendAt) || 0;
+            shouldSend = (now - lastSentAt) >= LASER_SEND_INTERVAL_MS;
+        }
+        if (shouldSend) {
+            session.laserSendAt = now;
+            sendLaserPoint(session.conversationId, appState, elements, peerManager, point, active);
+        }
+    }
+
     function handlePointerDown(event, appState, elements, peerManager) {
         if (!appState.boardModalOpen) {
             return;
@@ -1589,6 +1741,10 @@ var UiBoard = (function () {
         }
 
         if (Object.keys(pointerState.pointers).length >= 2) {
+            var localParticipant = getLocalParticipant(appState, elements, session);
+            if (localParticipant && localParticipant.laser && localParticipant.laser.active) {
+                updateLocalLaser(appState, elements, peerManager, session, localParticipant.laser.point, false, true);
+            }
             if (session.liveStroke) {
                 finalizeLiveStroke(appState, elements, peerManager, session, false);
             }
@@ -1606,6 +1762,21 @@ var UiBoard = (function () {
                 x: event.clientX,
                 y: event.clientY
             };
+            return;
+        }
+
+        if (session.tool === "laser") {
+            pointerState.gestureMode = "laser";
+            pointerState.drawPointerId = event.pointerId;
+            updateLocalLaser(
+                appState,
+                elements,
+                peerManager,
+                session,
+                screenToWorld(metrics, session.viewport, event.clientX, event.clientY),
+                true,
+                true
+            );
             return;
         }
 
@@ -1649,6 +1820,20 @@ var UiBoard = (function () {
             return;
         }
 
+        if (pointerState.gestureMode === "laser" && pointerState.drawPointerId === event.pointerId) {
+            event.preventDefault();
+            updateLocalLaser(
+                appState,
+                elements,
+                peerManager,
+                session,
+                screenToWorld(metrics, session.viewport, event.clientX, event.clientY),
+                true,
+                false
+            );
+            return;
+        }
+
         if (pointerState.gestureMode === "draw" && pointerState.drawPointerId === event.pointerId && session.liveStroke) {
             event.preventDefault();
             appendPointToLiveStroke(session.liveStroke, screenToWorld(metrics, session.viewport, event.clientX, event.clientY), session.viewport.zoom);
@@ -1666,6 +1851,12 @@ var UiBoard = (function () {
         }
         var pointerState = appState.boardPointerState || createPointerState();
         appState.boardPointerState = pointerState;
+
+        if (pointerState.gestureMode === "laser" && pointerState.drawPointerId === event.pointerId) {
+            var laserMetrics = getCanvasMetrics(elements);
+            var point = laserMetrics ? screenToWorld(laserMetrics, session.viewport, event.clientX, event.clientY) : null;
+            updateLocalLaser(appState, elements, peerManager, session, point, false, true);
+        }
 
         if (pointerState.gestureMode === "draw" && pointerState.drawPointerId === event.pointerId && session.liveStroke) {
             var metrics = getCanvasMetrics(elements);
@@ -1853,6 +2044,23 @@ var UiBoard = (function () {
         });
     }
 
+    function sendLaserPoint(conversationId, appState, elements, peerManager, point, active) {
+        var peerId = getConversationPeerId(appState, conversationId);
+        if (!peerId || !peerManager || typeof peerManager.sendStructured !== "function") {
+            return;
+        }
+        var normalized = point && typeof point === "object"
+            ? { x: Number(point.x) || 0, y: Number(point.y) || 0 }
+            : null;
+        peerManager.sendStructured(peerId, "board-laser", {
+            pid: getLocalParticipantId(appState),
+            name: getLocalParticipantName(appState, elements),
+            point: normalized,
+            active: Boolean(active),
+            ts: Date.now()
+        });
+    }
+
     function requestBoardSync(appState, elements, peerManager, conversationId) {
         var peerId = getConversationPeerId(appState, conversationId);
         if (!peerId || !peerManager || typeof peerManager.sendStructured !== "function") {
@@ -1940,6 +2148,7 @@ var UiBoard = (function () {
             && type !== "board-session-ended"
             && type !== "board-stroke"
             && type !== "board-stroke-visibility"
+            && type !== "board-laser"
             && type !== "board-sync-request"
             && type !== "board-sync-snapshot"
             && type !== "board-viewport"
@@ -2017,6 +2226,10 @@ var UiBoard = (function () {
         }
         if (type === "board-stroke-visibility") {
             applyStrokeVisibility(appState, elements, session, participantId, payload.strokeId, payload.hidden);
+            return true;
+        }
+        if (type === "board-laser") {
+            applyIncomingLaser(appState, elements, session, participantId, participantName, payload);
             return true;
         }
         if (type === "board-clear") {
@@ -2151,6 +2364,41 @@ var UiBoard = (function () {
         syncLayerList(appState, elements, session);
         syncFollowList(appState, elements, session);
         requestRender(appState, elements, session.conversationId);
+    }
+
+    function sanitizeWorldPoint(rawPoint) {
+        if (!rawPoint || typeof rawPoint !== "object") {
+            return null;
+        }
+        var x = Number(rawPoint.x);
+        var y = Number(rawPoint.y);
+        if (!Number.isFinite(x) || !Number.isFinite(y)) {
+            return null;
+        }
+        return { x: x, y: y };
+    }
+
+    function applyIncomingLaser(appState, elements, session, participantId, participantName, payload) {
+        if (!participantId) {
+            return;
+        }
+        var participant = ensureParticipant(session, participantId, participantName);
+        var active = payload && typeof payload.active === "boolean" ? Boolean(payload.active) : true;
+        var point = sanitizeWorldPoint(payload && payload.point);
+        var now = Date.now();
+
+        if (!active) {
+            participant.laser = null;
+            requestLaserRender(appState, elements, session.conversationId);
+            return;
+        }
+
+        if (!point) {
+            return;
+        }
+
+        participant.laser = { point: point, active: true, updatedAt: now };
+        requestLaserRender(appState, elements, session.conversationId);
     }
 
     function applyStrokeVisibility(appState, elements, session, participantId, strokeId, hidden) {

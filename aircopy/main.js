@@ -167,6 +167,7 @@
         boardFullscreenHint: document.getElementById("board-fullscreen-hint"),
         boardToolBrush: document.getElementById("board-tool-brush"),
         boardToolEraser: document.getElementById("board-tool-eraser"),
+        boardToolLaser: document.getElementById("board-tool-laser"),
         boardToolPan: document.getElementById("board-tool-pan"),
         boardUndo: document.getElementById("board-undo"),
         boardRedo: document.getElementById("board-redo"),
@@ -178,6 +179,7 @@
         boardFollowList: document.getElementById("board-follow-list"),
         boardStage: document.getElementById("board-stage"),
         boardCanvas: document.getElementById("board-canvas"),
+        boardLaserCanvas: document.getElementById("board-laser-canvas"),
         boardMediaHint: document.getElementById("board-media-hint"),
         boardLayerList: document.getElementById("board-layer-list"),
         boardInviteModal: document.getElementById("board-invite-modal"),
@@ -810,6 +812,9 @@
         }
         if (elements.boardToolEraser) {
             elements.boardToolEraser.addEventListener("click", () => UiBoard.setTool(appState, elements, "eraser"));
+        }
+        if (elements.boardToolLaser) {
+            elements.boardToolLaser.addEventListener("click", () => UiBoard.setTool(appState, elements, "laser"));
         }
         if (elements.boardToolPan) {
             elements.boardToolPan.addEventListener("click", () => UiBoard.setTool(appState, elements, "pan"));
