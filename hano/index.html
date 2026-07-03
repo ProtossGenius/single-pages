@@ -293,45 +293,6 @@
       font-variant-numeric: tabular-nums;
     }
 
-    /* Toggle switch */
-    .toggle-wrap {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-    }
-
-    .toggle {
-      position: relative;
-      width: 42px;
-      height: 24px;
-      border-radius: 12px;
-      background: rgba(255, 255, 255, 0.12);
-      border: 1px solid var(--border-glass);
-      cursor: pointer;
-      transition: background var(--transition-fast);
-      flex-shrink: 0;
-    }
-
-    .toggle.active {
-      background: var(--accent);
-      border-color: var(--accent);
-    }
-
-    .toggle::after {
-      content: '';
-      position: absolute;
-      top: 2px; left: 2px;
-      width: 18px; height: 18px;
-      border-radius: 50%;
-      background: #fff;
-      transition: transform var(--transition-fast);
-      box-shadow: 0 1px 3px rgba(0,0,0,0.3);
-    }
-
-    .toggle.active::after {
-      transform: translateX(18px);
-    }
-
     /* Buttons */
     .btn {
       display: inline-flex;
@@ -506,10 +467,7 @@
       </div>
 
       <div class="setting-group">
-        <div class="toggle-wrap">
-          <span class="setting-label">自动运行</span>
-          <div class="toggle" id="autoToggle" role="switch" aria-checked="false" tabindex="0"></div>
-        </div>
+        <button class="btn" id="autoSolveBtn" style="width:100%">▶️ 自动求解</button>
       </div>
 
       <div class="setting-group">
@@ -567,7 +525,7 @@
     const confettiContainer = document.getElementById('confettiContainer');
     const discCountInput = document.getElementById('discCount');
     const discCountValue = document.getElementById('discCountValue');
-    const autoToggle = document.getElementById('autoToggle');
+    const autoSolveBtn = document.getElementById('autoSolveBtn');
     const autoIntervalInput = document.getElementById('autoInterval');
     const autoIntervalValue = document.getElementById('autoIntervalValue');
     const resetBtn = document.getElementById('resetBtn');
@@ -1115,11 +1073,15 @@
       }
     }
 
-    window.addEventListener('keydown', (e) => {
+    // Use capture phase on document so 1/2/3 keys work even when
+    // settings inputs (range sliders, buttons) have focus.
+    document.addEventListener('keydown', (e) => {
       if (isWon || autoRunning) return;
 
       const key = e.key;
       if (key === '1' || key === '2' || key === '3') {
+        e.preventDefault();
+        e.stopPropagation();
         const pegIdx = parseInt(key) - 1;
 
         if (keyFloatingDisc >= 0) {
@@ -1140,13 +1102,14 @@
       }
 
       if (key === 'Escape' && keyFloatingDisc >= 0) {
+        e.preventDefault();
         // Cancel keyboard selection
         pegs[keySelectedPeg].push(keyFloatingDisc);
         keyFloatingDisc = -1;
         keySelectedPeg = -1;
         render();
       }
-    });
+    }, true);
 
     // ─── Toast ───
     let toastTimer = null;
@@ -1174,15 +1137,12 @@
 
     function startAutoRun() {
       if (autoRunning) return;
-      autoRunning = true;
-      autoToggle.classList.add('active');
-      autoToggle.setAttribute('aria-checked', 'true');
 
       // Reset game for auto run
       init();
       autoRunning = true;
-      autoToggle.classList.add('active');
-      autoToggle.setAttribute('aria-checked', 'true');
+      autoSolveBtn.textContent = '⏹️ 停止求解';
+      autoSolveBtn.classList.add('btn-primary');
 
       autoMoves = generateMoves(numDiscs, 0, 2, 1);
       let idx = 0;
@@ -1190,7 +1150,7 @@
       function step() {
         if (!autoRunning || idx >= autoMoves.length) {
           if (idx >= autoMoves.length) {
-            // finished
+            stopAutoRun();
           }
           return;
         }
@@ -1212,8 +1172,8 @@
       clearTimeout(autoTimer);
       autoTimer = null;
       autoMoves = [];
-      autoToggle.classList.remove('active');
-      autoToggle.setAttribute('aria-checked', 'false');
+      autoSolveBtn.textContent = '▶️ 自动求解';
+      autoSolveBtn.classList.remove('btn-primary');
     }
 
     // ─── Settings Event Handlers ───
@@ -1223,18 +1183,11 @@
       init();
     });
 
-    autoToggle.addEventListener('click', () => {
+    autoSolveBtn.addEventListener('click', () => {
       if (autoRunning) {
         stopAutoRun();
       } else {
         startAutoRun();
-      }
-    });
-
-    autoToggle.addEventListener('keydown', (e) => {
-      if (e.key === ' ' || e.key === 'Enter') {
-        e.preventDefault();
-        autoToggle.click();
       }
     });
 
