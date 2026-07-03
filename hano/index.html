@@ -248,6 +248,40 @@
       pointer-events: none;
     }
 
+    .stack-container {
+      background: rgba(0, 0, 0, 0.25);
+      border: 1px solid var(--border-glass);
+      border-radius: var(--radius-sm);
+      padding: 10px;
+      font-family: monospace;
+      font-size: 0.8rem;
+      line-height: 1.5;
+      color: var(--text-secondary);
+      max-height: 180px;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .stack-item {
+      padding: 4px 6px;
+      border-radius: 4px;
+      margin-bottom: 4px;
+      background: rgba(255, 255, 255, 0.03);
+      border-left: 3px solid rgba(99, 102, 241, 0.4);
+    }
+
+    .stack-item.active {
+      background: rgba(99, 102, 241, 0.15);
+      border-left-color: var(--accent);
+      color: var(--text-primary);
+      font-weight: bold;
+    }
+
+    .stack-item:last-child {
+      margin-bottom: 0;
+    }
+
     @media (orientation: portrait) {
       .settings-panel {
         flex-direction: row;
@@ -258,6 +292,7 @@
       .settings-title { width: 100%; margin-bottom: 0; }
       .setting-group { min-width: 120px; flex: 1; }
       .setting-group.player-group { min-width: 220px; flex: 2; }
+      #stackPanel { min-width: 100%; }
     }
 
     .setting-label {
@@ -498,6 +533,13 @@
         </div>
       </div>
 
+      <div class="setting-group" id="stackPanel" style="display: none;">
+        <span class="setting-label">递归调用栈 (不可编辑)</span>
+        <div class="stack-container" id="stackContainer">
+          <!-- Stack frames will be generated here -->
+        </div>
+      </div>
+
       <div class="setting-group">
         <span class="setting-label">自动运行间隔</span>
         <div class="setting-control">
@@ -735,16 +777,6 @@
 
       // Draw discs on pegs
       for (let p = 0; p < 3; p++) {
-        // Figure out which disc is visually on top (excluding dragged/floating)
-        let visualTopIdx = -1;
-        for (let s = pegs[p].length - 1; s >= 0; s--) {
-          const ds = pegs[p][s];
-          if (dragging && dragging.discSize === ds) continue;
-          if (keyFloatingDisc === ds) continue;
-          visualTopIdx = s;
-          break;
-        }
-
         for (let s = 0; s < pegs[p].length; s++) {
           const discSize = pegs[p][s];
 
@@ -765,9 +797,7 @@
             alpha = cycle < 0.5 ? 0.3 : 1;
           }
 
-          // Only the topmost visible disc gets the peg label
-          const label = (s === visualTopIdx) ? String(p + 1) : null;
-          drawDisc(discSize, dx, dy, dw, discHeight, alpha, false, label);
+          drawDisc(discSize, dx, dy, dw, discHeight, alpha, false);
         }
       }
 
@@ -782,7 +812,7 @@
         const y = returnAnim.fromY + (returnAnim.toY - returnAnim.fromY) * ease;
 
         const dw = getDiscWidth(returnAnim.discSize);
-        drawDisc(returnAnim.discSize, x - dw / 2, y, dw, discHeight, 1, false, null);
+        drawDisc(returnAnim.discSize, x - dw / 2, y, dw, discHeight, 1, false);
 
         if (t >= 1) {
           returnAnim = null;
@@ -795,7 +825,7 @@
         const fromPeg = keySelectedPeg;
         const floatX = pegCenters[fromPeg] - dw / 2;
         const floatY = getFloatY();
-        drawDisc(keyFloatingDisc, floatX, floatY, dw, discHeight, 1, true, String(keySelectedPeg + 1));
+        drawDisc(keyFloatingDisc, floatX, floatY, dw, discHeight, 1, true);
       }
 
       // Draw dragging disc
@@ -803,7 +833,7 @@
         const dw = getDiscWidth(dragging.discSize);
         const dx = dragging.x - dw / 2;
         const dy = dragging.y - discHeight - 10;
-        drawDisc(dragging.discSize, dx, dy, dw, discHeight, 1, true, String(dragging.fromPeg + 1));
+        drawDisc(dragging.discSize, dx, dy, dw, discHeight, 1, true);
       }
 
       // Continue animation loop if needed
@@ -812,7 +842,7 @@
       }
     }
 
-    function drawDisc(discSize, x, y, w, h, alpha, floating, label) {
+    function drawDisc(discSize, x, y, w, h, alpha, floating) {
       const colorIdx = (discSize - 1) % DISC_COLORS.length;
       const color = DISC_COLORS[colorIdx];
       const glow = DISC_GLOW_COLORS[colorIdx];
@@ -847,14 +877,12 @@
       roundRect(ctx, x + 2, y + 1, w - 4, h * 0.45, h * 0.3);
       ctx.fill();
 
-      // Only the topmost disc shows a label (the peg number)
-      if (label) {
-        ctx.fillStyle = 'rgba(0,0,0,0.35)';
-        ctx.font = `700 ${Math.min(h * 0.6, 16)}px Inter, system-ui, sans-serif`;
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.fillText(label, x + w / 2, y + h / 2 + 1);
-      }
+      // Label showing P1, P2...
+      ctx.fillStyle = 'rgba(0,0,0,0.35)';
+      ctx.font = `700 ${Math.min(h * 0.55, 14)}px Inter, system-ui, sans-serif`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('P' + discSize, x + w / 2, y + h / 2 + 1);
 
       ctx.restore();
     }
@@ -1173,18 +1201,60 @@
       }, 2000);
     }
 
-    // ─── Auto Run (Recursive solution) ───
-    function generateMoves(n, from, to, aux) {
+    // ─── Auto Run (Recursive solution with call stack snapshot) ───
+    function generateMoves(n, from, to, aux, currentStack = []) {
       if (n === 0) return [];
-      return [
-        ...generateMoves(n - 1, from, aux, to),
-        { from, to },
-        ...generateMoves(n - 1, aux, to, from)
-      ];
+      
+      const newFrame = { n, from, to };
+      const stackSnapshot = [...currentStack, newFrame];
+      
+      const movesBefore = generateMoves(n - 1, from, aux, to, stackSnapshot);
+      
+      const singleMove = {
+        from,
+        to,
+        disc: n,
+        stack: stackSnapshot
+      };
+      
+      const movesAfter = generateMoves(n - 1, aux, to, from, stackSnapshot);
+      
+      return [...movesBefore, singleMove, ...movesAfter];
     }
 
     function clonePegs(source) {
       return source.map(stack => [...stack]);
+    }
+
+    function updateStackDisplay() {
+      const container = document.getElementById('stackContainer');
+      const panel = document.getElementById('stackPanel');
+      
+      if (!autoSolveMode) {
+        panel.style.display = 'none';
+        return;
+      }
+      
+      panel.style.display = 'flex';
+      
+      if (autoIdx <= 0 || autoIdx > autoMoves.length) {
+        container.innerHTML = '<div style="color: var(--text-muted); text-align: center; padding: 10px;">准备播放...</div>';
+        return;
+      }
+      
+      const currentMove = autoMoves[autoIdx - 1];
+      const stack = currentMove.stack || [];
+      
+      let html = '';
+      for (let i = stack.length - 1; i >= 0; i--) {
+        const frame = stack[i];
+        const isTop = (i === stack.length - 1);
+        const label = frame.n > 1 ? `P1-${frame.n}` : `P1`;
+        const text = `将 ${label} 从 ${frame.from + 1}柱 移动到 ${frame.to + 1}柱`;
+        
+        html += `<div class="stack-item ${isTop ? 'active' : ''}">${text}</div>`;
+      }
+      container.innerHTML = html;
     }
 
     function updatePlayerUI() {
@@ -1206,6 +1276,8 @@
           playPauseBtn.classList.remove('btn-primary');
         }
       }
+      // Sync stack display
+      updateStackDisplay();
     }
 
     function startSolveMode() {
