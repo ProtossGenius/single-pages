@@ -1323,13 +1323,18 @@
       flashDisc = null;
       returnAnim = null;
 
+      // Show stack panel first, shifting flex layout
+      autoSolveMode = true;
+      updatePlayerUI();
+
       updateStats();
       winOverlay.classList.remove('show');
       confettiContainer.innerHTML = '';
+      
+      // Measure container in its new shrunken state
       computeLayout();
       render();
 
-      autoSolveMode = true;
       autoMoves = generateMoves(numDiscs, 0, 2, 1);
       
       // Cache states
@@ -1345,7 +1350,6 @@
       autoIdx = 0;
       autoRunning = true;
       playAuto();
-      updatePlayerUI();
     }
 
     function resumeAuto() {
@@ -1397,6 +1401,8 @@
       autoStates = [];
       autoIdx = 0;
       updatePlayerUI();
+      computeLayout();
+      render();
     }
 
     // ─── Settings Event Handlers ───
