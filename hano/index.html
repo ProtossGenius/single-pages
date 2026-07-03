@@ -1076,26 +1076,34 @@
     // Use capture phase on document so 1/2/3 keys work even when
     // settings inputs (range sliders, buttons) have focus.
     document.addEventListener('keydown', (e) => {
-      if (isWon || autoRunning) return;
+      console.log('[Hanoi keyboard] keydown fired, key=' + e.key, 'isWon=' + isWon, 'autoRunning=' + autoRunning);
+      if (isWon || autoRunning) {
+        console.log('[Hanoi keyboard] blocked: isWon=' + isWon + ', autoRunning=' + autoRunning);
+        return;
+      }
 
       const key = e.key;
       if (key === '1' || key === '2' || key === '3') {
         e.preventDefault();
         e.stopPropagation();
         const pegIdx = parseInt(key) - 1;
+        console.log('[Hanoi keyboard] peg ' + (pegIdx + 1) + ' selected, keyFloatingDisc=' + keyFloatingDisc);
 
         if (keyFloatingDisc >= 0) {
           // Drop floating disc
+          console.log('[Hanoi keyboard] dropping disc ' + keyFloatingDisc + ' onto peg ' + (pegIdx + 1));
           tryDropKeyboard(pegIdx);
         } else {
           // Pick up
           const stack = pegs[pegIdx];
+          console.log('[Hanoi keyboard] picking up from peg ' + (pegIdx + 1) + ', stack=' + JSON.stringify(stack));
           if (stack.length === 0) {
             showToast('该柱子上没有圆盘', 'info');
             return;
           }
           keyFloatingDisc = stack.pop();
           keySelectedPeg = pegIdx;
+          console.log('[Hanoi keyboard] picked up disc ' + keyFloatingDisc + ' from peg ' + (pegIdx + 1));
           cancelAnimationFrame(animFrame);
           animFrame = requestAnimationFrame(render);
         }
@@ -1103,6 +1111,7 @@
 
       if (key === 'Escape' && keyFloatingDisc >= 0) {
         e.preventDefault();
+        console.log('[Hanoi keyboard] Escape: returning disc ' + keyFloatingDisc + ' to peg ' + (keySelectedPeg + 1));
         // Cancel keyboard selection
         pegs[keySelectedPeg].push(keyFloatingDisc);
         keyFloatingDisc = -1;
