@@ -1,0 +1,1289 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
+  <title>汉诺塔 | Tower of Hanoi</title>
+  <meta name="description" content="经典汉诺塔益智游戏，支持触屏拖拽、键盘快捷键、自动演示，可自定义圆盘数量。" />
+  <meta name="keywords" content="汉诺塔,Tower of Hanoi,益智游戏,puzzle,拖拽" />
+  <link rel="icon" type="image/svg+xml" href="../site-icon.svg" />
+  <style>
+    /* ─── Design Tokens ─── */
+    :root {
+      --bg-deep: #0b0e1a;
+      --bg-panel: rgba(15, 20, 40, 0.82);
+      --bg-glass: rgba(255, 255, 255, 0.05);
+      --border-glass: rgba(255, 255, 255, 0.10);
+      --text-primary: #e2e8f0;
+      --text-secondary: #94a3b8;
+      --text-muted: #64748b;
+      --accent: #6366f1;
+      --accent-glow: rgba(99, 102, 241, 0.35);
+      --accent-2: #22d3ee;
+      --accent-3: #f472b6;
+      --success: #34d399;
+      --warning: #fbbf24;
+      --danger: #f87171;
+      --peg-color: #475569;
+      --peg-highlight: #6366f1;
+      --base-color: #334155;
+      --radius: 14px;
+      --radius-sm: 8px;
+      --shadow-glow: 0 0 30px var(--accent-glow);
+      --transition-fast: 0.18s cubic-bezier(0.4, 0, 0.2, 1);
+      --transition-bounce: 0.35s cubic-bezier(0.34, 1.56, 0.64, 1);
+    }
+
+    /* ─── Reset ─── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    html, body {
+      width: 100%; height: 100%;
+      overflow: hidden;
+      background: var(--bg-deep);
+      color: var(--text-primary);
+      font-family: 'Inter', 'Noto Sans SC', 'PingFang SC', system-ui, sans-serif;
+      -webkit-font-smoothing: antialiased;
+      touch-action: none;
+      user-select: none;
+    }
+
+    /* ─── Layout ─── */
+    .app {
+      display: flex;
+      width: 100%; height: 100%;
+      background:
+        radial-gradient(ellipse 800px 500px at 20% 30%, rgba(99,102,241,0.08), transparent),
+        radial-gradient(ellipse 600px 400px at 80% 70%, rgba(34,211,238,0.06), transparent),
+        var(--bg-deep);
+    }
+
+    /* Landscape (default): game left, settings right */
+    .game-area {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      position: relative;
+      min-width: 0;
+    }
+
+    .settings-panel {
+      width: 280px;
+      flex-shrink: 0;
+      padding: 24px 20px;
+      background: var(--bg-panel);
+      backdrop-filter: blur(16px);
+      border-left: 1px solid var(--border-glass);
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 18px;
+    }
+
+    /* Portrait mode */
+    @media (orientation: portrait) {
+      .app {
+        flex-direction: column-reverse;
+      }
+      .settings-panel {
+        width: 100%;
+        flex-shrink: 0;
+        max-height: 220px;
+        border-left: none;
+        border-bottom: 1px solid var(--border-glass);
+        padding: 16px 20px;
+        overflow-y: auto;
+      }
+    }
+
+    /* ─── Game Header ─── */
+    .game-header {
+      padding: 16px 24px 8px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-shrink: 0;
+    }
+
+    .game-title {
+      font-size: 1.3rem;
+      font-weight: 700;
+      background: linear-gradient(135deg, var(--accent), var(--accent-2));
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+
+    .game-stats {
+      display: flex;
+      gap: 16px;
+      font-size: 0.88rem;
+      color: var(--text-secondary);
+    }
+
+    .stat-value {
+      color: var(--accent-2);
+      font-weight: 600;
+      font-variant-numeric: tabular-nums;
+    }
+
+    /* ─── Canvas ─── */
+    .canvas-wrap {
+      flex: 1;
+      position: relative;
+      overflow: hidden;
+    }
+
+    #gameCanvas {
+      display: block;
+      width: 100%;
+      height: 100%;
+    }
+
+    /* ─── Toast ─── */
+    .toast {
+      position: absolute;
+      top: 16px;
+      left: 50%;
+      transform: translateX(-50%) translateY(-60px);
+      padding: 10px 22px;
+      border-radius: 999px;
+      font-size: 0.9rem;
+      font-weight: 600;
+      pointer-events: none;
+      opacity: 0;
+      transition: transform 0.35s cubic-bezier(0.34, 1.56, 0.64, 1), opacity 0.25s ease;
+      z-index: 20;
+      white-space: nowrap;
+    }
+
+    .toast.show {
+      opacity: 1;
+      transform: translateX(-50%) translateY(0);
+    }
+
+    .toast.error {
+      background: rgba(248, 113, 113, 0.18);
+      border: 1px solid rgba(248, 113, 113, 0.4);
+      color: var(--danger);
+    }
+
+    .toast.success {
+      background: rgba(52, 211, 153, 0.18);
+      border: 1px solid rgba(52, 211, 153, 0.4);
+      color: var(--success);
+    }
+
+    .toast.info {
+      background: rgba(99, 102, 241, 0.18);
+      border: 1px solid rgba(99, 102, 241, 0.4);
+      color: var(--accent);
+    }
+
+    /* ─── Keyboard Hint ─── */
+    .keyboard-hint {
+      position: absolute;
+      bottom: 12px;
+      left: 50%;
+      transform: translateX(-50%);
+      display: none;
+      align-items: center;
+      gap: 8px;
+      font-size: 0.8rem;
+      color: var(--text-muted);
+      pointer-events: none;
+    }
+
+    .keyboard-hint kbd {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-width: 24px;
+      height: 24px;
+      padding: 0 6px;
+      border-radius: 5px;
+      border: 1px solid var(--border-glass);
+      background: var(--bg-glass);
+      font-family: inherit;
+      font-size: 0.78rem;
+      color: var(--text-secondary);
+    }
+
+    @media (hover: hover) and (pointer: fine) {
+      .keyboard-hint { display: flex; }
+    }
+
+    /* ─── Settings Panel ─── */
+    .settings-title {
+      font-size: 1.05rem;
+      font-weight: 700;
+      color: var(--text-primary);
+      margin-bottom: 2px;
+    }
+
+    .setting-group {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    @media (orientation: portrait) {
+      .settings-panel {
+        flex-direction: row;
+        flex-wrap: wrap;
+        align-items: flex-start;
+        gap: 12px;
+      }
+      .settings-title { width: 100%; margin-bottom: 0; }
+      .setting-group { min-width: 120px; flex: 1; }
+    }
+
+    .setting-label {
+      font-size: 0.82rem;
+      color: var(--text-secondary);
+      font-weight: 500;
+    }
+
+    .setting-control {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .setting-control input[type="range"] {
+      flex: 1;
+      -webkit-appearance: none;
+      appearance: none;
+      height: 4px;
+      border-radius: 2px;
+      background: rgba(255, 255, 255, 0.12);
+      outline: none;
+    }
+
+    .setting-control input[type="range"]::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      width: 18px; height: 18px;
+      border-radius: 50%;
+      background: var(--accent);
+      border: 2px solid var(--bg-deep);
+      cursor: pointer;
+      box-shadow: 0 0 8px var(--accent-glow);
+      transition: transform var(--transition-fast);
+    }
+
+    .setting-control input[type="range"]::-webkit-slider-thumb:hover {
+      transform: scale(1.15);
+    }
+
+    .setting-control input[type="range"]::-moz-range-thumb {
+      width: 18px; height: 18px;
+      border-radius: 50%;
+      background: var(--accent);
+      border: 2px solid var(--bg-deep);
+      cursor: pointer;
+      box-shadow: 0 0 8px var(--accent-glow);
+    }
+
+    .setting-value {
+      min-width: 36px;
+      text-align: center;
+      font-size: 0.88rem;
+      font-weight: 600;
+      color: var(--accent-2);
+      font-variant-numeric: tabular-nums;
+    }
+
+    /* Toggle switch */
+    .toggle-wrap {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .toggle {
+      position: relative;
+      width: 42px;
+      height: 24px;
+      border-radius: 12px;
+      background: rgba(255, 255, 255, 0.12);
+      border: 1px solid var(--border-glass);
+      cursor: pointer;
+      transition: background var(--transition-fast);
+      flex-shrink: 0;
+    }
+
+    .toggle.active {
+      background: var(--accent);
+      border-color: var(--accent);
+    }
+
+    .toggle::after {
+      content: '';
+      position: absolute;
+      top: 2px; left: 2px;
+      width: 18px; height: 18px;
+      border-radius: 50%;
+      background: #fff;
+      transition: transform var(--transition-fast);
+      box-shadow: 0 1px 3px rgba(0,0,0,0.3);
+    }
+
+    .toggle.active::after {
+      transform: translateX(18px);
+    }
+
+    /* Buttons */
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      padding: 10px 18px;
+      border-radius: var(--radius-sm);
+      border: 1px solid var(--border-glass);
+      background: var(--bg-glass);
+      color: var(--text-primary);
+      font-size: 0.88rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all var(--transition-fast);
+      backdrop-filter: blur(8px);
+    }
+
+    .btn:hover {
+      background: rgba(255, 255, 255, 0.12);
+      border-color: rgba(255, 255, 255, 0.2);
+    }
+
+    .btn:active { transform: scale(0.96); }
+
+    .btn-primary {
+      background: linear-gradient(135deg, var(--accent), #818cf8);
+      border-color: transparent;
+    }
+
+    .btn-primary:hover {
+      box-shadow: var(--shadow-glow);
+    }
+
+    /* ─── Win Overlay ─── */
+    .win-overlay {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      background: rgba(11, 14, 26, 0.85);
+      backdrop-filter: blur(12px);
+      z-index: 50;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.4s ease;
+    }
+
+    .win-overlay.show {
+      opacity: 1;
+      pointer-events: auto;
+    }
+
+    .win-title {
+      font-size: 2.2rem;
+      font-weight: 800;
+      background: linear-gradient(135deg, var(--warning), var(--accent-3), var(--accent));
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+      margin-bottom: 8px;
+    }
+
+    .win-subtitle {
+      color: var(--text-secondary);
+      font-size: 1rem;
+      margin-bottom: 20px;
+    }
+
+    /* ─── Confetti ─── */
+    .confetti-container {
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+      z-index: 51;
+      overflow: hidden;
+    }
+
+    .confetti-piece {
+      position: absolute;
+      width: 10px;
+      height: 10px;
+      border-radius: 2px;
+      opacity: 0;
+    }
+
+    @keyframes confetti-fall {
+      0% {
+        opacity: 1;
+        transform: translateY(0) rotateZ(0deg) scale(1);
+      }
+      80% { opacity: 1; }
+      100% {
+        opacity: 0;
+        transform: translateY(100vh) rotateZ(720deg) scale(0.4);
+      }
+    }
+
+    /* ─── Back Link ─── */
+    .back-link {
+      position: absolute;
+      top: 16px;
+      left: 20px;
+      z-index: 10;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      color: var(--text-muted);
+      text-decoration: none;
+      font-size: 0.82rem;
+      transition: color var(--transition-fast);
+    }
+    .back-link:hover { color: var(--text-primary); }
+    .back-link svg { width: 14px; height: 14px; }
+
+    /* ─── Animations ─── */
+    @keyframes pulse-glow {
+      0%, 100% { box-shadow: 0 0 0 0 var(--accent-glow); }
+      50% { box-shadow: 0 0 16px 4px var(--accent-glow); }
+    }
+
+    @keyframes float {
+      0%, 100% { transform: translateY(0); }
+      50% { transform: translateY(-4px); }
+    }
+  </style>
+</head>
+<body>
+  <div class="app" id="app">
+    <!-- Game Area -->
+    <div class="game-area" id="gameArea">
+      <div class="game-header">
+        <span class="game-title">汉诺塔</span>
+        <div class="game-stats">
+          <span>步数 <span class="stat-value" id="moveCount">0</span></span>
+          <span>最少 <span class="stat-value" id="minMoves">3</span></span>
+        </div>
+      </div>
+
+      <div class="canvas-wrap" id="canvasWrap">
+        <canvas id="gameCanvas"></canvas>
+
+        <div class="toast" id="toast"></div>
+
+        <div class="keyboard-hint" id="keyboardHint">
+          <kbd>1</kbd><kbd>2</kbd><kbd>3</kbd> 选择/放置柱子
+        </div>
+
+        <!-- Win overlay -->
+        <div class="win-overlay" id="winOverlay">
+          <div class="win-title">🎉 恭喜通关！</div>
+          <div class="win-subtitle" id="winSubtitle">用了 0 步完成</div>
+          <button class="btn btn-primary" id="winRestart">再来一局</button>
+        </div>
+
+        <div class="confetti-container" id="confettiContainer"></div>
+      </div>
+    </div>
+
+    <!-- Settings Panel -->
+    <div class="settings-panel" id="settingsPanel">
+      <div class="settings-title">⚙️ 设置</div>
+
+      <div class="setting-group">
+        <span class="setting-label">圆盘数量</span>
+        <div class="setting-control">
+          <input type="range" id="discCount" min="2" max="8" value="2" />
+          <span class="setting-value" id="discCountValue">2</span>
+        </div>
+      </div>
+
+      <div class="setting-group">
+        <div class="toggle-wrap">
+          <span class="setting-label">自动运行</span>
+          <div class="toggle" id="autoToggle" role="switch" aria-checked="false" tabindex="0"></div>
+        </div>
+      </div>
+
+      <div class="setting-group">
+        <span class="setting-label">自动运行间隔</span>
+        <div class="setting-control">
+          <input type="range" id="autoInterval" min="100" max="2000" step="100" value="500" />
+          <span class="setting-value" id="autoIntervalValue">500ms</span>
+        </div>
+      </div>
+
+      <div class="setting-group">
+        <button class="btn btn-primary" id="resetBtn" style="width:100%">🔄 重新开始</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    /* ═══════════════════════════════════════════════════
+       Tower of Hanoi — Full Game Engine
+       ═══════════════════════════════════════════════════ */
+
+    // ─── Constants ───
+    const DISC_COLORS = [
+      '#f472b6', // pink
+      '#fb923c', // orange
+      '#facc15', // yellow
+      '#34d399', // green
+      '#22d3ee', // cyan
+      '#818cf8', // indigo
+      '#c084fc', // purple
+      '#f87171', // red
+    ];
+
+    const DISC_GLOW_COLORS = [
+      'rgba(244,114,182,0.4)',
+      'rgba(251,146,60,0.4)',
+      'rgba(250,204,21,0.4)',
+      'rgba(52,211,153,0.4)',
+      'rgba(34,211,238,0.4)',
+      'rgba(129,140,248,0.4)',
+      'rgba(192,132,252,0.4)',
+      'rgba(248,113,113,0.4)',
+    ];
+
+    // ─── DOM refs ───
+    const canvas = document.getElementById('gameCanvas');
+    const ctx = canvas.getContext('2d');
+    const canvasWrap = document.getElementById('canvasWrap');
+    const toast = document.getElementById('toast');
+    const moveCountEl = document.getElementById('moveCount');
+    const minMovesEl = document.getElementById('minMoves');
+    const winOverlay = document.getElementById('winOverlay');
+    const winSubtitle = document.getElementById('winSubtitle');
+    const winRestart = document.getElementById('winRestart');
+    const confettiContainer = document.getElementById('confettiContainer');
+    const discCountInput = document.getElementById('discCount');
+    const discCountValue = document.getElementById('discCountValue');
+    const autoToggle = document.getElementById('autoToggle');
+    const autoIntervalInput = document.getElementById('autoInterval');
+    const autoIntervalValue = document.getElementById('autoIntervalValue');
+    const resetBtn = document.getElementById('resetBtn');
+    const keyboardHint = document.getElementById('keyboardHint');
+
+    // ─── Game State ───
+    let numDiscs = 2;
+    let pegs = [[], [], []]; // arrays of disc sizes (largest number = largest disc)
+    let moveCount = 0;
+    let isWon = false;
+
+    // Dragging state
+    let dragging = null; // { discSize, fromPeg, x, y }
+    let hoveredPeg = -1;
+
+    // Keyboard state
+    let keySelectedPeg = -1; // peg with floating disc via keyboard
+    let keyFloatingDisc = -1; // disc size floating via keyboard
+
+    // Auto-run
+    let autoRunning = false;
+    let autoTimer = null;
+    let autoMoves = []; // pre-computed moves
+
+    // Layout cache (recomputed on resize)
+    let layout = {};
+
+    // Animation
+    let animFrame = null;
+    let flashDisc = null; // { discSize, pegIndex, startTime }
+    let returnAnim = null; // { discSize, fromX, fromY, toX, toY, startTime, toPeg }
+
+    // ─── Initialization ───
+    function init() {
+      numDiscs = parseInt(discCountInput.value) || 2;
+      pegs = [[], [], []];
+      for (let i = numDiscs; i >= 1; i--) {
+        pegs[0].push(i);
+      }
+      moveCount = 0;
+      isWon = false;
+      dragging = null;
+      keySelectedPeg = -1;
+      keyFloatingDisc = -1;
+      flashDisc = null;
+      returnAnim = null;
+      stopAutoRun();
+
+      updateStats();
+      winOverlay.classList.remove('show');
+      confettiContainer.innerHTML = '';
+      computeLayout();
+      render();
+    }
+
+    function updateStats() {
+      moveCountEl.textContent = moveCount;
+      minMovesEl.textContent = Math.pow(2, numDiscs) - 1;
+    }
+
+    // ─── Layout Computation ───
+    function computeLayout() {
+      const dpr = window.devicePixelRatio || 1;
+      const rect = canvasWrap.getBoundingClientRect();
+      canvas.width = rect.width * dpr;
+      canvas.height = rect.height * dpr;
+      canvas.style.width = rect.width + 'px';
+      canvas.style.height = rect.height + 'px';
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+      const W = rect.width;
+      const H = rect.height;
+
+      const baseY = H * 0.88;
+      const pegHeight = H * 0.52;
+      const pegWidth = 6;
+      const baseWidth = W * 0.26;
+      const baseHeight = 8;
+
+      // Three pegs evenly spaced
+      const pegSpacing = W / 3;
+      const pegCenters = [
+        pegSpacing * 0.5,
+        pegSpacing * 1.5,
+        pegSpacing * 2.5
+      ];
+
+      // Disc dimensions
+      const maxDiscWidth = Math.min(baseWidth * 0.92, pegSpacing * 0.8);
+      const minDiscWidth = maxDiscWidth * 0.32;
+      const discHeight = Math.min(
+        (pegHeight * 0.85) / Math.max(numDiscs, 3),
+        38
+      );
+
+      layout = {
+        W, H, dpr,
+        baseY, pegHeight, pegWidth,
+        baseWidth, baseHeight,
+        pegCenters, pegSpacing,
+        maxDiscWidth, minDiscWidth, discHeight
+      };
+    }
+
+    function getDiscWidth(discSize) {
+      const { maxDiscWidth, minDiscWidth } = layout;
+      if (numDiscs <= 1) return maxDiscWidth;
+      const t = (discSize - 1) / (numDiscs - 1);
+      return minDiscWidth + t * (maxDiscWidth - minDiscWidth);
+    }
+
+    function getDiscY(pegIndex, stackPos) {
+      const { baseY, discHeight } = layout;
+      return baseY - (stackPos + 1) * (discHeight + 2);
+    }
+
+    function getFloatY() {
+      return layout.baseY - layout.pegHeight - layout.discHeight * 0.5;
+    }
+
+    // ─── Rendering ───
+    function render() {
+      const { W, H, baseY, pegHeight, pegWidth, baseWidth, baseHeight, pegCenters, discHeight } = layout;
+
+      ctx.clearRect(0, 0, W, H);
+
+      // Draw subtle grid
+      ctx.strokeStyle = 'rgba(255,255,255,0.02)';
+      ctx.lineWidth = 1;
+      for (let x = 0; x < W; x += 40) {
+        ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, H); ctx.stroke();
+      }
+      for (let y = 0; y < H; y += 40) {
+        ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke();
+      }
+
+      // Draw bases and pegs
+      for (let i = 0; i < 3; i++) {
+        const cx = pegCenters[i];
+
+        // Base
+        const baseGrad = ctx.createLinearGradient(cx - baseWidth / 2, baseY, cx + baseWidth / 2, baseY);
+        baseGrad.addColorStop(0, 'rgba(51,65,85,0.3)');
+        baseGrad.addColorStop(0.5, 'rgba(51,65,85,0.8)');
+        baseGrad.addColorStop(1, 'rgba(51,65,85,0.3)');
+        ctx.fillStyle = baseGrad;
+        roundRect(ctx, cx - baseWidth / 2, baseY, baseWidth, baseHeight, 4);
+        ctx.fill();
+
+        // Peg
+        const isHighlight = (dragging && hoveredPeg === i) ||
+                           (keySelectedPeg === i) ||
+                           (keyFloatingDisc >= 0 && hoveredPeg === i);
+        const pegGrad = ctx.createLinearGradient(cx, baseY, cx, baseY - pegHeight);
+        if (isHighlight) {
+          pegGrad.addColorStop(0, 'rgba(99,102,241,0.8)');
+          pegGrad.addColorStop(1, 'rgba(99,102,241,0.2)');
+        } else {
+          pegGrad.addColorStop(0, 'rgba(71,85,105,0.7)');
+          pegGrad.addColorStop(1, 'rgba(71,85,105,0.15)');
+        }
+        ctx.fillStyle = pegGrad;
+        roundRect(ctx, cx - pegWidth / 2, baseY - pegHeight, pegWidth, pegHeight, 3);
+        ctx.fill();
+
+        // Peg number label
+        ctx.fillStyle = 'rgba(255,255,255,0.25)';
+        ctx.font = '600 13px Inter, system-ui, sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'top';
+        ctx.fillText(String(i + 1), cx, baseY + baseHeight + 6);
+      }
+
+      // Draw discs on pegs
+      for (let p = 0; p < 3; p++) {
+        for (let s = 0; s < pegs[p].length; s++) {
+          const discSize = pegs[p][s];
+
+          // Skip the disc being dragged
+          if (dragging && dragging.discSize === discSize) continue;
+          // Skip the disc floating via keyboard
+          if (keyFloatingDisc === discSize) continue;
+
+          const dw = getDiscWidth(discSize);
+          const dx = pegCenters[p] - dw / 2;
+          const dy = getDiscY(p, s);
+
+          // Flash animation
+          let alpha = 1;
+          if (flashDisc && flashDisc.discSize === discSize && flashDisc.pegIndex === p) {
+            const elapsed = performance.now() - flashDisc.startTime;
+            const cycle = (elapsed % 200) / 200;
+            alpha = cycle < 0.5 ? 0.3 : 1;
+          }
+
+          drawDisc(discSize, dx, dy, dw, discHeight, alpha);
+        }
+      }
+
+      // Draw return animation
+      if (returnAnim) {
+        const elapsed = performance.now() - returnAnim.startTime;
+        const duration = 300;
+        const t = Math.min(elapsed / duration, 1);
+        const ease = 1 - Math.pow(1 - t, 3); // ease-out cubic
+
+        const x = returnAnim.fromX + (returnAnim.toX - returnAnim.fromX) * ease;
+        const y = returnAnim.fromY + (returnAnim.toY - returnAnim.fromY) * ease;
+
+        const dw = getDiscWidth(returnAnim.discSize);
+        drawDisc(returnAnim.discSize, x - dw / 2, y, dw, discHeight, 1);
+
+        if (t >= 1) {
+          returnAnim = null;
+        }
+      }
+
+      // Draw floating disc (keyboard)
+      if (keyFloatingDisc >= 0 && !dragging) {
+        const dw = getDiscWidth(keyFloatingDisc);
+        const fromPeg = keySelectedPeg;
+        const floatX = pegCenters[fromPeg] - dw / 2;
+        const floatY = getFloatY();
+        drawDisc(keyFloatingDisc, floatX, floatY, dw, discHeight, 1, true);
+      }
+
+      // Draw dragging disc
+      if (dragging) {
+        const dw = getDiscWidth(dragging.discSize);
+        const dx = dragging.x - dw / 2;
+        const dy = dragging.y - discHeight - 10;
+        drawDisc(dragging.discSize, dx, dy, dw, discHeight, 1, true);
+      }
+
+      // Continue animation loop if needed
+      if (flashDisc || returnAnim || dragging || keyFloatingDisc >= 0) {
+        animFrame = requestAnimationFrame(render);
+      }
+    }
+
+    function drawDisc(discSize, x, y, w, h, alpha, floating) {
+      const colorIdx = (discSize - 1) % DISC_COLORS.length;
+      const color = DISC_COLORS[colorIdx];
+      const glow = DISC_GLOW_COLORS[colorIdx];
+
+      ctx.save();
+      ctx.globalAlpha = alpha;
+
+      // Glow
+      if (floating) {
+        ctx.shadowColor = glow;
+        ctx.shadowBlur = 20;
+        ctx.shadowOffsetY = 4;
+      }
+
+      // Disc body gradient
+      const grad = ctx.createLinearGradient(x, y, x, y + h);
+      grad.addColorStop(0, lighten(color, 20));
+      grad.addColorStop(0.5, color);
+      grad.addColorStop(1, darken(color, 15));
+
+      ctx.fillStyle = grad;
+      roundRect(ctx, x, y, w, h, h * 0.35);
+      ctx.fill();
+
+      // Shine
+      ctx.shadowColor = 'transparent';
+      ctx.shadowBlur = 0;
+      const shineGrad = ctx.createLinearGradient(x, y, x, y + h * 0.5);
+      shineGrad.addColorStop(0, 'rgba(255,255,255,0.3)');
+      shineGrad.addColorStop(1, 'rgba(255,255,255,0)');
+      ctx.fillStyle = shineGrad;
+      roundRect(ctx, x + 2, y + 1, w - 4, h * 0.45, h * 0.3);
+      ctx.fill();
+
+      // Disc size number
+      ctx.fillStyle = 'rgba(0,0,0,0.35)';
+      ctx.font = `700 ${Math.min(h * 0.6, 16)}px Inter, system-ui, sans-serif`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(String(discSize), x + w / 2, y + h / 2 + 1);
+
+      ctx.restore();
+    }
+
+    function roundRect(ctx, x, y, w, h, r) {
+      r = Math.min(r, w / 2, h / 2);
+      ctx.beginPath();
+      ctx.moveTo(x + r, y);
+      ctx.lineTo(x + w - r, y);
+      ctx.quadraticCurveTo(x + w, y, x + w, y + r);
+      ctx.lineTo(x + w, y + h - r);
+      ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+      ctx.lineTo(x + r, y + h);
+      ctx.quadraticCurveTo(x, y + h, x, y + h - r);
+      ctx.lineTo(x, y + r);
+      ctx.quadraticCurveTo(x, y, x + r, y);
+      ctx.closePath();
+    }
+
+    function lighten(hex, percent) {
+      const r = parseInt(hex.slice(1, 3), 16);
+      const g = parseInt(hex.slice(3, 5), 16);
+      const b = parseInt(hex.slice(5, 7), 16);
+      const f = percent / 100;
+      return `rgb(${Math.min(255, r + (255 - r) * f)}, ${Math.min(255, g + (255 - g) * f)}, ${Math.min(255, b + (255 - b) * f)})`;
+    }
+
+    function darken(hex, percent) {
+      const r = parseInt(hex.slice(1, 3), 16);
+      const g = parseInt(hex.slice(3, 5), 16);
+      const b = parseInt(hex.slice(5, 7), 16);
+      const f = 1 - percent / 100;
+      return `rgb(${Math.round(r * f)}, ${Math.round(g * f)}, ${Math.round(b * f)})`;
+    }
+
+    // ─── Hit Testing ───
+    function getPegAt(clientX, clientY) {
+      const rect = canvasWrap.getBoundingClientRect();
+      const x = clientX - rect.left;
+      const { pegCenters, pegSpacing } = layout;
+
+      for (let i = 0; i < 3; i++) {
+        if (Math.abs(x - pegCenters[i]) < pegSpacing * 0.45) {
+          return i;
+        }
+      }
+      return -1;
+    }
+
+    function getCanvasPos(clientX, clientY) {
+      const rect = canvasWrap.getBoundingClientRect();
+      return { x: clientX - rect.left, y: clientY - rect.top };
+    }
+
+    // ─── Move Logic ───
+    function canPlace(discSize, toPeg) {
+      const stack = pegs[toPeg];
+      if (stack.length === 0) return true;
+      return stack[stack.length - 1] > discSize;
+    }
+
+    function doMove(fromPeg, toPeg) {
+      const disc = pegs[fromPeg].pop();
+      pegs[toPeg].push(disc);
+      moveCount++;
+      updateStats();
+      checkWin();
+    }
+
+    function checkWin() {
+      if (pegs[2].length === numDiscs) {
+        isWon = true;
+        winSubtitle.textContent = `用了 ${moveCount} 步完成（最少 ${Math.pow(2, numDiscs) - 1} 步）`;
+        setTimeout(() => {
+          winOverlay.classList.add('show');
+          spawnConfetti();
+        }, 300);
+        stopAutoRun();
+      }
+    }
+
+    // ─── Drag (Mouse + Touch) ───
+    function startDrag(clientX, clientY) {
+      if (isWon || autoRunning) return;
+
+      // If keyboard has a floating disc, drop it via drag start position
+      if (keyFloatingDisc >= 0) {
+        const peg = getPegAt(clientX, clientY);
+        if (peg >= 0) {
+          tryDropKeyboard(peg);
+        }
+        return;
+      }
+
+      const pegIdx = getPegAt(clientX, clientY);
+      if (pegIdx < 0) return;
+
+      const stack = pegs[pegIdx];
+      if (stack.length === 0) return;
+
+      const topDisc = stack[stack.length - 1];
+      const pos = getCanvasPos(clientX, clientY);
+
+      // Check if click is within peg area vertically (generous)
+      if (pos.y > layout.baseY + 20) return;
+
+      // Pick up the top disc
+      stack.pop();
+      dragging = {
+        discSize: topDisc,
+        fromPeg: pegIdx,
+        x: pos.x,
+        y: pos.y
+      };
+
+      cancelAnimationFrame(animFrame);
+      animFrame = requestAnimationFrame(render);
+    }
+
+    function moveDrag(clientX, clientY) {
+      if (!dragging) return;
+      const pos = getCanvasPos(clientX, clientY);
+      dragging.x = pos.x;
+      dragging.y = pos.y;
+      hoveredPeg = getPegAt(clientX, clientY);
+    }
+
+    function endDrag(clientX, clientY) {
+      if (!dragging) return;
+
+      const toPeg = getPegAt(clientX, clientY);
+      const { discSize, fromPeg, x, y } = dragging;
+      dragging = null;
+
+      if (toPeg >= 0 && toPeg !== fromPeg && canPlace(discSize, toPeg)) {
+        // Valid move
+        pegs[toPeg].push(discSize);
+        moveCount++;
+        updateStats();
+        hoveredPeg = -1;
+        checkWin();
+        render();
+      } else if (toPeg >= 0 && toPeg !== fromPeg && !canPlace(discSize, toPeg)) {
+        // Invalid: show error + animate back
+        showToast('不能放到比它小的盘子上！', 'error');
+        pegs[fromPeg].push(discSize);
+
+        // Flash the top disc on target peg
+        if (pegs[toPeg].length > 0) {
+          flashDisc = {
+            discSize: pegs[toPeg][pegs[toPeg].length - 1],
+            pegIndex: toPeg,
+            startTime: performance.now()
+          };
+          setTimeout(() => { flashDisc = null; render(); }, 600);
+        }
+
+        // Animate return
+        const dw = getDiscWidth(discSize);
+        const targetY = getDiscY(fromPeg, pegs[fromPeg].length - 1);
+        returnAnim = {
+          discSize,
+          fromX: x,
+          fromY: y - layout.discHeight - 10,
+          toX: layout.pegCenters[fromPeg] - dw / 2 + dw / 2,
+          toY: targetY,
+          startTime: performance.now(),
+          toPeg: fromPeg
+        };
+
+        hoveredPeg = -1;
+        cancelAnimationFrame(animFrame);
+        animFrame = requestAnimationFrame(render);
+      } else {
+        // Dropped back / nowhere
+        pegs[fromPeg].push(discSize);
+        hoveredPeg = -1;
+        render();
+      }
+    }
+
+    // Mouse events
+    canvas.addEventListener('mousedown', (e) => {
+      e.preventDefault();
+      startDrag(e.clientX, e.clientY);
+    });
+
+    window.addEventListener('mousemove', (e) => {
+      if (dragging) {
+        e.preventDefault();
+        moveDrag(e.clientX, e.clientY);
+      }
+    });
+
+    window.addEventListener('mouseup', (e) => {
+      if (dragging) {
+        e.preventDefault();
+        endDrag(e.clientX, e.clientY);
+      }
+    });
+
+    // Touch events
+    canvas.addEventListener('touchstart', (e) => {
+      e.preventDefault();
+      const t = e.touches[0];
+      startDrag(t.clientX, t.clientY);
+    }, { passive: false });
+
+    window.addEventListener('touchmove', (e) => {
+      if (dragging) {
+        e.preventDefault();
+        const t = e.touches[0];
+        moveDrag(t.clientX, t.clientY);
+      }
+    }, { passive: false });
+
+    window.addEventListener('touchend', (e) => {
+      if (dragging) {
+        e.preventDefault();
+        const t = e.changedTouches[0];
+        endDrag(t.clientX, t.clientY);
+      }
+    }, { passive: false });
+
+    // ─── Keyboard Controls ───
+    function tryDropKeyboard(toPeg) {
+      if (keyFloatingDisc < 0) return;
+
+      const discSize = keyFloatingDisc;
+      const fromPeg = keySelectedPeg;
+
+      if (toPeg === fromPeg) {
+        // Put it back
+        pegs[fromPeg].push(discSize);
+        keyFloatingDisc = -1;
+        keySelectedPeg = -1;
+        render();
+        return;
+      }
+
+      if (canPlace(discSize, toPeg)) {
+        pegs[toPeg].push(discSize);
+        keyFloatingDisc = -1;
+        keySelectedPeg = -1;
+        moveCount++;
+        updateStats();
+        checkWin();
+        render();
+      } else {
+        showToast('不能放到比它小的盘子上！', 'error');
+
+        // Flash
+        if (pegs[toPeg].length > 0) {
+          flashDisc = {
+            discSize: pegs[toPeg][pegs[toPeg].length - 1],
+            pegIndex: toPeg,
+            startTime: performance.now()
+          };
+          setTimeout(() => { flashDisc = null; render(); }, 600);
+        }
+
+        cancelAnimationFrame(animFrame);
+        animFrame = requestAnimationFrame(render);
+      }
+    }
+
+    window.addEventListener('keydown', (e) => {
+      if (isWon || autoRunning) return;
+
+      const key = e.key;
+      if (key === '1' || key === '2' || key === '3') {
+        const pegIdx = parseInt(key) - 1;
+
+        if (keyFloatingDisc >= 0) {
+          // Drop floating disc
+          tryDropKeyboard(pegIdx);
+        } else {
+          // Pick up
+          const stack = pegs[pegIdx];
+          if (stack.length === 0) {
+            showToast('该柱子上没有圆盘', 'info');
+            return;
+          }
+          keyFloatingDisc = stack.pop();
+          keySelectedPeg = pegIdx;
+          cancelAnimationFrame(animFrame);
+          animFrame = requestAnimationFrame(render);
+        }
+      }
+
+      if (key === 'Escape' && keyFloatingDisc >= 0) {
+        // Cancel keyboard selection
+        pegs[keySelectedPeg].push(keyFloatingDisc);
+        keyFloatingDisc = -1;
+        keySelectedPeg = -1;
+        render();
+      }
+    });
+
+    // ─── Toast ───
+    let toastTimer = null;
+    function showToast(message, type) {
+      clearTimeout(toastTimer);
+      toast.textContent = message;
+      toast.className = `toast ${type}`;
+      // Force reflow
+      void toast.offsetWidth;
+      toast.classList.add('show');
+      toastTimer = setTimeout(() => {
+        toast.classList.remove('show');
+      }, 2000);
+    }
+
+    // ─── Auto Run (Recursive solution) ───
+    function generateMoves(n, from, to, aux) {
+      if (n === 0) return [];
+      return [
+        ...generateMoves(n - 1, from, aux, to),
+        { from, to },
+        ...generateMoves(n - 1, aux, to, from)
+      ];
+    }
+
+    function startAutoRun() {
+      if (autoRunning) return;
+      autoRunning = true;
+      autoToggle.classList.add('active');
+      autoToggle.setAttribute('aria-checked', 'true');
+
+      // Reset game for auto run
+      init();
+      autoRunning = true;
+      autoToggle.classList.add('active');
+      autoToggle.setAttribute('aria-checked', 'true');
+
+      autoMoves = generateMoves(numDiscs, 0, 2, 1);
+      let idx = 0;
+
+      function step() {
+        if (!autoRunning || idx >= autoMoves.length) {
+          if (idx >= autoMoves.length) {
+            // finished
+          }
+          return;
+        }
+        const move = autoMoves[idx];
+        doMove(move.from, move.to);
+        render();
+        idx++;
+
+        if (idx < autoMoves.length && autoRunning) {
+          autoTimer = setTimeout(step, parseInt(autoIntervalInput.value));
+        }
+      }
+
+      autoTimer = setTimeout(step, parseInt(autoIntervalInput.value));
+    }
+
+    function stopAutoRun() {
+      autoRunning = false;
+      clearTimeout(autoTimer);
+      autoTimer = null;
+      autoMoves = [];
+      autoToggle.classList.remove('active');
+      autoToggle.setAttribute('aria-checked', 'false');
+    }
+
+    // ─── Settings Event Handlers ───
+    discCountInput.addEventListener('input', () => {
+      discCountValue.textContent = discCountInput.value;
+      numDiscs = parseInt(discCountInput.value);
+      init();
+    });
+
+    autoToggle.addEventListener('click', () => {
+      if (autoRunning) {
+        stopAutoRun();
+      } else {
+        startAutoRun();
+      }
+    });
+
+    autoToggle.addEventListener('keydown', (e) => {
+      if (e.key === ' ' || e.key === 'Enter') {
+        e.preventDefault();
+        autoToggle.click();
+      }
+    });
+
+    autoIntervalInput.addEventListener('input', () => {
+      autoIntervalValue.textContent = autoIntervalInput.value + 'ms';
+    });
+
+    resetBtn.addEventListener('click', () => {
+      init();
+    });
+
+    winRestart.addEventListener('click', () => {
+      init();
+    });
+
+    // ─── Resize Handler ───
+    let resizeTimeout;
+    window.addEventListener('resize', () => {
+      clearTimeout(resizeTimeout);
+      resizeTimeout = setTimeout(() => {
+        computeLayout();
+        render();
+      }, 50);
+    });
+
+    // ─── Confetti ───
+    function spawnConfetti() {
+      confettiContainer.innerHTML = '';
+      const colors = ['#f472b6', '#facc15', '#34d399', '#22d3ee', '#818cf8', '#fb923c', '#c084fc'];
+      const count = 60;
+
+      for (let i = 0; i < count; i++) {
+        const el = document.createElement('div');
+        el.className = 'confetti-piece';
+        el.style.left = Math.random() * 100 + '%';
+        el.style.top = -10 + 'px';
+        el.style.backgroundColor = colors[Math.floor(Math.random() * colors.length)];
+        el.style.width = (6 + Math.random() * 8) + 'px';
+        el.style.height = (6 + Math.random() * 8) + 'px';
+        el.style.borderRadius = Math.random() > 0.5 ? '50%' : '2px';
+        el.style.animation = `confetti-fall ${1.5 + Math.random() * 2}s ease-out ${Math.random() * 0.6}s forwards`;
+        confettiContainer.appendChild(el);
+      }
+
+      setTimeout(() => { confettiContainer.innerHTML = ''; }, 4500);
+    }
+
+    // ─── Start ───
+    init();
+  </script>
+</body>
+</html>
