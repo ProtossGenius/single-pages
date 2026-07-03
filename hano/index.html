@@ -701,6 +701,16 @@
 
       // Draw discs on pegs
       for (let p = 0; p < 3; p++) {
+        // Figure out which disc is visually on top (excluding dragged/floating)
+        let visualTopIdx = -1;
+        for (let s = pegs[p].length - 1; s >= 0; s--) {
+          const ds = pegs[p][s];
+          if (dragging && dragging.discSize === ds) continue;
+          if (keyFloatingDisc === ds) continue;
+          visualTopIdx = s;
+          break;
+        }
+
         for (let s = 0; s < pegs[p].length; s++) {
           const discSize = pegs[p][s];
 
@@ -721,7 +731,9 @@
             alpha = cycle < 0.5 ? 0.3 : 1;
           }
 
-          drawDisc(discSize, dx, dy, dw, discHeight, alpha);
+          // Only the topmost visible disc gets the peg label
+          const label = (s === visualTopIdx) ? String(p + 1) : null;
+          drawDisc(discSize, dx, dy, dw, discHeight, alpha, false, label);
         }
       }
 
@@ -736,7 +748,7 @@
         const y = returnAnim.fromY + (returnAnim.toY - returnAnim.fromY) * ease;
 
         const dw = getDiscWidth(returnAnim.discSize);
-        drawDisc(returnAnim.discSize, x - dw / 2, y, dw, discHeight, 1);
+        drawDisc(returnAnim.discSize, x - dw / 2, y, dw, discHeight, 1, false, null);
 
         if (t >= 1) {
           returnAnim = null;
@@ -749,7 +761,7 @@
         const fromPeg = keySelectedPeg;
         const floatX = pegCenters[fromPeg] - dw / 2;
         const floatY = getFloatY();
-        drawDisc(keyFloatingDisc, floatX, floatY, dw, discHeight, 1, true);
+        drawDisc(keyFloatingDisc, floatX, floatY, dw, discHeight, 1, true, String(keySelectedPeg + 1));
       }
 
       // Draw dragging disc
@@ -757,7 +769,7 @@
         const dw = getDiscWidth(dragging.discSize);
         const dx = dragging.x - dw / 2;
         const dy = dragging.y - discHeight - 10;
-        drawDisc(dragging.discSize, dx, dy, dw, discHeight, 1, true);
+        drawDisc(dragging.discSize, dx, dy, dw, discHeight, 1, true, String(dragging.fromPeg + 1));
       }
 
       // Continue animation loop if needed
@@ -766,7 +778,7 @@
       }
     }
 
-    function drawDisc(discSize, x, y, w, h, alpha, floating) {
+    function drawDisc(discSize, x, y, w, h, alpha, floating, label) {
       const colorIdx = (discSize - 1) % DISC_COLORS.length;
       const color = DISC_COLORS[colorIdx];
       const glow = DISC_GLOW_COLORS[colorIdx];
@@ -801,12 +813,14 @@
       roundRect(ctx, x + 2, y + 1, w - 4, h * 0.45, h * 0.3);
       ctx.fill();
 
-      // Disc size number
-      ctx.fillStyle = 'rgba(0,0,0,0.35)';
-      ctx.font = `700 ${Math.min(h * 0.6, 16)}px Inter, system-ui, sans-serif`;
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      ctx.fillText(String(discSize), x + w / 2, y + h / 2 + 1);
+      // Only the topmost disc shows a label (the peg number)
+      if (label) {
+        ctx.fillStyle = 'rgba(0,0,0,0.35)';
+        ctx.font = `700 ${Math.min(h * 0.6, 16)}px Inter, system-ui, sans-serif`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(label, x + w / 2, y + h / 2 + 1);
+      }
 
       ctx.restore();
     }
@@ -1076,34 +1090,24 @@
     // Use capture phase on document so 1/2/3 keys work even when
     // settings inputs (range sliders, buttons) have focus.
     document.addEventListener('keydown', (e) => {
-      console.log('[Hanoi keyboard] keydown fired, key=' + e.key, 'isWon=' + isWon, 'autoRunning=' + autoRunning);
-      if (isWon || autoRunning) {
-        console.log('[Hanoi keyboard] blocked: isWon=' + isWon + ', autoRunning=' + autoRunning);
-        return;
-      }
+      if (isWon || autoRunning) return;
 
       const key = e.key;
       if (key === '1' || key === '2' || key === '3') {
         e.preventDefault();
         e.stopPropagation();
         const pegIdx = parseInt(key) - 1;
-        console.log('[Hanoi keyboard] peg ' + (pegIdx + 1) + ' selected, keyFloatingDisc=' + keyFloatingDisc);
 
         if (keyFloatingDisc >= 0) {
-          // Drop floating disc
-          console.log('[Hanoi keyboard] dropping disc ' + keyFloatingDisc + ' onto peg ' + (pegIdx + 1));
           tryDropKeyboard(pegIdx);
         } else {
-          // Pick up
           const stack = pegs[pegIdx];
-          console.log('[Hanoi keyboard] picking up from peg ' + (pegIdx + 1) + ', stack=' + JSON.stringify(stack));
           if (stack.length === 0) {
             showToast('该柱子上没有圆盘', 'info');
             return;
           }
           keyFloatingDisc = stack.pop();
           keySelectedPeg = pegIdx;
-          console.log('[Hanoi keyboard] picked up disc ' + keyFloatingDisc + ' from peg ' + (pegIdx + 1));
           cancelAnimationFrame(animFrame);
           animFrame = requestAnimationFrame(render);
         }
@@ -1111,8 +1115,6 @@
 
       if (key === 'Escape' && keyFloatingDisc >= 0) {
         e.preventDefault();
-        console.log('[Hanoi keyboard] Escape: returning disc ' + keyFloatingDisc + ' to peg ' + (keySelectedPeg + 1));
-        // Cancel keyboard selection
         pegs[keySelectedPeg].push(keyFloatingDisc);
         keyFloatingDisc = -1;
         keySelectedPeg = -1;
