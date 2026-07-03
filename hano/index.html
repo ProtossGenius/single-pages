@@ -296,6 +296,13 @@
       margin-bottom: 4px;
       background: rgba(255, 255, 255, 0.03);
       border-left: 3px solid rgba(99, 102, 241, 0.4);
+      cursor: pointer;
+      transition: background-color var(--transition-fast), border-left-color var(--transition-fast);
+    }
+
+    .stack-item:hover {
+      background: rgba(255, 255, 255, 0.08);
+      border-left-color: rgba(99, 102, 241, 0.7);
     }
 
     .stack-item.active {
@@ -626,6 +633,7 @@
     const playPauseBtn = document.getElementById('playPauseBtn');
     const nextBtn = document.getElementById('nextBtn');
     const stopBtn = document.getElementById('stopBtn');
+    const stackContainer = document.getElementById('stackContainer');
     const autoIntervalInput = document.getElementById('autoInterval');
     const autoIntervalValue = document.getElementById('autoIntervalValue');
     const resetBtn = document.getElementById('resetBtn');
@@ -1229,14 +1237,18 @@
     }
 
     // ─── Auto Run (Recursive solution with call stack snapshot) ───
-    function generateMoves(n, from, to, aux, currentStack = []) {
+    function generateMoves(n, from, to, aux, currentStack = [], state = { count: 0 }) {
       if (n === 0) return [];
       
-      const newFrame = { n, from, to };
+      const numMovesInThisCall = Math.pow(2, n) - 1;
+      const completionIdx = state.count + numMovesInThisCall;
+      
+      const newFrame = { n, from, to, completionIdx };
       const stackSnapshot = [...currentStack, newFrame];
       
-      const movesBefore = generateMoves(n - 1, from, aux, to, stackSnapshot);
+      const movesBefore = generateMoves(n - 1, from, aux, to, stackSnapshot, state);
       
+      state.count++;
       const singleMove = {
         from,
         to,
@@ -1244,7 +1256,7 @@
         stack: stackSnapshot
       };
       
-      const movesAfter = generateMoves(n - 1, aux, to, from, stackSnapshot);
+      const movesAfter = generateMoves(n - 1, aux, to, from, stackSnapshot, state);
       
       return [...movesBefore, singleMove, ...movesAfter];
     }
@@ -1254,7 +1266,6 @@
     }
 
     function updateStackDisplay() {
-      const container = document.getElementById('stackContainer');
       const panel = document.getElementById('stackPanel');
       
       if (!autoSolveMode) {
@@ -1265,7 +1276,7 @@
       panel.style.display = 'flex';
       
       if (autoIdx <= 0 || autoIdx > autoMoves.length) {
-        container.innerHTML = '<div style="color: var(--text-muted); text-align: center; padding: 10px;">准备播放...</div>';
+        stackContainer.innerHTML = '<div style="color: var(--text-muted); text-align: center; padding: 10px;">准备播放...</div>';
         return;
       }
       
@@ -1279,10 +1290,10 @@
         const label = frame.n > 1 ? `P1-${frame.n}` : `P1`;
         const text = `将 ${label} 从 ${frame.from + 1}柱 移动到 ${frame.to + 1}柱`;
         
-        html += `<div class="stack-item ${isTop ? 'active' : ''}">${text}</div>`;
+        html += `<div class="stack-item ${isTop ? 'active' : ''}" data-step="${frame.completionIdx}">${text}</div>`;
       }
-      container.innerHTML = html;
-      container.scrollTop = container.scrollHeight;
+      stackContainer.innerHTML = html;
+      stackContainer.scrollTop = stackContainer.scrollHeight;
     }
 
     function updatePlayerUI() {
@@ -1459,6 +1470,35 @@
     stopBtn.addEventListener('click', () => {
       exitSolveMode();
       init();
+    });
+
+    stackContainer.addEventListener('click', (e) => {
+      const item = e.target.closest('.stack-item');
+      if (!item) return;
+
+      const stepIdx = parseInt(item.getAttribute('data-step'));
+      if (isNaN(stepIdx)) return;
+
+      // Pause playback
+      autoRunning = false;
+      clearTimeout(autoTimer);
+
+      // Travel to the completion step of this subproblem
+      autoIdx = stepIdx;
+      pegs = clonePegs(autoStates[autoIdx]);
+      moveCount = autoIdx;
+      updateStats();
+
+      // Check win
+      if (autoIdx === autoMoves.length) {
+        checkWin();
+      } else {
+        isWon = false;
+        winOverlay.classList.remove('show');
+      }
+
+      render();
+      updatePlayerUI();
     });
 
     autoIntervalInput.addEventListener('input', () => {
