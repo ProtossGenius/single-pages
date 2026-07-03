@@ -1318,7 +1318,7 @@
         playPauseBtn.textContent = '▶️';
         playPauseBtn.classList.remove('btn-primary');
         prevBtn.disabled = true;
-        nextBtn.disabled = true;
+        nextBtn.disabled = false; // Enabled by default!
         stopBtn.disabled = true;
       } else {
         stopBtn.disabled = false;
@@ -1336,7 +1336,7 @@
       updateStackDisplay();
     }
 
-    function startSolveMode() {
+    function startSolveMode(startPlaying = true) {
       // Force reset to start clean
       numDiscs = parseInt(discCountInput.value) || 2;
       pegs = [[], [], []];
@@ -1375,9 +1375,20 @@
         autoStates.push(clonePegs(tempPegs));
       }
       
-      autoIdx = 0;
-      autoRunning = true;
-      playAuto();
+      if (startPlaying) {
+        autoIdx = 0;
+        autoRunning = true;
+        playAuto();
+      } else {
+        // Paused mode: execute step 1 immediately
+        autoIdx = 1;
+        pegs = clonePegs(autoStates[autoIdx]);
+        moveCount = autoIdx;
+        updateStats();
+        checkWin();
+        render();
+        updatePlayerUI();
+      }
     }
 
     function resumeAuto() {
@@ -1471,7 +1482,11 @@
     });
 
     nextBtn.addEventListener('click', () => {
-      if (!autoSolveMode || autoIdx >= autoMoves.length) return;
+      if (!autoSolveMode) {
+        startSolveMode(false);
+        return;
+      }
+      if (autoIdx >= autoMoves.length) return;
       autoRunning = false;
       clearTimeout(autoTimer);
       
