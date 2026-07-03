@@ -80,6 +80,24 @@
       gap: 18px;
     }
 
+    .stack-panel {
+      width: 280px;
+      flex-shrink: 0;
+      padding: 24px 20px;
+      background: var(--bg-panel);
+      backdrop-filter: blur(16px);
+      border-left: 1px solid var(--border-glass);
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .stack-panel .stack-container {
+      flex: 1;
+      max-height: none;
+    }
+
     /* Portrait mode */
     @media (orientation: portrait) {
       .app {
@@ -88,10 +106,19 @@
       .settings-panel {
         width: 100%;
         flex-shrink: 0;
-        max-height: 220px;
+        max-height: 160px;
         border-left: none;
         border-bottom: 1px solid var(--border-glass);
-        padding: 16px 20px;
+        padding: 12px 20px;
+        overflow-y: auto;
+      }
+      .stack-panel {
+        width: 100%;
+        flex-shrink: 0;
+        max-height: 120px;
+        border-left: none;
+        border-bottom: 1px solid var(--border-glass);
+        padding: 12px 20px;
         overflow-y: auto;
       }
     }
@@ -292,7 +319,6 @@
       .settings-title { width: 100%; margin-bottom: 0; }
       .setting-group { min-width: 120px; flex: 1; }
       .setting-group.player-group { min-width: 220px; flex: 2; }
-      #stackPanel { min-width: 100%; }
     }
 
     .setting-label {
@@ -511,6 +537,14 @@
       </div>
     </div>
 
+    <!-- Stack Panel (Left of Settings) -->
+    <div class="stack-panel" id="stackPanel" style="display: none;">
+      <div class="settings-title">📋 递归调用栈</div>
+      <div class="stack-container" id="stackContainer">
+        <!-- Stack frames will be generated here -->
+      </div>
+    </div>
+
     <!-- Settings Panel -->
     <div class="settings-panel" id="settingsPanel">
       <div class="settings-title">⚙️ 设置</div>
@@ -530,13 +564,6 @@
           <button class="btn player-btn btn-primary" id="playPauseBtn" title="播放/暂停">▶️</button>
           <button class="btn player-btn" id="nextBtn" title="下一步" disabled>⏭️</button>
           <button class="btn player-btn" id="stopBtn" title="停止" disabled>⏹️</button>
-        </div>
-      </div>
-
-      <div class="setting-group" id="stackPanel" style="display: none;">
-        <span class="setting-label">递归调用栈 (不可编辑)</span>
-        <div class="stack-container" id="stackContainer">
-          <!-- Stack frames will be generated here -->
         </div>
       </div>
 
@@ -1246,7 +1273,7 @@
       const stack = currentMove.stack || [];
       
       let html = '';
-      for (let i = stack.length - 1; i >= 0; i--) {
+      for (let i = 0; i < stack.length; i++) {
         const frame = stack[i];
         const isTop = (i === stack.length - 1);
         const label = frame.n > 1 ? `P1-${frame.n}` : `P1`;
@@ -1255,6 +1282,7 @@
         html += `<div class="stack-item ${isTop ? 'active' : ''}">${text}</div>`;
       }
       container.innerHTML = html;
+      container.scrollTop = container.scrollHeight;
     }
 
     function updatePlayerUI() {
