@@ -227,6 +227,27 @@
       gap: 8px;
     }
 
+    .player-controls {
+      display: flex;
+      gap: 6px;
+      width: 100%;
+    }
+
+    .player-btn {
+      flex: 1;
+      padding: 8px 0;
+      font-size: 1.1rem;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .player-btn:disabled {
+      opacity: 0.35;
+      cursor: not-allowed;
+      pointer-events: none;
+    }
+
     @media (orientation: portrait) {
       .settings-panel {
         flex-direction: row;
@@ -236,6 +257,7 @@
       }
       .settings-title { width: 100%; margin-bottom: 0; }
       .setting-group { min-width: 120px; flex: 1; }
+      .setting-group.player-group { min-width: 220px; flex: 2; }
     }
 
     .setting-label {
@@ -461,13 +483,19 @@
       <div class="setting-group">
         <span class="setting-label">圆盘数量</span>
         <div class="setting-control">
-          <input type="range" id="discCount" min="2" max="8" value="2" />
+          <input type="range" id="discCount" min="1" max="8" value="2" />
           <span class="setting-value" id="discCountValue">2</span>
         </div>
       </div>
 
-      <div class="setting-group">
-        <button class="btn" id="autoSolveBtn" style="width:100%">▶️ 自动求解</button>
+      <div class="setting-group player-group">
+        <span class="setting-label">自动求解</span>
+        <div class="player-controls">
+          <button class="btn player-btn" id="prevBtn" title="上一步" disabled>⏮️</button>
+          <button class="btn player-btn btn-primary" id="playPauseBtn" title="播放/暂停">▶️</button>
+          <button class="btn player-btn" id="nextBtn" title="下一步" disabled>⏭️</button>
+          <button class="btn player-btn" id="stopBtn" title="停止" disabled>⏹️</button>
+        </div>
       </div>
 
       <div class="setting-group">
@@ -525,7 +553,10 @@
     const confettiContainer = document.getElementById('confettiContainer');
     const discCountInput = document.getElementById('discCount');
     const discCountValue = document.getElementById('discCountValue');
-    const autoSolveBtn = document.getElementById('autoSolveBtn');
+    const prevBtn = document.getElementById('prevBtn');
+    const playPauseBtn = document.getElementById('playPauseBtn');
+    const nextBtn = document.getElementById('nextBtn');
+    const stopBtn = document.getElementById('stopBtn');
     const autoIntervalInput = document.getElementById('autoInterval');
     const autoIntervalValue = document.getElementById('autoIntervalValue');
     const resetBtn = document.getElementById('resetBtn');
@@ -545,10 +576,13 @@
     let keySelectedPeg = -1; // peg with floating disc via keyboard
     let keyFloatingDisc = -1; // disc size floating via keyboard
 
-    // Auto-run
+    // Auto-run / Solve playback state
+    let autoSolveMode = false;
     let autoRunning = false;
     let autoTimer = null;
     let autoMoves = []; // pre-computed moves
+    let autoStates = []; // pre-computed peg configurations
+    let autoIdx = 0;
 
     // Layout cache (recomputed on resize)
     let layout = {};
@@ -572,7 +606,7 @@
       keyFloatingDisc = -1;
       flashDisc = null;
       returnAnim = null;
-      stopAutoRun();
+      exitSolveMode();
 
       updateStats();
       winOverlay.classList.remove('show');
@@ -898,13 +932,16 @@
           winOverlay.classList.add('show');
           spawnConfetti();
         }, 300);
-        stopAutoRun();
+        if (autoSolveMode) {
+          autoRunning = false;
+          updatePlayerUI();
+        }
       }
     }
 
     // ─── Drag (Mouse + Touch) ───
     function startDrag(clientX, clientY) {
-      if (isWon || autoRunning) return;
+      if (isWon || autoSolveMode) return;
 
       // If keyboard has a floating disc, drop it via drag start position
       if (keyFloatingDisc >= 0) {
@@ -1090,7 +1127,7 @@
     // Use capture phase on document so 1/2/3 keys work even when
     // settings inputs (range sliders, buttons) have focus.
     document.addEventListener('keydown', (e) => {
-      if (isWon || autoRunning) return;
+      if (isWon || autoSolveMode) return;
 
       const key = e.key;
       if (key === '1' || key === '2' || key === '3') {
@@ -1146,45 +1183,120 @@
       ];
     }
 
-    function startAutoRun() {
-      if (autoRunning) return;
-
-      // Reset game for auto run
-      init();
-      autoRunning = true;
-      autoSolveBtn.textContent = '⏹️ 停止求解';
-      autoSolveBtn.classList.add('btn-primary');
-
-      autoMoves = generateMoves(numDiscs, 0, 2, 1);
-      let idx = 0;
-
-      function step() {
-        if (!autoRunning || idx >= autoMoves.length) {
-          if (idx >= autoMoves.length) {
-            stopAutoRun();
-          }
-          return;
-        }
-        const move = autoMoves[idx];
-        doMove(move.from, move.to);
-        render();
-        idx++;
-
-        if (idx < autoMoves.length && autoRunning) {
-          autoTimer = setTimeout(step, parseInt(autoIntervalInput.value));
-        }
-      }
-
-      autoTimer = setTimeout(step, parseInt(autoIntervalInput.value));
+    function clonePegs(source) {
+      return source.map(stack => [...stack]);
     }
 
-    function stopAutoRun() {
+    function updatePlayerUI() {
+      if (!autoSolveMode) {
+        playPauseBtn.textContent = '▶️';
+        playPauseBtn.classList.remove('btn-primary');
+        prevBtn.disabled = true;
+        nextBtn.disabled = true;
+        stopBtn.disabled = true;
+      } else {
+        stopBtn.disabled = false;
+        prevBtn.disabled = (autoIdx === 0);
+        nextBtn.disabled = (autoIdx === autoMoves.length);
+        if (autoRunning) {
+          playPauseBtn.textContent = '⏸️';
+          playPauseBtn.classList.add('btn-primary');
+        } else {
+          playPauseBtn.textContent = '▶️';
+          playPauseBtn.classList.remove('btn-primary');
+        }
+      }
+    }
+
+    function startSolveMode() {
+      // Force reset to start clean
+      numDiscs = parseInt(discCountInput.value) || 2;
+      pegs = [[], [], []];
+      for (let i = numDiscs; i >= 1; i--) {
+        pegs[0].push(i);
+      }
+      moveCount = 0;
+      isWon = false;
+      dragging = null;
+      keySelectedPeg = -1;
+      keyFloatingDisc = -1;
+      flashDisc = null;
+      returnAnim = null;
+
+      updateStats();
+      winOverlay.classList.remove('show');
+      confettiContainer.innerHTML = '';
+      computeLayout();
+      render();
+
+      autoSolveMode = true;
+      autoMoves = generateMoves(numDiscs, 0, 2, 1);
+      
+      // Cache states
+      autoStates = [];
+      let tempPegs = clonePegs(pegs);
+      autoStates.push(clonePegs(tempPegs));
+      for (const m of autoMoves) {
+        const disc = tempPegs[m.from].pop();
+        tempPegs[m.to].push(disc);
+        autoStates.push(clonePegs(tempPegs));
+      }
+      
+      autoIdx = 0;
+      autoRunning = true;
+      playAuto();
+      updatePlayerUI();
+    }
+
+    function resumeAuto() {
+      if (autoIdx >= autoMoves.length) {
+        autoIdx = 0;
+        pegs = clonePegs(autoStates[0]);
+        moveCount = 0;
+        updateStats();
+        isWon = false;
+        winOverlay.classList.remove('show');
+      }
+      autoRunning = true;
+      playAuto();
+      updatePlayerUI();
+    }
+
+    function playAuto() {
+      clearTimeout(autoTimer);
+      if (!autoRunning) return;
+      
+      if (autoIdx >= autoMoves.length) {
+        autoRunning = false;
+        updatePlayerUI();
+        return;
+      }
+      
+      autoIdx++;
+      pegs = clonePegs(autoStates[autoIdx]);
+      moveCount = autoIdx;
+      updateStats();
+      checkWin();
+      render();
+      updatePlayerUI();
+      
+      if (autoIdx < autoMoves.length && autoRunning) {
+        autoTimer = setTimeout(playAuto, parseInt(autoIntervalInput.value));
+      } else if (autoIdx >= autoMoves.length) {
+        autoRunning = false;
+        updatePlayerUI();
+      }
+    }
+
+    function exitSolveMode() {
+      autoSolveMode = false;
       autoRunning = false;
       clearTimeout(autoTimer);
       autoTimer = null;
       autoMoves = [];
-      autoSolveBtn.textContent = '▶️ 自动求解';
-      autoSolveBtn.classList.remove('btn-primary');
+      autoStates = [];
+      autoIdx = 0;
+      updatePlayerUI();
     }
 
     // ─── Settings Event Handlers ───
@@ -1194,12 +1306,53 @@
       init();
     });
 
-    autoSolveBtn.addEventListener('click', () => {
-      if (autoRunning) {
-        stopAutoRun();
+    playPauseBtn.addEventListener('click', () => {
+      if (!autoSolveMode) {
+        startSolveMode();
       } else {
-        startAutoRun();
+        if (autoRunning) {
+          autoRunning = false;
+          clearTimeout(autoTimer);
+          updatePlayerUI();
+        } else {
+          resumeAuto();
+        }
       }
+    });
+
+    prevBtn.addEventListener('click', () => {
+      if (!autoSolveMode || autoIdx <= 0) return;
+      autoRunning = false;
+      clearTimeout(autoTimer);
+      
+      autoIdx--;
+      pegs = clonePegs(autoStates[autoIdx]);
+      moveCount = autoIdx;
+      updateStats();
+      isWon = false;
+      winOverlay.classList.remove('show');
+      
+      render();
+      updatePlayerUI();
+    });
+
+    nextBtn.addEventListener('click', () => {
+      if (!autoSolveMode || autoIdx >= autoMoves.length) return;
+      autoRunning = false;
+      clearTimeout(autoTimer);
+      
+      autoIdx++;
+      pegs = clonePegs(autoStates[autoIdx]);
+      moveCount = autoIdx;
+      updateStats();
+      checkWin();
+      render();
+      updatePlayerUI();
+    });
+
+    stopBtn.addEventListener('click', () => {
+      exitSolveMode();
+      init();
     });
 
     autoIntervalInput.addEventListener('input', () => {
