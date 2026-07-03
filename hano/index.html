@@ -1243,17 +1243,23 @@
       const numMovesInThisCall = Math.pow(2, n) - 1;
       const completionIdx = state.count + numMovesInThisCall;
       
-      const newFrame = { n, from, to, completionIdx };
+      const newFrame = { n, from, to, completionIdx, isSingleDisc: false };
       const stackSnapshot = [...currentStack, newFrame];
       
       const movesBefore = generateMoves(n - 1, from, aux, to, stackSnapshot, state);
       
       state.count++;
+      let moveStack = stackSnapshot;
+      if (n > 1) {
+        const leafFrame = { n, from, to, isSingleDisc: true, completionIdx: state.count };
+        moveStack = [...stackSnapshot, leafFrame];
+      }
+      
       const singleMove = {
         from,
         to,
         disc: n,
-        stack: stackSnapshot
+        stack: moveStack
       };
       
       const movesAfter = generateMoves(n - 1, aux, to, from, stackSnapshot, state);
@@ -1275,19 +1281,30 @@
       
       panel.style.display = 'flex';
       
-      if (autoIdx <= 0 || autoIdx > autoMoves.length) {
-        stackContainer.innerHTML = '<div style="color: var(--text-muted); text-align: center; padding: 10px;">准备播放...</div>';
+      // Paused: show next move's stack (autoIdx).
+      // Running: show currently executing move's stack (autoIdx - 1).
+      let targetMoveIdx = autoRunning ? autoIdx - 1 : autoIdx;
+      
+      if (targetMoveIdx < 0) targetMoveIdx = 0;
+      if (targetMoveIdx >= autoMoves.length) {
+        stackContainer.innerHTML = '<div style="color: var(--text-muted); text-align: center; padding: 10px;">🎉 求解完成！</div>';
         return;
       }
       
-      const currentMove = autoMoves[autoIdx - 1];
+      const currentMove = autoMoves[targetMoveIdx];
       const stack = currentMove.stack || [];
       
       let html = '';
       for (let i = 0; i < stack.length; i++) {
         const frame = stack[i];
         const isTop = (i === stack.length - 1);
-        const label = frame.n > 1 ? `P1-${frame.n}` : `P1`;
+        
+        let label;
+        if (frame.isSingleDisc) {
+          label = `P${frame.n}`;
+        } else {
+          label = frame.n > 1 ? `P1-${frame.n}` : `P1`;
+        }
         const text = `将 ${label} 从 ${frame.from + 1}柱 移动到 ${frame.to + 1}柱`;
         
         html += `<div class="stack-item ${isTop ? 'active' : ''}" data-step="${frame.completionIdx}">${text}</div>`;
