@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>Zombie Mayhem</title>
+    <style>
+        body, html {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background-color: #000;
+        }
+        #canvas {
+            width: 100%;
+            height: 100%;
+            display: block;
+        }
+        #orientationPrompt {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: #1a1a1a;
+            color: white;
+            z-index: 2000;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            text-align: center;
+            font-family: sans-serif;
+        }
+        #orientationPrompt .icon {
+            font-size: 60px;
+            margin-bottom: 20px;
+            animation: rotateDevice 2s ease-in-out infinite;
+        }
+        @keyframes rotateDevice {
+            0% { transform: rotate(0deg); }
+            50% { transform: rotate(-90deg); }
+            100% { transform: rotate(0deg); }
+        }
+    </style>
+</head>
+<body>
+    <canvas id="canvas"></canvas>
+
+    <!-- Fullscreen Prompt Modal -->
+    <div id="fullscreenPrompt" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: rgba(0,0,0,0.8); color: white; z-index: 1000; display: flex; justify-content: center; align-items: center;">
+        <div style="background-color: #333; padding: 20px; border-radius: 10px; text-align: center;">
+            <p>为了更好的游戏体验，建议进入全屏模式。</p>
+            <p>双击屏幕可以退出或进入全屏。</p>
+            <button id="enterFullscreenBtn" style="padding: 10px 20px; font-size: 16px; cursor: pointer;">确定</button>
+        </div>
+    </div>
+
+    <!-- Orientation Prompt Modal -->
+    <div id="orientationPrompt">
+        <div class="icon">📱</div>
+        <p>请旋转设备以获得最佳横屏体验</p>
+    </div>
+
+    <script type="text/javascript">
+        // Function to detect if it's a mobile device (more reliably using touch events)
+        function isMobile() {
+            return ('ontouchstart' in window) || (navigator.maxTouchPoints > 0);
+        }
+
+        // Function to toggle full-screen mode
+        function toggleFullScreen() {
+            if (!document.fullscreenElement &&    // standard
+                !document.mozFullScreenElement && // Firefox
+                !document.webkitFullscreenElement && // Chrome, Safari and Opera
+                !document.msFullscreenElement) {  // IE/Edge
+                if (document.documentElement.requestFullscreen) {
+                    document.documentElement.requestFullscreen();
+                } else if (document.documentElement.mozRequestFullScreen) { /* Firefox */
+                    document.documentElement.mozRequestFullScreen();
+                } else if (document.documentElement.webkitRequestFullscreen) { /* Chrome, Safari and Opera */
+                    document.documentElement.webkitRequestFullscreen();
+                } else if (document.documentElement.msRequestFullscreen) { /* IE/Edge */
+                    document.documentElement.msRequestFullscreen();
+                }
+            } else {
+                if (document.exitFullscreen) {
+                    document.exitFullscreen();
+                } else if (document.mozCancelFullScreen) { /* Firefox */
+                    document.mozCancelFullScreen();
+                } else if (document.documentElement.webkitExitFullscreen) { /* Chrome, Safari and Opera */
+                    document.documentElement.webkitExitFullscreen();
+                } else if (document.documentElement.msExitFullscreen) { /* IE/Edge */
+                    document.documentElement.msExitFullscreen();
+                }
+            }
+        }
+
+        var canvasElement = document.getElementById('canvas');
+        var fullscreenPrompt = document.getElementById('fullscreenPrompt');
+        var enterFullscreenBtn = document.getElementById('enterFullscreenBtn');
+        var orientationPrompt = document.getElementById('orientationPrompt');
+
+        function checkOrientation() {
+            if (isMobile()) {
+                if (window.innerHeight > window.innerWidth) {
+                    orientationPrompt.style.display = 'flex';
+                } else {
+                    orientationPrompt.style.display = 'none';
+                }
+            }
+        }
+
+        // Show prompt only on mobile devices
+        if (isMobile()) {
+            fullscreenPrompt.style.display = 'flex';
+            checkOrientation();
+
+            enterFullscreenBtn.addEventListener('click', function() {
+                fullscreenPrompt.style.display = 'none';
+                toggleFullScreen();
+            });
+
+            // Implement double-tap for mobile
+            let lastTap = 0;
+            canvasElement.addEventListener('touchend', function(event) {
+                const currentTime = new Date().getTime();
+                const tapLength = currentTime - lastTap;
+                if (tapLength < 300 && tapLength > 0) { // 300ms for double tap
+                    toggleFullScreen();
+                    event.preventDefault(); // Prevent zooming
+                }
+                lastTap = currentTime;
+            });
+        } else {
+            // For non-mobile, hide the prompt and use dblclick
+            fullscreenPrompt.style.display = 'none'; // Ensure it's hidden on desktop
+            orientationPrompt.style.display = 'none';
+            canvasElement.addEventListener('dblclick', toggleFullScreen);
+        }
+
+        function resizeCanvas() {
+            // ... (keep as is)
+        }
+
+        window.addEventListener('resize', function() {
+            resizeCanvas();
+            checkOrientation();
+        }, false);
+        window.addEventListener('orientationchange', checkOrientation, false);
+        // Initial resize
+        resizeCanvas();
+
+        var Module = {
+            canvas: canvasElement,
+            printErr: function(text) {
+                if (arguments.length > 1) text = Array.prototype.slice.call(arguments).join(' ');
+                console.error(text);
+            },
+            print: function(text) {
+                if (arguments.length > 1) text = Array.prototype.slice.call(arguments).join(' ');
+                console.log(text);
+            },
+            locateFile: function(path, prefix) {
+                if (path.endsWith('.wasm')) {
+                    return 'ZombieMayhem.wasm';
+                }
+                return prefix + path;
+            }
+        };
+    </script>
+    <script async type="text/javascript" src="ZombieMayhem.js"></script>
+</body>
+</html>
