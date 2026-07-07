@@ -1,0 +1,15 @@
+runtime: brain_luck
+platform: web
+build_type: Release
+entry_file: index.html
+artifacts:
+- ZombieMayhem.data
+- ZombieMayhem.js
+- ZombieMayhem.wasm
+- ZombieMayhem.wasm.map
+- imgui.ini
+- index.html
+- resources.tar.xz
+notes:
+- Serve this directory over HTTP; opening index.html via file:// may fail in browsers.
+- The generated .data bundle already contains static/ and the selected resources/ subtree.

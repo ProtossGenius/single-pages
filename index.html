@@ -6,18 +6,18 @@
   <title>躺平至上 | 站长工具导航与端对端拷贝入口</title>
   <meta
     name="description"
-    content="站长工具导航页，聚合 AirCopy 等子项目，支持中文/英文/拼音/简拼模糊搜索。可通过 file transfer、one line script、端对端拷贝等关键词快速找到工具。"
+    content="站长工具导航页，聚合 AirCopy、BL 等子项目，支持中文/英文/拼音/简拼模糊搜索。可通过 file transfer、one line script、bl、汇编命令执行可视化等关键词快速找到工具。"
   />
   <meta
     name="keywords"
-    content="站长工具,工具导航,AirCopy,file transfer,WebRTC file transfer,端对端拷贝,点对点传输,Linux one line,Linux one-liner,script"
+    content="站长工具,工具导航,AirCopy,file transfer,WebRTC file transfer,端对端拷贝,点对点传输,Linux one line,Linux one-liner,script,bl,BL,汇编命令执行可视化,assembly visualizer"
   />
   <meta name="robots" content="index,follow,max-image-preview:large,max-snippet:-1,max-video-preview:-1" />
   <meta property="og:type" content="website" />
   <meta property="og:title" content="躺平至上 | 站长工具导航与端对端拷贝入口" />
   <meta
     property="og:description"
-    content="收录 AirCopy 等子项目，支持拼音和模糊搜索，快速定位端对端拷贝/点对点传输工具。"
+    content="收录 AirCopy、BL 等子项目，支持拼音和模糊搜索，快速定位端对端拷贝、脚本库与汇编命令执行可视化工具。"
   />
   <meta property="og:locale" content="zh_CN" />
   <meta property="og:url" content="https://www.liedown.top/" />
@@ -360,7 +360,7 @@
           id="searchInput"
           type="search"
           autocomplete="off"
-          placeholder="输入关键词/英文/拼音，如：aircopy、file transfer、linux one line、script"
+          placeholder="输入关键词/英文/拼音，如：aircopy、file transfer、linux one line、bl"
         />
       </div>
       <p class="search-tip">支持中文、英文、拼音、简拼和缺字模糊匹配。</p>
@@ -370,18 +370,18 @@
     <section aria-labelledby="tools-title">
       <h2 id="tools-title" class="visually-hidden">工具列表</h2>
       <div id="cardGrid" class="cards" role="list"></div>
-      <div id="emptyState" class="empty" hidden>未匹配到工具，试试「file transfer / linux one line / script / aircopy」。</div>
+      <div id="emptyState" class="empty" hidden>未匹配到工具，试试「file transfer / linux one line / script / aircopy / bl」。</div>
     </section>
 
     <section class="seo-block" aria-labelledby="seo-title">
       <h2 id="seo-title">常见检索词</h2>
       <p>
-        如果你在搜索「端对端拷贝」「点对点传输」「file transfer」「WebRTC file transfer」「linux one line」「script」，可以在本页快速定位对应工具。
+        如果你在搜索「端对端拷贝」「点对点传输」「file transfer」「WebRTC file transfer」「linux one line」「script」「bl」「汇编命令执行可视化」，可以在本页快速定位对应工具。
       </p>
     </section>
 
     <noscript>
-      <p class="noscript">当前页面支持 JavaScript 增强搜索。你仍可直接访问：<a href="./aircopy/">AirCopy 端对端拷贝</a> | <a href="./hano/">汉诺塔游戏</a>。</p>
+      <p class="noscript">当前页面支持 JavaScript 增强搜索。你仍可直接访问：<a href="./aircopy/">AirCopy 端对端拷贝</a>、<a href="./bl/">BL</a>、<a href="./hano/">汉诺塔游戏</a>。</p>
     </noscript>
   </main>
 
@@ -418,6 +418,22 @@
           "WebRTC 文件传输",
           "P2P 文件快传",
           "文件传输"
+        ]
+      },
+      {
+        id: "bl",
+        title: "BL",
+        folder: "bl",
+        url: "./bl/",
+        description: "一个汇编命令执行可视化工具",
+        keywords: [
+          "bl",
+          "BL",
+          "汇编命令",
+          "汇编命令执行可视化",
+          "assembly",
+          "assembly visualizer",
+          "instruction visualizer"
         ]
       },
       {
@@ -756,7 +772,7 @@
           name: "站长工具导航",
           inLanguage: "zh-CN",
           url: currentPageUrl,
-          description: "站长工具页，提供端对端拷贝等子项目入口。",
+          description: "站长工具页，提供端对端拷贝、脚本库与汇编命令执行可视化等子项目入口。",
           potentialAction: {
             "@type": "SearchAction",
             target: `${currentPageUrl}?q={search_term_string}`,
