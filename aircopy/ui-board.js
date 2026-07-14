@@ -292,6 +292,16 @@ var UiBoard = (function () {
         return document.querySelector('meta[name="viewport"]');
     }
 
+    function clearDocumentSelection() {
+        if (!window.getSelection) {
+            return;
+        }
+        var selection = window.getSelection();
+        if (selection && typeof selection.removeAllRanges === "function" && String(selection).length > 0) {
+            selection.removeAllRanges();
+        }
+    }
+
     function lockBoardViewportGestures(appState) {
         ensureBoardRoot(appState);
         if (appState.boardUi.viewportLockActive) {
@@ -321,13 +331,48 @@ var UiBoard = (function () {
                 event.preventDefault();
             }
         };
+        var blockSelection = function (event) {
+            if (!appState.boardModalOpen || !event || !event.cancelable) {
+                return;
+            }
+            event.preventDefault();
+        };
+        var clearSelection = function () {
+            if (!appState.boardModalOpen) {
+                return;
+            }
+            clearDocumentSelection();
+        };
+        var blockBoardContextMenu = function (event) {
+            if (!appState.boardModalOpen || !event || !event.cancelable) {
+                return;
+            }
+            var target = event.target;
+            if (!(target instanceof HTMLElement) || !target.closest("#board-modal")) {
+                return;
+            }
+            event.preventDefault();
+        };
+        clearDocumentSelection();
+        if (document && document.documentElement) {
+            document.documentElement.classList.add("board-interaction-lock");
+        }
+        if (document && document.body) {
+            document.body.classList.add("board-interaction-lock");
+        }
         document.addEventListener("gesturestart", blockGesture, { passive: false });
         document.addEventListener("gesturechange", blockGesture, { passive: false });
         document.addEventListener("gestureend", blockGesture, { passive: false });
         document.addEventListener("touchmove", blockBoardPinch, { passive: false });
+        document.addEventListener("selectstart", blockSelection, true);
+        document.addEventListener("selectionchange", clearSelection, true);
+        document.addEventListener("contextmenu", blockBoardContextMenu, true);
         appState.boardUi.viewportLockHandlers = {
             blockGesture: blockGesture,
-            blockBoardPinch: blockBoardPinch
+            blockBoardPinch: blockBoardPinch,
+            blockSelection: blockSelection,
+            clearSelection: clearSelection,
+            blockBoardContextMenu: blockBoardContextMenu
         };
         appState.boardUi.viewportLockActive = true;
     }
@@ -343,10 +388,20 @@ var UiBoard = (function () {
             document.removeEventListener("gesturechange", handlers.blockGesture, { passive: false });
             document.removeEventListener("gestureend", handlers.blockGesture, { passive: false });
             document.removeEventListener("touchmove", handlers.blockBoardPinch, { passive: false });
+            document.removeEventListener("selectstart", handlers.blockSelection, true);
+            document.removeEventListener("selectionchange", handlers.clearSelection, true);
+            document.removeEventListener("contextmenu", handlers.blockBoardContextMenu, true);
         }
         var viewportMeta = appState.boardUi.viewportMetaElement || getViewportMetaElement();
         if (viewportMeta && typeof appState.boardUi.viewportMetaOriginal === "string") {
             viewportMeta.setAttribute("content", appState.boardUi.viewportMetaOriginal || "width=device-width, initial-scale=1.0");
+        }
+        clearDocumentSelection();
+        if (document && document.documentElement) {
+            document.documentElement.classList.remove("board-interaction-lock");
+        }
+        if (document && document.body) {
+            document.body.classList.remove("board-interaction-lock");
         }
         appState.boardUi.viewportLockHandlers = null;
         appState.boardUi.viewportMetaElement = null;
