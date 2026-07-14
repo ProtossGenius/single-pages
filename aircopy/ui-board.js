@@ -1725,6 +1725,9 @@ var UiBoard = (function () {
         if (!appState.boardModalOpen) {
             return;
         }
+        if (event && event.cancelable) {
+            event.preventDefault();
+        }
         var session = ensureBoardSession(appState, elements);
         var metrics = getCanvasMetrics(elements);
         if (!session || !metrics) {
