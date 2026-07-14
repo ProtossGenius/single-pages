@@ -1159,6 +1159,10 @@ button.danger:hover {
     align-items: stretch;
     justify-content: stretch;
     padding: 0;
+    -webkit-user-select: none;
+    user-select: none;
+    -webkit-touch-callout: none;
+    -webkit-tap-highlight-color: transparent;
 }
 
 .board-modal.board-modal-pseudo-fullscreen {
@@ -1222,6 +1226,10 @@ button.danger:hover {
     height: 100%;
     overflow: hidden;
     background: #f8fafc;
+    -webkit-user-select: none;
+    user-select: none;
+    -webkit-touch-callout: none;
+    -webkit-tap-highlight-color: transparent;
 }
 
 .board-stage canvas {
@@ -1230,6 +1238,11 @@ button.danger:hover {
     display: block;
     touch-action: none;
     cursor: crosshair;
+    -webkit-user-select: none;
+    user-select: none;
+    -webkit-user-drag: none;
+    -webkit-touch-callout: none;
+    -webkit-tap-highlight-color: transparent;
 }
 
 #board-canvas,
