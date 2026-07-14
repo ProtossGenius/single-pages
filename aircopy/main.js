@@ -852,10 +852,20 @@
         if (elements.rejectBoardInvite) {
             elements.rejectBoardInvite.addEventListener("click", () => UiBoard.rejectBoardInvite(appState, elements, peerManager));
         }
+        const suppressBoardCanvasNativeUi = (event) => {
+            if (!appState.boardModalOpen || !event || event.cancelable === false) {
+                return;
+            }
+            event.preventDefault();
+        };
         if (elements.boardCanvas) {
-            elements.boardCanvas.addEventListener("contextmenu", (event) => {
-                event.preventDefault();
-            });
+            elements.boardCanvas.addEventListener("contextmenu", suppressBoardCanvasNativeUi);
+            elements.boardCanvas.addEventListener("selectstart", suppressBoardCanvasNativeUi);
+            elements.boardCanvas.addEventListener("dragstart", suppressBoardCanvasNativeUi);
+            elements.boardCanvas.addEventListener("touchstart", suppressBoardCanvasNativeUi, { passive: false });
+            elements.boardCanvas.addEventListener("touchmove", suppressBoardCanvasNativeUi, { passive: false });
+            elements.boardCanvas.addEventListener("touchend", suppressBoardCanvasNativeUi, { passive: false });
+            elements.boardCanvas.addEventListener("touchcancel", suppressBoardCanvasNativeUi, { passive: false });
             elements.boardCanvas.addEventListener("pointerdown", (event) => UiBoard.handlePointerDown(event, appState, elements, peerManager));
             elements.boardCanvas.addEventListener("pointermove", (event) => UiBoard.handlePointerMove(event, appState, elements, peerManager));
             elements.boardCanvas.addEventListener("pointerup", (event) => UiBoard.handlePointerUp(event, appState, elements, peerManager));

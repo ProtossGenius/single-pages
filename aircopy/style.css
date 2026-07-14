@@ -10,6 +10,21 @@ body {
     overflow: hidden;
 }
 
+html.board-interaction-lock,
+body.board-interaction-lock {
+    -webkit-user-select: none;
+    user-select: none;
+    -webkit-touch-callout: none;
+    -webkit-tap-highlight-color: transparent;
+}
+
+body.board-interaction-lock * {
+    -webkit-user-select: none;
+    user-select: none;
+    -webkit-touch-callout: none;
+    -webkit-tap-highlight-color: transparent;
+}
+
 html.board-pseudo-fullscreen,
 body.board-pseudo-fullscreen {
     height: 100dvh;
@@ -1159,6 +1174,13 @@ button.danger:hover {
     align-items: stretch;
     justify-content: stretch;
     padding: 0;
+    -webkit-user-select: none;
+    user-select: none;
+    -webkit-touch-callout: none;
+    -webkit-tap-highlight-color: transparent;
+}
+
+.board-modal * {
     -webkit-user-select: none;
     user-select: none;
     -webkit-touch-callout: none;
