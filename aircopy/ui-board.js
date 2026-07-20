@@ -353,6 +353,19 @@ var UiBoard = (function () {
             }
             event.preventDefault();
         };
+        var blockBoardDblClick = function (event) {
+            if (!appState.boardModalOpen || !event) {
+                return;
+            }
+            var target = event.target;
+            if (!(target instanceof HTMLElement) || !target.closest("#board-modal")) {
+                return;
+            }
+            if (event.cancelable) {
+                event.preventDefault();
+            }
+            event.stopPropagation();
+        };
         clearDocumentSelection();
         if (document && document.documentElement) {
             document.documentElement.classList.add("board-interaction-lock");
@@ -367,12 +380,14 @@ var UiBoard = (function () {
         document.addEventListener("selectstart", blockSelection, true);
         document.addEventListener("selectionchange", clearSelection, true);
         document.addEventListener("contextmenu", blockBoardContextMenu, true);
+        document.addEventListener("dblclick", blockBoardDblClick, true);
         appState.boardUi.viewportLockHandlers = {
             blockGesture: blockGesture,
             blockBoardPinch: blockBoardPinch,
             blockSelection: blockSelection,
             clearSelection: clearSelection,
-            blockBoardContextMenu: blockBoardContextMenu
+            blockBoardContextMenu: blockBoardContextMenu,
+            blockBoardDblClick: blockBoardDblClick
         };
         appState.boardUi.viewportLockActive = true;
     }
@@ -391,6 +406,7 @@ var UiBoard = (function () {
             document.removeEventListener("selectstart", handlers.blockSelection, true);
             document.removeEventListener("selectionchange", handlers.clearSelection, true);
             document.removeEventListener("contextmenu", handlers.blockBoardContextMenu, true);
+            document.removeEventListener("dblclick", handlers.blockBoardDblClick, true);
         }
         var viewportMeta = appState.boardUi.viewportMetaElement || getViewportMetaElement();
         if (viewportMeta && typeof appState.boardUi.viewportMetaOriginal === "string") {

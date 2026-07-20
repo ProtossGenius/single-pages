@@ -862,6 +862,8 @@
             elements.boardCanvas.addEventListener("contextmenu", suppressBoardCanvasNativeUi);
             elements.boardCanvas.addEventListener("selectstart", suppressBoardCanvasNativeUi);
             elements.boardCanvas.addEventListener("dragstart", suppressBoardCanvasNativeUi);
+            elements.boardCanvas.addEventListener("dblclick", suppressBoardCanvasNativeUi);
+            elements.boardCanvas.addEventListener("click", suppressBoardCanvasNativeUi);
             elements.boardCanvas.addEventListener("touchstart", suppressBoardCanvasNativeUi, { passive: false });
             elements.boardCanvas.addEventListener("touchmove", suppressBoardCanvasNativeUi, { passive: false });
             elements.boardCanvas.addEventListener("touchend", suppressBoardCanvasNativeUi, { passive: false });

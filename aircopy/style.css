@@ -1174,6 +1174,7 @@ button.danger:hover {
     align-items: stretch;
     justify-content: stretch;
     padding: 0;
+    touch-action: none;
     -webkit-user-select: none;
     user-select: none;
     -webkit-touch-callout: none;
@@ -1248,6 +1249,7 @@ button.danger:hover {
     height: 100%;
     overflow: hidden;
     background: #f8fafc;
+    touch-action: none;
     -webkit-user-select: none;
     user-select: none;
     -webkit-touch-callout: none;
